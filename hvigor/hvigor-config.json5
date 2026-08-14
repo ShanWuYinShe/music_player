@@ -1,0 +1,21 @@
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+  },
+  "execution": {
+    // "analyze": "normal",                     /* 构建分析模式，取值: [ "normal" | "advanced" | "ultrafine" | false ]，默认: "normal" */
+    // "daemon": true,                          /* 守护进程编译，取值: [ true | false ]，默认: true */
+    // "incremental": true,                     /* 增量编译，取值: [ true | false ]，默认: true */
+    // "parallel": true,                        /* 并行编译，取值: [ true | false ]，默认: true */
+    // "typeCheck": false,                      /* 类型检查，取值: [ true | false ]，默认: false */
+  },
+  "logging": {
+    // "level": "info"                          /* 日志级别，取值: [ "debug" | "info" | "warn" | "error" ]，默认: "info" */
+  },
+  "debugging": {
+    // "stacktrace": false                      /* stacktrace 编译，取值: [ true | false ]，默认: false */
+  },
+  "nodeOptions": {
+    // "maxOldSpaceSize": 8192                  /* node 堆内存上限（MB），默认: 8192 */
+  }
+}
