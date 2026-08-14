@@ -6,7 +6,7 @@ import { PlayerController } from '../player/PlayerController';
 @ComponentV2
 export struct MiniPlayerBar {
   @Param @Require player: PlayerController;
-  onTapOpen: () => void = () => {
+  @Event onTapOpen: () => void = () => {
   };
 
   build() {

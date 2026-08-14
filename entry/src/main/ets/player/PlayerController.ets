@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { media } from '@kit.MediaKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { SongRecord } from '../model/Song';
 import { PlayMode, nextPlayMode } from '../model/PlayMode';
 import { MusicLibrary } from '../library/MusicLibrary';
@@ -33,6 +34,8 @@ export class PlayerController {
   private library: MusicLibrary;
   private session: SessionController = new SessionController();
   private player: media.AVPlayer | null = null;
+  /** 当前曲目占用的文件描述符，release 时关闭 */
+  private currentFd: number = -1;
   private context: common.UIAbilityContext | null = null;
   /** 切歌代际号：递增后旧实例的异步回调全部作废 */
   private generation: number = 0;
@@ -155,22 +158,18 @@ export class PlayerController {
     }
     try {
       await this.player.play();
-      this.isPlaying = true;
-      await this.session.updatePlaybackState(true, this.currentTime, 1.0);
-      await this.session.startBackground();
+      // isPlaying / AVSession / 后台任务同步由 stateChange(playing) 事件统一处理
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'play failed: %{public}s', JSON.stringify(err));
     }
   }
 
   async pause(): Promise<void> {
-    if (!this.player) {
+    if (!this.player || !this.isPlaying) {
       return;
     }
     try {
       await this.player.pause();
-      this.isPlaying = false;
-      await this.session.updatePlaybackState(false, this.currentTime, 1.0);
       // 暂停仅退出播放态：保留长驻任务，避免频繁起停；完全停止时再结束
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'pause failed: %{public}s', JSON.stringify(err));
@@ -189,7 +188,7 @@ export class PlayerController {
     this.session.stopBackground();
   }
 
-  /** 加载曲目并自动播放：重建 AVPlayer 实例，简单可靠 */
+  /** 加载曲目并自动播放：重建 AVPlayer 实例，状态推进全部由 stateChange 事件驱动 */
   private async loadAndPlay(song: SongRecord): Promise<void> {
     const gen = ++this.generation;
     this.isPlaying = false;
@@ -208,9 +207,11 @@ export class PlayerController {
       }
       this.player = player;
       this.registerPlayerEvents(player, gen, song);
-      player.url = `file://${this.library.songPath(song)}`;
-      await player.prepare();
-      await this.play();
+      // 本地文件必须走文件描述符（url 仅支持网络协议与 fd:// 协议）；
+      // 赋值后状态迁移(initialized)为异步事件，prepare 须在 stateChange 回调中触发
+      const file = fs.openSync(this.library.songPath(song), fs.OpenMode.READ_ONLY);
+      this.currentFd = file.fd;
+      player.url = `fd://${file.fd}`;
       await this.session.updateMetadata(song);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load song failed: %{public}s', JSON.stringify(err));
@@ -223,17 +224,7 @@ export class PlayerController {
       if (gen !== this.generation) {
         return;
       }
-      if (state === 'prepared') {
-        this.isPrepared = true;
-        if (player.duration > 0) {
-          this.duration = player.duration;
-          this.library.updateDuration(song.id, player.duration);
-        }
-      } else if (state === 'completed') {
-        this.onCompleted();
-      } else if (state === 'error') {
-        this.isPlaying = false;
-      }
+      this.onPlayerState(state, player, song);
     });
     player.on('timeUpdate', (time: number) => {
       if (gen !== this.generation) {
@@ -244,6 +235,38 @@ export class PlayerController {
     player.on('error', (err) => {
       hilog.error(DOMAIN, TAG, 'AVPlayer error: %{public}s', JSON.stringify(err));
     });
+  }
+
+  /** AVPlayer 状态机推进（异步事件驱动） */
+  private onPlayerState(state: string, player: media.AVPlayer, song: SongRecord): void {
+    hilog.info(DOMAIN, TAG, 'state -> %{public}s', state);
+    if (state === 'initialized') {
+      player.prepare().catch((err: Object) => {
+        hilog.error(DOMAIN, TAG, 'prepare failed: %{public}s', JSON.stringify(err));
+      });
+    } else if (state === 'prepared') {
+      this.isPrepared = true;
+      if (player.duration > 0) {
+        this.duration = player.duration;
+        this.library.updateDuration(song.id, player.duration);
+        // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
+        this.songs = this.library.getAllSongs().slice();
+      }
+      player.play().catch((err: Object) => {
+        hilog.error(DOMAIN, TAG, 'play failed: %{public}s', JSON.stringify(err));
+      });
+    } else if (state === 'playing') {
+      this.isPlaying = true;
+      this.session.updatePlaybackState(true, this.currentTime, 1.0);
+      this.session.startBackground();
+    } else if (state === 'paused') {
+      this.isPlaying = false;
+      this.session.updatePlaybackState(false, this.currentTime, 1.0);
+    } else if (state === 'completed') {
+      this.onCompleted();
+    } else if (state === 'error') {
+      this.isPlaying = false;
+    }
   }
 
   /** 一曲播完，按播放模式决定后续行为 */
@@ -297,6 +320,14 @@ export class PlayerController {
       } catch (err) {
         hilog.warn(DOMAIN, TAG, 'release player: %{public}s', JSON.stringify(err));
       }
+    }
+    if (this.currentFd >= 0) {
+      try {
+        fs.closeSync(this.currentFd);
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'close fd: %{public}s', JSON.stringify(err));
+      }
+      this.currentFd = -1;
     }
   }
 

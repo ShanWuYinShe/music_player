@@ -1,6 +1,7 @@
 import { picker } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
+import { SongRecord } from '../model/Song';
 import { SongItem } from '../components/SongItem';
 import { MiniPlayerBar } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
@@ -44,7 +45,7 @@ struct Index {
           this.EmptyView()
         } else {
           List({ space: 4 }) {
-            ForEach(appStore.player.songs, (song) => {
+            ForEach(appStore.player.songs, (song: SongRecord) => {
               ListItem() {
                 SongItem({
                   song: song,
@@ -61,7 +62,7 @@ struct Index {
                   onAction: () => appStore.player.removeSong(song.id)
                 }
               })
-            }, (song) => song.id)
+            }, (song: SongRecord) => song.id)
           }
           .width('100%')
           .layoutWeight(1)
@@ -154,7 +155,8 @@ struct Index {
     this.scanning = true;
     try {
       const audioPicker = new picker.AudioViewPicker();
-      const uris: string[] = await audioPicker.select({ maxNumber: 100 });
+      const selectOptions: picker.AudioSelectOptions = { maxSelectNumber: 100 };
+      const uris: Array<string> = await audioPicker.select(selectOptions);
       if (uris.length > 0) {
         const added = await appStore.library.importFromUris(uris);
         appStore.player.refreshSongs();

@@ -12,7 +12,7 @@ export struct SongItem {
   @Param @Require song: SongRecord;
   @Param isCurrent: boolean = false;
   @Param isPlaying: boolean = false;
-  onItemClick: (id: string) => void = () => {
+  @Event onItemClick: (id: string) => void = () => {
   };
 
   build() {

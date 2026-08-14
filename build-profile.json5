@@ -1,12 +1,26 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A5F8BEFE8AE9F580EE0976C29B5B37790554FC4D9DA8061A82BB300859164B4412FB67B6A1A9B",
+          "profile": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.p12",
+          "storePassword": "0000001A08BA5038197C4F59300435BFD98B9599FEDDFF6F1DB552043A5118DE45997AAFB612892F277E"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
         "signingConfig": "default",
-        "compatibleSdkVersion": "5.0.0(12)",
-        "targetSdkVersion": "5.0.0(12)",
+        "compatibleSdkVersion": "6.0.0(20)",
+        "targetSdkVersion": "6.0.0(20)",
         "runtimeOS": "HarmonyOS",
       }
     ],

@@ -66,11 +66,19 @@ hvigorw --mode module -p module=entry@default -p isLocalTest=true test --no-daem
 模拟器运行（DevEco Studio）：
 
 1. 用 DevEco Studio 打开工程
-2. File > Project Structure > Signing Configs 勾选 **Automatically generate signature** 完成自动签名（本地模拟器可免账号生成调试签名）
-3. 选择模拟器（工程按 API 12 编译，兼容 HarmonyOS 5.0+ 设备）点击 Run
+2. File > Project Structure > Signing Configs 勾选 **Automatically generate signature** 完成自动签名（已配置，bundleName 为 `com.lsyb.musicplayer`）
+3. 选择模拟器点击 Run；命令行方式见下
 
 > 注意：模拟器允许 `hdc install` 未签名 HAP，但**运行时页面加载要求签名**（未签名会白屏），
 > 因此真机/模拟器运行前必须完成签名步骤。
+
+命令行安装运行（模拟器已启动时）：
+
+```bash
+HDC=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
+$HDC install -r entry/build/default/outputs/default/entry-default-signed.hap
+$HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
+```
 
 ## 音乐导入说明
 

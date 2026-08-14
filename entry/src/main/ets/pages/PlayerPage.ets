@@ -8,7 +8,7 @@ import { formatTime } from '../common/TimeUtils';
 @ComponentV2
 export struct PlayerPage {
   @Param @Require player: PlayerController;
-  navPathStack: NavPathStack = new NavPathStack();
+  @Param navPathStack: NavPathStack = new NavPathStack();
   /** 拖动进度条期间的本地值，避免与 timeUpdate 抖动 */
   @Local dragValue: number = -1;
 
@@ -99,7 +99,7 @@ export struct PlayerPage {
           .fontColor([$r('sys.color.font_primary')])
           .onClick(() => this.player.previous())
 
-        Stack() {
+        Stack({ alignContent: Alignment.Center }) {
           SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
             .fontSize(36)
             .fontColor([$r('sys.color.font_on_primary')])
@@ -108,7 +108,6 @@ export struct PlayerPage {
         .height(76)
         .borderRadius(38)
         .backgroundColor($r('sys.color.font_primary'))
-        .justifyContent(FlexAlign.Center)
         .onClick(() => this.player.togglePlay())
 
         SymbolGlyph($r('sys.symbol.forward_end_fill'))
