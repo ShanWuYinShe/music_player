@@ -19,32 +19,39 @@ struct Index {
   build() {
     Navigation(this.pathStack) {
       Column() {
-        // 顶部操作区
+        // 标题区：大标题 + 曲目数副标题 + 操作按钮
         Row() {
-          Text('音乐')
-            .fontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('sys.color.font_primary'))
-          Blank()
+          Column({ space: 4 }) {
+            Text('音乐')
+              .fontSize(30)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('sys.color.font_primary'))
+            Text(appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐')
+              .fontSize(13)
+              .fontColor($r('sys.color.font_secondary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
           SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(24)
+            .fontSize(22)
             .fontColor([$r('sys.color.font_primary')])
-            .padding(8)
+            .padding(10)
             .onClick(() => this.importFromPicker())
           SymbolGlyph($r('sys.symbol.gearshape'))
-            .fontSize(24)
+            .fontSize(22)
             .fontColor([$r('sys.color.font_primary')])
-            .padding(8)
+            .padding(10)
             .onClick(() => this.pathStack.pushPathByName('settings', null))
         }
         .width('100%')
-        .padding({ left: 16, right: 8, top: 12, bottom: 8 })
+        .padding({ left: 20, right: 12, top: 14, bottom: 6 })
 
         // 歌曲列表
         if (appStore.player.songs.length === 0) {
           this.EmptyView()
         } else {
-          List({ space: 4 }) {
+          List({ space: 2 }) {
             ForEach(appStore.player.songs, (song: SongRecord) => {
               ListItem() {
                 SongItem({
@@ -66,7 +73,7 @@ struct Index {
           }
           .width('100%')
           .layoutWeight(1)
-          .padding({ left: 12, right: 12 })
+          .padding({ left: 12, right: 12, bottom: 8 })
           .scrollBar(BarState.Off)
         }
 
@@ -89,21 +96,41 @@ struct Index {
 
   @Builder
   EmptyView() {
-    Column({ space: 16 }) {
-      SymbolGlyph($r('sys.symbol.music_note_list'))
-        .fontSize(64)
-        .fontColor([$r('sys.color.font_tertiary')])
-      Text('曲库还是空的')
-        .fontSize(16)
-        .fontColor($r('sys.color.font_secondary'))
-      Text('导入设备中的音频，或先载入内置演示曲目')
-        .fontSize(13)
-        .fontColor($r('sys.color.font_tertiary'))
+    Column({ space: 20 }) {
+      // 音符圆形底
+      Column() {
+        SymbolGlyph($r('sys.symbol.music_note_list'))
+          .fontSize(44)
+          .fontColor([$r('sys.color.font_tertiary')])
+      }
+      .width(96)
+      .height(96)
+      .borderRadius(48)
+      .backgroundColor($r('sys.color.background_tertiary'))
+      .justifyContent(FlexAlign.Center)
+
+      Column({ space: 6 }) {
+        Text('曲库还是空的')
+          .fontSize(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('导入设备音频，或先听听内置演示曲目')
+          .fontSize(13)
+          .fontColor($r('sys.color.font_tertiary'))
+      }
+
       Row({ space: 12 }) {
         Button('导入音乐')
+          .height(42)
+          .fontSize(15)
+          .borderRadius(21)
           .backgroundColor($r('sys.color.font_primary'))
+          .fontColor($r('sys.color.font_on_primary'))
           .onClick(() => this.importFromPicker())
         Button('载入演示曲目')
+          .height(42)
+          .fontSize(15)
+          .borderRadius(21)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('sys.color.background_tertiary'))
           .fontColor($r('sys.color.font_primary'))
@@ -113,6 +140,7 @@ struct Index {
     .width('100%')
     .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
+    .padding({ bottom: 60 })
   }
 
   @Builder

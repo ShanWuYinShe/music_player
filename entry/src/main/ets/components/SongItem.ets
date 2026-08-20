@@ -1,11 +1,11 @@
 import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
 
-const COVER_SIZE = 52;
+const COVER_SIZE = 48;
 const CURRENT_COLOR = '#34C77B';
 
 /**
- * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放标记
+ * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放高亮
  */
 @ComponentV2
 export struct SongItem {
@@ -17,27 +17,29 @@ export struct SongItem {
 
   build() {
     Row({ space: 12 }) {
+      // 封面
       Stack() {
         if (this.song.coverPath !== '') {
           Image(this.song.coverPath)
             .width(COVER_SIZE)
             .height(COVER_SIZE)
-            .borderRadius(8)
+            .borderRadius(10)
             .autoResize(true)
         } else {
           Column() {
             SymbolGlyph($r('sys.symbol.music_note_list'))
-              .fontSize(24)
+              .fontSize(22)
               .fontColor([$r('sys.color.font_secondary')])
           }
           .width(COVER_SIZE)
           .height(COVER_SIZE)
-          .borderRadius(8)
+          .borderRadius(10)
           .backgroundColor($r('sys.color.background_tertiary'))
           .justifyContent(FlexAlign.Center)
         }
       }
 
+      // 歌名 / 歌手
       Column({ space: 4 }) {
         Text(this.song.title)
           .fontSize(16)
@@ -54,19 +56,20 @@ export struct SongItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      if (this.isCurrent && this.isPlaying) {
-        SymbolGlyph($r('sys.symbol.play_fill'))
+      // 当前播放标记 + 时长
+      if (this.isCurrent) {
+        SymbolGlyph(this.isPlaying ? $r('sys.symbol.play_fill') : $r('sys.symbol.pause_fill'))
           .fontSize(16)
           .fontColor([CURRENT_COLOR])
       }
       Text(this.song.duration > 0 ? formatTime(this.song.duration) : '--:--')
-        .fontSize(13)
+        .fontSize(12)
         .fontColor($r('sys.color.font_tertiary'))
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .borderRadius(12)
-    .backgroundColor($r('sys.color.background_primary'))
+    .backgroundColor(this.isCurrent ? $r('sys.color.background_secondary') : $r('sys.color.background_primary'))
     .onClick(() => this.onItemClick(this.song.id))
   }
 }

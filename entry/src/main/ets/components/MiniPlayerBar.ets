@@ -11,56 +11,66 @@ export struct MiniPlayerBar {
 
   build() {
     if (this.player.currentSong !== null) {
-      Row({ space: 12 }) {
-        if (this.player.currentSong?.coverPath !== '') {
-          Image(this.player.currentSong?.coverPath ?? '')
+      Stack({ alignContent: Alignment.Top }) {
+        // 顶部细分割线，克制分隔
+        Divider()
+          .strokeWidth(0.5)
+          .color($r('sys.color.comp_divider'))
+          .width('80%')
+
+        Row({ space: 12 }) {
+          if (this.player.currentSong?.coverPath !== '') {
+            Image(this.player.currentSong?.coverPath ?? '')
+              .width(40)
+              .height(40)
+              .borderRadius(8)
+          } else {
+            Column() {
+              SymbolGlyph($r('sys.symbol.music_note_list'))
+                .fontSize(20)
+                .fontColor([$r('sys.color.font_secondary')])
+            }
             .width(40)
             .height(40)
-            .borderRadius(6)
-        } else {
-          Column() {
-            SymbolGlyph($r('sys.symbol.music_note_list'))
-              .fontSize(20)
-              .fontColor([$r('sys.color.font_secondary')])
+            .borderRadius(8)
+            .backgroundColor($r('sys.color.background_tertiary'))
+            .justifyContent(FlexAlign.Center)
           }
-          .width(40)
-          .height(40)
-          .borderRadius(6)
-          .backgroundColor($r('sys.color.background_tertiary'))
-          .justifyContent(FlexAlign.Center)
+
+          Column() {
+            Text(this.player.currentSong?.title ?? '')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('sys.color.font_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.player.currentSong?.artist ?? '')
+              .fontSize(12)
+              .fontColor($r('sys.color.font_secondary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+            .fontSize(26)
+            .fontColor([$r('sys.color.font_primary')])
+            .onClick(() => this.player.togglePlay())
+
+          SymbolGlyph($r('sys.symbol.forward_end_fill'))
+            .fontSize(26)
+            .fontColor([$r('sys.color.font_primary')])
+            .onClick(() => this.player.next())
         }
-
-        Column() {
-          Text(this.player.currentSong?.title ?? '')
-            .fontSize(15)
-            .fontColor($r('sys.color.font_primary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.player.currentSong?.artist ?? '')
-            .fontSize(12)
-            .fontColor($r('sys.color.font_secondary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-
-        SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-          .fontSize(26)
-          .fontColor([$r('sys.color.font_primary')])
-          .onClick(() => this.player.togglePlay())
-
-        SymbolGlyph($r('sys.symbol.forward_end_fill'))
-          .fontSize(26)
-          .fontColor([$r('sys.color.font_primary')])
-          .onClick(() => this.player.next())
+        .width('100%')
+        .height(64)
+        .padding({ left: 16, right: 16 })
+        .borderRadius(16)
+        .backgroundColor($r('sys.color.background_secondary'))
+        .onClick(() => this.onTapOpen())
       }
       .width('100%')
-      .height(64)
-      .padding({ left: 16, right: 16 })
-      .borderRadius(16)
-      .backgroundColor($r('sys.color.background_secondary'))
-      .onClick(() => this.onTapOpen())
     }
   }
 }
