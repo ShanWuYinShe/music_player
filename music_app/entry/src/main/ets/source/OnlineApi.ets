@@ -15,7 +15,7 @@ export const ONLINE_ID_PREFIX = 'online:';
  */
 export const DEFAULT_ONLINE_BASE_URL = 'https://yinghuoren.com/api/music';
 
-/** music_server GET /api/songs 响应中的单曲条目（album 服务端可省略） */
+/** music_server GET /api/songs 响应中的单曲条目（album/source 服务端可省略） */
 export interface OnlineSongItem {
   id: string;
   title: string;
@@ -24,6 +24,8 @@ export interface OnlineSongItem {
   durationMs?: number;
   format?: string;
   sizeBytes?: number;
+  /** 来源标识：省略=服务器本地曲库，netease=网络源 */
+  source?: string;
 }
 
 /** music_server GET /api/songs 响应体 */
@@ -46,9 +48,11 @@ export function effectiveBaseUrl(configured: string): string {
   return normalizeBaseUrl(configured) || DEFAULT_ONLINE_BASE_URL;
 }
 
-/** 曲目列表接口完整地址：${base}/songs（base 需含到 /api[/music] 前缀） */
-export function songsUrl(baseUrl: string): string {
-  return `${normalizeBaseUrl(baseUrl)}/songs`;
+/** 曲目列表接口完整地址：${base}/songs，query 非空时带上服务端搜索参数 */
+export function songsUrl(baseUrl: string, query: string = ''): string {
+  const base = normalizeBaseUrl(baseUrl);
+  const q = query.trim();
+  return q === '' ? `${base}/songs` : `${base}/songs?q=${encodeURIComponent(q)}`;
 }
 
 /**

@@ -184,6 +184,11 @@ export default function LocalUnitSuite() {
       expect(songsUrl('http://host/api/music/')).assertEqual('http://host/api/music/songs');
     });
 
+    it('songsUrlAppendsEncodedQuery', 0, () => {
+      expect(songsUrl('http://h/api/music', '晴天')).assertEqual('http://h/api/music/songs?q=%E6%99%B4%E5%A4%A9');
+      expect(songsUrl('http://h/api/music', '  ')).assertEqual('http://h/api/music/songs');
+    });
+
     it('parseMapsIdTitleAndStreamUrl', 0, () => {
       const list = parseOnlineSongs('http://host/api/music', BODY);
       expect(list.length).assertEqual(2);

@@ -1,0 +1,183 @@
+package main
+
+// netease 网络源:经私有部署的 NeteaseCloudMusicApi(Enhanced)上游
+// (npm 包 @neteasecloudmusicapienhanced/api,容器内网部署)聚合搜索与
+// 流解析。设计约束:
+//   - 上游不可达/接口失败时降级为仅本地曲库,绝不影响既有 library 能力;
+//   - 对外曲目 id 加 "ne_" 前缀与本地 hex id 区分,stream 路由按前缀分发;
+//   - 音频流由本服务反向代理转发(用户选定方案):上游直链带时效签名且
+//     防盗链策略不定,客户端直连失败率高;代理同时隐藏上游细节。
+//
+// 匿名上游只能播放免费曲目;NETEASE_MUSIC_COOKIE 配置登录 cookie 后
+// 可解锁账号权限内曲目(与 Web 端登录同权限)。
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// neteaseIDPrefix 对外曲目 id 前缀;strip 后即上游歌曲数字 id。
+const neteaseIDPrefix = "ne_"
+
+// neteaseSearchCap 每次搜索最多聚合的网易结果数,避免结果被单一源淹没。
+const neteaseSearchCap = 30
+
+// neteaseUpstreamTimeout 搜索/解析上游超时;流代理不设整体超时
+// (长音频),仅用 Transport 级连接超时。
+const neteaseUpstreamTimeout = 8 * time.Second
+
+// errNoStream 表示上游解析成功但该曲目无可用播放地址(无版权/VIP/区域)。
+var errNoStream = errors.New("no stream url")
+
+// neteaseClient 封装上游调用。
+type neteaseClient struct {
+	base   string
+	cookie string
+	// api 用于搜索/解析的小超时请求;stream 用独立长超时 Transport。
+	api    *http.Client
+	stream *http.Client
+}
+
+func newNeteaseClient(base, cookie string) *neteaseClient {
+	if base == "" {
+		return nil
+	}
+	return &neteaseClient{
+		base:   base,
+		cookie: cookie,
+		api:    &http.Client{Timeout: neteaseUpstreamTimeout},
+		// 流代理不设整体超时(长音频),仅限制上游响应头等待时间防挂死。
+		stream: &http.Client{Transport: &http.Transport{
+			ResponseHeaderTimeout: 15 * time.Second,
+		}},
+	}
+}
+
+// enabled 报告网络源是否启用。
+func (c *neteaseClient) enabled() bool {
+	return c != nil && c.base != ""
+}
+
+// getJSON 请求上游接口并解析 JSON(匿名或带配置 cookie)。
+func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return err
+	}
+	if c.cookie != "" {
+		req.Header.Set("Cookie", c.cookie)
+	}
+	resp, err := c.api.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("upstream %s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// cloudsearchSongs / songURLData 是上游响应的用到的子集。
+type cloudsearchSongs struct {
+	Result struct {
+		Songs []struct {
+			ID       int64 `json:"id"`
+			Name     string
+			Artists  []struct{ Name string } `json:"artists"`
+			Album    struct{ Name string }   `json:"album"`
+			Duration int64                   `json:"duration"`
+		} `json:"songs"`
+	} `json:"result"`
+}
+
+type songURLData struct {
+	Data []struct {
+		URL  string `json:"url"`
+		Code int    `json:"code"`
+	} `json:"data"`
+}
+
+// search 调上游 /cloudsearch 并映射为对外 Song(id 加 ne_ 前缀)。
+func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]Song, error) {
+	if limit <= 0 || limit > neteaseSearchCap {
+		limit = neteaseSearchCap
+	}
+	path := fmt.Sprintf("/cloudsearch?keywords=%s&type=1&limit=%d",
+		url.QueryEscape(query), limit)
+	var resp cloudsearchSongs
+	if err := c.getJSON(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	songs := make([]Song, 0, len(resp.Result.Songs))
+	for _, s := range resp.Result.Songs {
+		artists := make([]string, 0, len(s.Artists))
+		for _, a := range s.Artists {
+			artists = append(artists, a.Name)
+		}
+		songs = append(songs, Song{
+			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, s.ID),
+			Title:      s.Name,
+			Artist:     strings.Join(artists, "/"),
+			Album:      s.Album.Name,
+			DurationMs: s.Duration,
+			Format:     "mp3",
+			Source:     "netease",
+		})
+	}
+	return songs, nil
+}
+
+// resolveURL 调上游 /song/url/v1 解析播放直链(带时效签名,即取即用)。
+func (c *neteaseClient) resolveURL(ctx context.Context, songID string) (string, error) {
+	path := fmt.Sprintf("/song/url/v1?id=%s&level=exhigh", url.QueryEscape(songID))
+	var resp songURLData
+	if err := c.getJSON(ctx, path, &resp); err != nil {
+		return "", err
+	}
+	if len(resp.Data) == 0 || resp.Data[0].URL == "" {
+		return "", errNoStream
+	}
+	return resp.Data[0].URL, nil
+}
+
+// proxyStream 反向代理上游音频流:透传 Range/返回头与状态码,逐块拷贝。
+// 直链域名不做白名单(签名 URL 即凭证),但仅允许 http(s) 防任意 scheme。
+func (c *neteaseClient) proxyStream(w http.ResponseWriter, r *http.Request, streamURL string) {
+	parsed, err := url.Parse(streamURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		writeError(w, "invalid stream url", http.StatusBadGateway)
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, streamURL, nil)
+	if err != nil {
+		writeError(w, "stream request failed", http.StatusBadGateway)
+		return
+	}
+	// Range 原样透传,其余头不透传(上游按 CDN 习惯自带 Content-* 响应头)。
+	if rng := r.Header.Get("Range"); rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	resp, err := c.stream.Do(req)
+	if err != nil {
+		log.Printf("netease stream upstream: %v", err)
+		writeError(w, "stream upstream failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if v := resp.Header.Get(h); v != "" {
+			w.Header().Set(h, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}

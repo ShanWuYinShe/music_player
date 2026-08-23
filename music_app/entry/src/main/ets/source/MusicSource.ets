@@ -59,13 +59,13 @@ export class OnlineSource implements MusicSource {
   }
 
   /**
-   * 拉取在线曲目列表（全量，服务端 limit 上限 500）：
-   * 网络/HTTP 失败抛 Error 由调用方提示。
+   * 拉取在线曲目列表：query 非空走服务端搜索（本地曲库匹配 + 网络源聚合），
+   * 为空返回服务器曲库全量（limit 上限 500）。网络/HTTP 失败抛 Error 由调用方提示。
    */
-  async fetchSongs(): Promise<SongRecord[]> {
+  async fetchSongs(query: string = ''): Promise<SongRecord[]> {
     const request = http.createHttp();
     try {
-      const response = await request.request(songsUrl(this.baseUrl), {
+      const response = await request.request(songsUrl(this.baseUrl, query), {
         method: http.RequestMethod.GET,
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: 8000,

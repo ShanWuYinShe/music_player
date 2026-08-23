@@ -1,7 +1,9 @@
 # music_server — 在线音乐服务
 
-Go HTTP 服务:从本地曲库目录(LIBRARY_DIR)扫描音频文件,提供曲目列表/搜索与
-HTTP Range 流式播放。零第三方依赖(纯标准库),不做任何上游第三方 API 调用。
+Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫描)与网易云
+网络源(经私有部署的 [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)
+上游,workwork 编排的 netease_api 容器)。零第三方 Go 依赖(纯标准库);
+网络源失败自动降级为仅本地曲库。
 
 ## 本地命令
 
@@ -16,7 +18,7 @@ go test -C music_server ./...              # 单元测试
 go run -C music_server . -library-review
 ```
 
-## 文件名约定
+## 文件名约定(本地曲库)
 
 元数据从文件名解析,不做 ID3/元数据块解析:
 
@@ -25,18 +27,30 @@ go run -C music_server . -library-review
   music_app rawfile 的 `demoXX_歌手 - 歌名.wav` 命名习惯兼容)
 - 无「 - 」分隔时整体作为标题,歌手为空
 - 一级子目录名作为专辑名
-- 时长不解析(durationMs 恒 0),由客户端 prepared 后回填
+- 本地曲目时长不解析(durationMs 恒 0),由客户端 prepared 后回填;
+  netease 源带真实时长
+
+## 曲目来源与 id 空间
+
+| 来源 | source 字段 | id 形态 | 流下发方式 |
+|------|------------|---------|-----------|
+| 本地曲库 | (省略) | 相对路径 sha256 前 16 hex | 直读文件,ServeContent 原生 Range |
+| 网易云网络源 | `netease` | `ne_<上游歌曲数字id>` | 解析时效直链后由本服务反向代理转发 |
+
+- 网络源上游匿名只能播免费曲目;`NETEASE_MUSIC_COOKIE` 配置账号 cookie
+  (如 `MUSIC_U=...`)可解锁登录权限内曲目
+- 上游为非官方接口,仅限个人使用,可能随平台变动失效(降级不影响本地源)
 
 ## API(nginx 去前缀后,外部路径为 /api/music/<path>)
 
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | healthcheck,无限流 |
-| `GET /api/providers` | 源列表(当前仅内置 library 源) |
-| `GET /api/songs?q=&limit=` | 曲目列表/模糊搜索(q 匹配标题+歌手,不分大小写;limit 默认 200 上限 500) |
-| `GET /api/stream/{id}` | 音频流,ServeContent 原生 Range 支持 |
+| `GET /api/providers` | 源列表(library + 启用的 netease) |
+| `GET /api/songs?q=&limit=` | q 空:本地曲库全量;q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
+| `GET /api/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
 
-- id 为曲库相对路径 sha256 前 16 位 hex,磁盘路径不对外暴露,无路径穿越面
+- 本地曲库 id 不暴露磁盘路径,无路径穿越面;网络源直链域名仅允许 http(s)
 - 曲库索引 60s TTL 懒刷新,文件增删最迟一个 TTL 生效
 - per-IP 限流(默认 120 req/min,env `RATE_LIMIT_PER_MINUTE`),取 IP 顺序与
   media_server 一致(X-Real-IP → X-Forwarded-For 首段 → RemoteAddr 兜底)
@@ -49,10 +63,13 @@ go run -C music_server . -library-review
 | `PORT` | 8790 | 监听端口 |
 | `LIBRARY_DIR` | /data/library | 曲库目录(容器内 ro 挂载) |
 | `RATE_LIMIT_PER_MINUTE` | 120 | per-IP 限流阈值 |
+| `NETEASE_API_BASE` | (空=禁用) | netease_api 上游地址(compose 内 `http://netease_api:3000`) |
+| `NETEASE_MUSIC_COOKIE` | (空) | 可选:网易账号 cookie,解锁登录态曲目 |
 
 ## 部署
 
-部署编排(nginx、compose 等)在 workwork 仓库,本仓库 music_server 作为其
-submodule 被构建。音频文件投放到宿主机 `service/.wework/music-library/`
-(compose ro 绑定挂载),然后 `docker compose build music_server && docker
-compose up -d --no-deps music_server`。新增音频无需重启服务,等待扫描 TTL 即可。
+部署编排(nginx、netease_api、compose 等)在 workwork 仓库,本仓库
+music_server 作为其 submodule 被构建。本地曲库音频经管理面板「音乐曲库」
+页上传(写宿主机 `service/.wework/music-library/`,compose 挂载),或手动
+投放;`docker compose build music_server && docker compose up -d --no-deps
+music_server`。新增音频无需重启服务,等待扫描 TTL 即可。

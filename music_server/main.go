@@ -45,9 +45,9 @@ var supportedExt = map[string]bool{
 	".ogg": true, ".oga": true, ".aac": true, ".opus": true,
 }
 
-// Song 是对外暴露的曲目元数据。DurationMs 恒为 0:音频时长解析成本高
-// (mp3 需逐帧扫描),由客户端在 prepared 后自行回填(与 HarmonyOS 端
-// music_player 的既有行为一致)。
+// Song 是对外暴露的曲目元数据。本地曲目 DurationMs 恒为 0(音频时长解析
+// 成本高,由客户端在 prepared 后回填);netease 源带真实时长。
+// Source 标识来源(library 省略保持兼容,netease 网络源)。
 type Song struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`
@@ -56,12 +56,14 @@ type Song struct {
 	DurationMs int64  `json:"durationMs"`
 	Format     string `json:"format"`
 	SizeBytes  int64  `json:"sizeBytes"`
+	Source     string `json:"source,omitempty"`
 }
 
 // musicServer 聚合配置、限流器与带 TTL 缓存的曲库索引。
 type musicServer struct {
 	config  AppConfig
 	limiter *ipWindowLimiter
+	netease *neteaseClient
 
 	mu        sync.RWMutex
 	library   []Song
@@ -88,6 +90,11 @@ func main() {
 	server := &musicServer{
 		config:  config,
 		limiter: newIPWindowLimiter(config.RateLimitPerMinute, time.Minute),
+		netease: newNeteaseClient(config.NeteaseAPIBase, config.NeteaseCookie),
+	}
+	if server.netease.enabled() {
+		log.Printf("netease source enabled, upstream=%s (cookie=%v)",
+			config.NeteaseAPIBase, config.NeteaseCookie != "")
 	}
 	if *libraryReview {
 		if err := server.refreshLibrary(); err != nil {
@@ -156,17 +163,21 @@ func (s *musicServer) requireRateLimit(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleProviders 返回可用音乐源列表。当前只有内置 library 源;
-// 未来聚合第三方 API 时在此追加 provider 条目。
+// handleProviders 返回可用音乐源列表:内置 library 源 + 可选 netease 网络源。
 func (s *musicServer) handleProviders(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"providers": []map[string]string{
-			{"id": "library", "name": "服务器曲库", "type": "library"},
-		},
-	})
+	providers := []map[string]string{
+		{"id": "library", "name": "服务器曲库", "type": "library"},
+	}
+	if s.netease.enabled() {
+		providers = append(providers, map[string]string{
+			"id": "netease", "name": "网易云(网络源)", "type": "online",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 }
 
 // handleSongs 返回曲目列表;可选 q 模糊匹配(标题/歌手,不分大小写)、limit 分页。
+// q 非空且网络源启用时,本地匹配之后追加网易搜索结果(上游失败降级仅本地)。
 func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(query) > maxSearchQueryBytes {
@@ -196,6 +207,18 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// 网络源结果追加在本地匹配之后;q 为空时不拉网络源(列表语义仍是"曲库")。
+	if query != "" && s.netease.enabled() && len(matched) < limit {
+		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
+		online, err := s.netease.search(ctx, query, limit-len(matched))
+		cancel()
+		if err != nil {
+			// 上游失败只降级不报错:本地结果仍然完整返回。
+			log.Printf("netease search %q: %v", query, err)
+		} else {
+			matched = append(matched, online...)
+		}
+	}
 	total := len(matched)
 	if len(matched) > limit {
 		matched = matched[:limit]
@@ -203,10 +226,30 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"total": total, "songs": matched})
 }
 
-// handleStream 以 HTTP Range 流式播放曲目。ServeContent 原生支持
-// Range/If-Range/If-Modified-Since,配合 nginx proxy_buffering off 逐段下发。
+// handleStream 以 HTTP Range 流式播放曲目。id 带 ne_ 前缀走网络源代理,
+// 其余为本地曲库文件,ServeContent 原生支持 Range/If-Range 等条件请求。
 func (s *musicServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if after, ok := strings.CutPrefix(id, neteaseIDPrefix); ok {
+		if !s.netease.enabled() {
+			writeError(w, "netease source disabled", http.StatusNotFound)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
+		streamURL, err := s.netease.resolveURL(ctx, after)
+		cancel()
+		if errors.Is(err, errNoStream) {
+			// 无版权/VIP/区域限制:对客户端是"这首歌放不了"而非服务故障。
+			writeError(w, "song not available (copyright)", http.StatusNotFound)
+			return
+		} else if err != nil {
+			log.Printf("netease resolve %s: %v", after, err)
+			writeError(w, "stream resolve failed", http.StatusBadGateway)
+			return
+		}
+		s.netease.proxyStream(w, r, streamURL)
+		return
+	}
 	s.mu.RLock()
 	entry, ok := s.byID[id]
 	s.mu.RUnlock()

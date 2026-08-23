@@ -7,8 +7,8 @@ submodule，music_server 由 workwork 的 docker-compose 构建）。
 ## 架构事实
 
 - `music_app/`：HarmonyOS 应用（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖；工程级技术约束（AVPlayer 状态机、AVSession、V2 状态管理等）见 [music_app/AGENTS.md](music_app/AGENTS.md)
-- `music_server/`：纯 Go 标准库 HTTP 服务，零第三方依赖；扫描本地曲库目录提供列表/搜索/Range 流式播放，元数据从文件名解析（不做 ID3 解析），API 与运维约定见 [music_server/AGENTS.md](music_server/AGENTS.md)
-- 客户端在线源已实现：首页「本地/在线」源切换，`OnlineSource.fetchSongs` 拉取 `/songs` 列表（解析纯函数在 `source/OnlineApi.ets`，可 LocalUnit 单测），播放走 `/stream/{id}`；服务地址设置页持久化，**留空回落默认 `https://yinghuoren.com/api/music`**（`effectiveBaseUrl`，配置值需含 `/api[/music]` 前缀）；服务端对外经 nginx `/api/music/` 前缀（workwork 仓库 nginx 去前缀转发到 8790）
+- `music_server/`：纯 Go 标准库 HTTP 服务，零第三方依赖；聚合本地曲库目录（扫描/搜索/Range 流式播放，元数据从文件名解析）与网易云网络源（netease.go，上游 NeteaseCloudMusicApi Enhanced，搜索聚合 + 服务端代理流，失败降级），API 与运维约定见 [music_server/AGENTS.md](music_server/AGENTS.md)
+- 客户端在线源已实现：首页「本地/在线」源切换，`OnlineSource.fetchSongs(q)` 拉取 `/songs`（q 非空走服务端搜索并聚合网络源；解析纯函数在 `source/OnlineApi.ets`，可 LocalUnit 单测），播放走 `/stream/{id}`（网络源曲目由服务端代理转发，客户端无感知）；在线搜索由 Index 防抖 600ms 触发，列表即服务端返回不做本地二次过滤；服务地址设置页持久化，**留空回落默认 `https://yinghuoren.com/api/music`**（`effectiveBaseUrl`，配置值需含 `/api[/music]` 前缀）；服务端对外经 nginx `/api/music/` 前缀（workwork 仓库 nginx 去前缀转发到 8790）
 
 ## 本地命令
 

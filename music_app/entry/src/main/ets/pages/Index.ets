@@ -33,18 +33,15 @@ struct Index {
   @Local onlineError: string = '';
   /** 最近一次成功拉取的在线列表（切回在线 tab 时的兜底缓存） */
   @Local onlineSongs: SongRecord[] = [];
+  /** 在线搜索防抖定时器 id（-1 无待触发任务） */
+  private searchTimerId: number = -1;
 
-  /** 当前 Tab 与搜索词过滤后的列表；在线模式固定全部+默认序，避免跨源收藏/最近语义 */
+  /** 当前 Tab 与搜索词过滤后的列表。
+   * 在线模式列表即最近一次服务端返回（q 已在服务端匹配并聚合网络源），
+   * 不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉。 */
   private visibleSongs(): SongRecord[] {
     if (this.sourceTab === SourceTab.ONLINE) {
-      const opts: FilterOptions = {
-        query: this.searchText,
-        tab: LibraryTab.ALL,
-        sort: SortMode.DEFAULT,
-        favoriteIds: [],
-        recentIds: []
-      };
-      return filterAndSort(appStore.player.songs, opts);
+      return appStore.player.songs;
     }
     const opts: FilterOptions = {
       query: this.searchText,
@@ -112,7 +109,7 @@ struct Index {
               .fontColor([$r('app.color.ink_faint')])
             TextInput({
               text: this.searchText,
-              placeholder: '搜索歌曲、歌手',
+              placeholder: this.sourceTab === SourceTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
             })
               .layoutWeight(1)
               .height(34)
@@ -124,6 +121,11 @@ struct Index {
               .padding(0)
               .onChange((value: string) => {
                 this.searchText = value;
+                if (this.sourceTab === SourceTab.ONLINE) {
+                  // 在线搜索由服务端完成（含网络源聚合），输入停顿后触发
+                  this.scheduleOnlineSearch();
+                  return;
+                }
                 if (value.trim() !== '' && this.tab !== LibraryTab.ALL) {
                   // 搜索时自动切回全部，避免「喜欢」子集里搜不到造成困惑
                   this.tab = LibraryTab.ALL;
@@ -135,6 +137,10 @@ struct Index {
                 .fontColor([$r('app.color.ink_faint')])
                 .onClick(() => {
                   this.searchText = '';
+                  if (this.sourceTab === SourceTab.ONLINE) {
+                    // 清空即回到服务器曲库全量
+                    this.enterOnline('');
+                  }
                 })
             }
           }
@@ -313,7 +319,7 @@ struct Index {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.ink'))
-          .onClick(() => this.enterOnline())
+          .onClick(() => this.enterOnline(this.searchText.trim()))
       }
       .width('100%')
       .layoutWeight(1)
@@ -338,7 +344,7 @@ struct Index {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.ink'))
-          .onClick(() => this.enterOnline())
+          .onClick(() => this.enterOnline(this.searchText.trim()))
       }
       .width('100%')
       .layoutWeight(1)
@@ -567,7 +573,7 @@ struct Index {
   /** 从设置页返回时重新拉取在线曲库（Base URL 可能刚配置/修改过） */
   onPageShow(): void {
     if (this.sourceTab === SourceTab.ONLINE) {
-      this.enterOnline();
+      this.enterOnline(this.searchText.trim());
     }
   }
 
@@ -578,22 +584,39 @@ struct Index {
     }
     this.sourceTab = tab;
     this.searchText = '';
+    this.cancelPendingSearch();
     if (tab === SourceTab.ONLINE) {
-      this.enterOnline();
+      this.enterOnline('');
     } else {
       appStore.player.refreshSongs();
     }
   }
 
-  /** 进入在线源：拉取曲目并替换播放队列；失败时回退旧缓存并提示 */
-  private async enterOnline(): Promise<void> {
+  /** 在线搜索防抖：输入停顿 600ms 后触发服务端搜索 */
+  private scheduleOnlineSearch(): void {
+    this.cancelPendingSearch();
+    this.searchTimerId = setTimeout(() => {
+      this.searchTimerId = -1;
+      this.enterOnline(this.searchText.trim());
+    }, 600);
+  }
+
+  private cancelPendingSearch(): void {
+    if (this.searchTimerId >= 0) {
+      clearTimeout(this.searchTimerId);
+      this.searchTimerId = -1;
+    }
+  }
+
+  /** 进入在线源：按关键词拉取曲目（空=曲库全量）并替换播放队列；失败时回退旧缓存并提示 */
+  private async enterOnline(query: string): Promise<void> {
     if (this.onlineLoading) {
       return;
     }
     this.onlineLoading = true;
     this.onlineError = '';
     try {
-      const list = await appStore.onlineSource.fetchSongs();
+      const list = await appStore.onlineSource.fetchSongs(query);
       this.onlineSongs = list;
       appStore.player.setOnlineQueue(list);
     } catch (err) {
