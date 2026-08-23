@@ -30,17 +30,17 @@ export class AppStore {
 
   async init(context: common.UIAbilityContext): Promise<void> {
     this.pref = preferences.getPreferencesSync(context, { name: PREF_NAME });
-    this.onlineSource.baseUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
+    this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
     this.userData.init(this.pref);
     this.library.init(context);
     await this.player.init(context, this.pref);
   }
 
-  /** 保存在线源 Base URL（本期仅持久化，供后续接入使用） */
+  /** 保存在线源地址：存用户原始输入（trim），留空回落默认线上服务 */
   saveOnlineBaseUrl(url: string): void {
-    this.onlineSource.baseUrl = url;
+    this.onlineSource.configuredUrl = url.trim();
     if (this.pref) {
-      this.pref.putSync(KEY_ONLINE_BASE_URL, url);
+      this.pref.putSync(KEY_ONLINE_BASE_URL, this.onlineSource.configuredUrl);
       this.pref.flush();
     }
   }

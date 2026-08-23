@@ -2,10 +2,10 @@
 
 这个仓库同时包含在线音乐服务的客户端与服务端（组织方式与 media_center 一致）：
 
-- `music_app`：HarmonyOS 音乐播放器客户端（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖。支持本地曲库导入（系统音频选择器 + ID3v2 解析）、完整播放控制、后台播放与系统媒体中心接入；支持「本地 / 在线」源切换，配置服务地址后在线搜索与流式播放 `music_server` 曲库。
+- `music_app`：HarmonyOS 音乐播放器客户端（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖。支持本地曲库导入（系统音频选择器 + ID3v2 解析）、完整播放控制、后台播放与系统媒体中心接入；支持「本地 / 在线」源切换，默认对接线上服务，在线搜索与流式播放 `music_server` 曲库。
 - `music_server`：Go 实现的在线音乐服务，扫描服务器本地曲库目录，提供曲目列表、搜索与 HTTP Range 流式播放。纯标准库实现、零第三方依赖，不对接任何第三方音乐 API，曲目由运维向曲库目录投放音频文件。
 
-客户端通过设置页配置服务端 Base URL，外部统一经 nginx 以 `/api/music/` 前缀访问（去前缀转发）。代理 / 部署基础设施（nginx、xray、admin 面板等）在 [workwork](https://github.com/ShanWuYinShe/workwork) 仓库，并通过 git submodule 引用本仓库来构建 `music_server`。
+客户端默认使用线上服务 `https://yinghuoren.com/api/music`（设置页可改，留空即用默认），外部统一经 nginx 以 `/api/music/` 前缀访问（去前缀转发）。代理 / 部署基础设施（nginx、xray、admin 面板等）在 [workwork](https://github.com/ShanWuYinShe/workwork) 仓库，并通过 git submodule 引用本仓库来构建 `music_server`。
 
 ## 目录结构
 

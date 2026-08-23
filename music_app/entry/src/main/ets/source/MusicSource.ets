@@ -1,7 +1,7 @@
 import { http } from '@kit.NetworkKit';
 import { SongRecord } from '../model/Song';
 import { MusicLibrary } from '../library/MusicLibrary';
-import { parseOnlineSongs, songsUrl, normalizeBaseUrl } from './OnlineApi';
+import { parseOnlineSongs, songsUrl, effectiveBaseUrl } from './OnlineApi';
 
 /**
  * 音乐源抽象：本地导入与在线 API 的统一入口。
@@ -37,17 +37,22 @@ export class LocalSource implements MusicSource {
 /**
  * 在线音乐源：
  * 对接同仓库 music_server 的 GET /songs（列表/搜索）与 GET /stream/{id}
- * （Range 流式播放）。Base URL 由设置页配置并持久化，需含到 /api[/music]
- * 前缀；响应解析见 OnlineApi.ets（纯函数，可单测）。
+ * （Range 流式播放）。地址由设置页配置并持久化（需含到 /api[/music] 前缀），
+ * 留空回落默认线上服务（DEFAULT_ONLINE_BASE_URL）；响应解析见 OnlineApi.ets。
  */
 export class OnlineSource implements MusicSource {
   readonly name: string = '在线音乐';
   readonly online: boolean = true;
 
-  /** 服务端 Base URL，空表示未配置 */
-  baseUrl: string = '';
+  /** 用户配置的服务地址（原始输入 trim），空串表示未配置（用默认） */
+  configuredUrl: string = '';
   /** 最近一次成功拉取的曲目缓存 */
   private cache: SongRecord[] = [];
+
+  /** 生效地址：配置值非空用它，否则默认服务地址（永不为空） */
+  get baseUrl(): string {
+    return effectiveBaseUrl(this.configuredUrl);
+  }
 
   getSongs(): SongRecord[] {
     return this.cache;
@@ -55,12 +60,9 @@ export class OnlineSource implements MusicSource {
 
   /**
    * 拉取在线曲目列表（全量，服务端 limit 上限 500）：
-   * baseUrl 未配置时返回空数组；网络/HTTP 失败抛 Error 由调用方提示。
+   * 网络/HTTP 失败抛 Error 由调用方提示。
    */
   async fetchSongs(): Promise<SongRecord[]> {
-    if (normalizeBaseUrl(this.baseUrl) === '') {
-      return [];
-    }
     const request = http.createHttp();
     try {
       const response = await request.request(songsUrl(this.baseUrl), {

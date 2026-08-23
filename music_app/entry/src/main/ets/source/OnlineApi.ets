@@ -9,6 +9,12 @@ import { SongRecord } from '../model/Song';
 /** 在线曲目 id 前缀，避免与本地曲库 id（文件名+大小摘要）冲突 */
 export const ONLINE_ID_PREFIX = 'online:';
 
+/**
+ * 默认在线服务地址：线上 nginx 的 /api/music/ 前缀（与 media_center 客户端
+ * 默认 https://yinghuoren.com/api/media 同域同 nginx）。用户未配置时使用。
+ */
+export const DEFAULT_ONLINE_BASE_URL = 'https://yinghuoren.com/api/music';
+
 /** music_server GET /api/songs 响应中的单曲条目（album 服务端可省略） */
 export interface OnlineSongItem {
   id: string;
@@ -33,6 +39,11 @@ export function normalizeBaseUrl(url: string): string {
     return '';
   }
   return trimmed.replace(/\/+$/, '');
+}
+
+/** 生效地址：用户配置值非空用它，否则回落默认服务地址（永不为空） */
+export function effectiveBaseUrl(configured: string): string {
+  return normalizeBaseUrl(configured) || DEFAULT_ONLINE_BASE_URL;
 }
 
 /** 曲目列表接口完整地址：${base}/songs（base 需含到 /api[/music] 前缀） */

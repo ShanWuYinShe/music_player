@@ -3,7 +3,7 @@ import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMod
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
 import { LibraryTab, SortMode, filterAndSort } from '../main/ets/common/LibraryFilter';
-import { ONLINE_ID_PREFIX, normalizeBaseUrl, songsUrl, parseOnlineSongs, OnlineSongItem, OnlineSongsResponse } from '../main/ets/source/OnlineApi';
+import { ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL, songsUrl, parseOnlineSongs, OnlineSongItem, OnlineSongsResponse } from '../main/ets/source/OnlineApi';
 
 /** 构造测试歌曲记录 */
 function mk(id: string, title: string, artist: string, duration: number): SongRecord {
@@ -169,6 +169,15 @@ export default function LocalUnitSuite() {
       expect(normalizeBaseUrl('  http://10.0.2.2:8790/api/  ')).assertEqual('http://10.0.2.2:8790/api');
       expect(normalizeBaseUrl('')).assertEqual('');
       expect(normalizeBaseUrl('///')).assertEqual('');
+    });
+
+    it('effectiveBaseUrlFallsBackToDefault', 0, () => {
+      // 留空/纯空白/纯斜杠 → 默认线上服务地址
+      expect(effectiveBaseUrl('')).assertEqual(DEFAULT_ONLINE_BASE_URL);
+      expect(effectiveBaseUrl('   ')).assertEqual(DEFAULT_ONLINE_BASE_URL);
+      expect(effectiveBaseUrl('///')).assertEqual(DEFAULT_ONLINE_BASE_URL);
+      // 配置值非空 → 规范化后原样使用
+      expect(effectiveBaseUrl('http://10.0.2.2:8790/api/')).assertEqual('http://10.0.2.2:8790/api');
     });
 
     it('songsUrlJoinsPath', 0, () => {

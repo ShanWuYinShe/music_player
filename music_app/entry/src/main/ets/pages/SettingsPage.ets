@@ -1,6 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { formatTotalDuration } from '../common/TimeUtils';
+import { DEFAULT_ONLINE_BASE_URL } from '../source/OnlineApi';
 
 /**
  * 设置页：曲库统计 / 在线音乐源配置 / 危险操作 / 应用信息
@@ -78,10 +79,10 @@ export struct SettingsPage {
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.ink'))
-        Text('填入 music_server 服务地址（含 /api 前缀），首页切到「在线」即可搜索与播放。')
+        Text('music_server 服务地址（含 /api 前缀），留空使用默认服务。')
           .fontSize(12)
           .fontColor($r('app.color.ink_soft'))
-        TextInput({ text: appStore.onlineSource.baseUrl, placeholder: 'https://example.com/api/music' })
+        TextInput({ text: appStore.onlineSource.configuredUrl, placeholder: DEFAULT_ONLINE_BASE_URL })
           .width('100%')
           .fontSize(14)
           .backgroundColor($r('app.color.surface_alt'))

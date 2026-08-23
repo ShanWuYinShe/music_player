@@ -295,28 +295,6 @@ struct Index {
       .width('100%')
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
-    } else if (appStore.onlineSource.baseUrl.trim() === '') {
-      Column({ space: 14 }) {
-        SymbolGlyph($r('sys.symbol.wifi'))
-          .fontSize(40)
-          .fontColor([$r('app.color.ink_faint')])
-        Text('还未配置在线服务')
-          .fontSize(15)
-          .fontColor($r('app.color.ink_soft'))
-        Text('在设置中填写服务地址，即可在线搜索与播放')
-          .fontSize(12)
-          .fontColor($r('app.color.ink_faint'))
-        Button('去设置')
-          .height(38)
-          .fontSize(14)
-          .borderRadius(19)
-          .backgroundColor($r('app.color.ink'))
-          .fontColor($r('app.color.paper'))
-          .onClick(() => this.pathStack.pushPathByName('settings', null))
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
     } else if (this.onlineError !== '' && appStore.player.songs.length === 0) {
       Column({ space: 14 }) {
         SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
@@ -609,7 +587,7 @@ struct Index {
 
   /** 进入在线源：拉取曲目并替换播放队列；失败时回退旧缓存并提示 */
   private async enterOnline(): Promise<void> {
-    if (this.onlineLoading || appStore.onlineSource.baseUrl.trim() === '') {
+    if (this.onlineLoading) {
       return;
     }
     this.onlineLoading = true;
