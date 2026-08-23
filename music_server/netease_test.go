@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // decodeJSONBody 反序列化响应体(测试专用小工具)。
@@ -69,7 +74,7 @@ func newFakeNetease(t *testing.T) *fakeNetease {
 func newTestServerWithNetease(t *testing.T, upstream string) *musicServer {
 	t.Helper()
 	server := newTestServer(t, mkLibrary(t))
-	server.netease = newNeteaseClient(upstream, "")
+	server.netease = newNeteaseClient(upstream, "", "")
 	return server
 }
 
@@ -205,5 +210,66 @@ func TestNeteaseDisabled(t *testing.T) {
 	}
 	if resp.Total != 1 {
 		t.Fatalf("local only, got %d", resp.Total)
+	}
+}
+
+// cookie 文件热加载:写入新文件后(绕过 30s 间隔强制过期)上游请求携带新值。
+func TestNeteaseCookieFileHotReload(t *testing.T) {
+	f := newFakeNetease(t)
+	var gotCookie atomic.Value
+	f.api.Config.Handler = http.NewServeMux()
+	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get("Cookie"); v != "" {
+			gotCookie.Store(v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"songs":[]}}`))
+	})
+
+	cookiePath := filepath.Join(t.TempDir(), "netease-cookie.txt")
+	if err := os.WriteFile(cookiePath, []byte("MUSIC_U=v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := newNeteaseClient(f.api.URL, "", cookiePath)
+	ctx := context.Background()
+	if _, err := c.search(ctx, "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	if gotCookie.Load() != "MUSIC_U=v1" {
+		t.Fatalf("expect file cookie v1, got %v", gotCookie.Load())
+	}
+
+	// 更新文件 + 强制过期重读窗口。
+	if err := os.WriteFile(cookiePath, []byte("MUSIC_U=v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.fileRead = time.Time{} // 绕过 30s 间隔
+	c.mu.Unlock()
+	if _, err := c.search(ctx, "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	if gotCookie.Load() != "MUSIC_U=v2" {
+		t.Fatalf("expect hot-reloaded v2, got %v", gotCookie.Load())
+	}
+}
+
+// 无 cookie 文件时回退 env 初值;文件不存在不报错。
+func TestNeteaseCookieFallback(t *testing.T) {
+	f := newFakeNetease(t)
+	var gotCookie atomic.Value
+	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get("Cookie"); v != "" {
+			gotCookie.Store(v)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"songs":[]}}`))
+	})
+	c := newNeteaseClient(f.api.URL, "MUSIC_U=env", filepath.Join(t.TempDir(), "missing.txt"))
+	if _, err := c.search(context.Background(), "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	if gotCookie.Load() != "MUSIC_U=env" {
+		t.Fatalf("expect env fallback, got %v", gotCookie.Load())
 	}
 }

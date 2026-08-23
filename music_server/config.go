@@ -17,8 +17,11 @@ type AppConfig struct {
 	// 空 = 禁用网络源(仅本地曲库)。
 	NeteaseAPIBase string
 	// NeteaseCookie 可选:网易账号 cookie(如 "MUSIC_U=..."),透传给上游
-	// 解锁登录态曲目(免费匿名只能播免费曲目)。
+	// 解锁登录态曲目与完整音频(免费匿名部分曲目只有试听片段)。
 	NeteaseCookie string
+	// NeteaseCookieFile 可选:cookie 文件路径(管理面板扫码登录写入),
+	// 热加载,优先于 NeteaseCookie。
+	NeteaseCookieFile string
 }
 
 // Addr 返回监听地址。
@@ -35,6 +38,7 @@ func loadAppConfig() (AppConfig, error) {
 		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 120),
 		NeteaseAPIBase:     strings.TrimRight(getEnv("NETEASE_API_BASE", ""), "/"),
 		NeteaseCookie:      getEnv("NETEASE_MUSIC_COOKIE", ""),
+		NeteaseCookieFile:  getEnv("NETEASE_COOKIE_FILE", ""),
 	}
 	if config.Port == "" {
 		return AppConfig{}, errors.New("PORT is required")

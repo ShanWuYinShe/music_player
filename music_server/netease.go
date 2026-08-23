@@ -8,8 +8,10 @@ package main
 //   - 音频流由本服务反向代理转发(用户选定方案):上游直链带时效签名且
 //     防盗链策略不定,客户端直连失败率高;代理同时隐藏上游细节。
 //
-// 匿名上游只能播放免费曲目;NETEASE_MUSIC_COOKIE 配置登录 cookie 后
-// 可解锁账号权限内曲目(与 Web 端登录同权限)。
+// 匿名上游只能播免费曲目且部分只有 30~60s 试听片段;配置网易账号 cookie
+// (登录态)后返回完整音频。cookie 两个来源:env NETEASE_MUSIC_COOKIE(初始
+// 值)与 NETEASE_COOKIE_FILE 指向的文件(管理面板扫码登录后写入,30s 内
+// 热加载生效,文件优先)。
 
 import (
 	"context"
@@ -20,7 +22,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,26 +43,81 @@ var errNoStream = errors.New("no stream url")
 
 // neteaseClient 封装上游调用。
 type neteaseClient struct {
-	base   string
-	cookie string
+	base string
+	// cookieFile 非 nil 时优先读取文件(管理面板扫码登录写入),每
+	// cookieReloadInterval 检查一次 mtime 热加载;env 初值作回退。
+	cookieFile string
+	cookie     string
 	// api 用于搜索/解析的小超时请求;stream 用独立长超时 Transport。
 	api    *http.Client
 	stream *http.Client
+
+	mu           sync.Mutex
+	fileMod      time.Time
+	fileRead     time.Time
+	fileValue    string
+	hasFileValue bool
 }
 
-func newNeteaseClient(base, cookie string) *neteaseClient {
+// cookieReloadInterval 是 cookie 文件的重读检查间隔。
+const cookieReloadInterval = 30 * time.Second
+
+func newNeteaseClient(base, cookie, cookieFile string) *neteaseClient {
 	if base == "" {
 		return nil
 	}
 	return &neteaseClient{
-		base:   base,
-		cookie: cookie,
-		api:    &http.Client{Timeout: neteaseUpstreamTimeout},
+		base:       base,
+		cookieFile: cookieFile,
+		cookie:     cookie,
+		api:        &http.Client{Timeout: neteaseUpstreamTimeout},
 		// 流代理不设整体超时(长音频),仅限制上游响应头等待时间防挂死。
 		stream: &http.Client{Transport: &http.Transport{
 			ResponseHeaderTimeout: 15 * time.Second,
 		}},
 	}
+}
+
+// currentCookie 返回生效 cookie:文件(热加载)优先,env 初值为回退;
+// 文件被删除(如登出)后同样回退 env。读取失败保留旧值并记日志,
+// 绝不让热加载故障打断播放。
+func (c *neteaseClient) currentCookie() string {
+	if c.cookieFile == "" {
+		return c.cookie
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Since(c.fileRead) < cookieReloadInterval {
+		return c.effectiveCookieLocked()
+	}
+	c.fileRead = time.Now()
+	if info, err := os.Stat(c.cookieFile); err == nil {
+		if !info.ModTime().Equal(c.fileMod) {
+			data, err := os.ReadFile(c.cookieFile)
+			if err != nil {
+				log.Printf("netease cookie read: %v", err)
+			} else {
+				c.fileMod = info.ModTime()
+				c.fileValue = strings.TrimSpace(string(data))
+				c.hasFileValue = true
+				log.Printf("netease cookie reloaded (%d bytes)", len(c.fileValue))
+			}
+		}
+	} else {
+		// 文件消失:清文件态,回退 env(部署初始或登出后的匿名/初值状态)。
+		c.fileMod = time.Time{}
+		c.fileValue = ""
+		c.hasFileValue = false
+	}
+	return c.effectiveCookieLocked()
+}
+
+// effectiveCookieLocked 调用方须持 mu。
+func (c *neteaseClient) effectiveCookieLocked() string {
+	if c.hasFileValue {
+		return c.fileValue
+	}
+	return c.cookie
 }
 
 // enabled 报告网络源是否启用。
@@ -72,8 +131,8 @@ func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error
 	if err != nil {
 		return err
 	}
-	if c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
+	if cookie := c.currentCookie(); cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 	resp, err := c.api.Do(req)
 	if err != nil {

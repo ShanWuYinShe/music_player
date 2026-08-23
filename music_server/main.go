@@ -90,7 +90,7 @@ func main() {
 	server := &musicServer{
 		config:  config,
 		limiter: newIPWindowLimiter(config.RateLimitPerMinute, time.Minute),
-		netease: newNeteaseClient(config.NeteaseAPIBase, config.NeteaseCookie),
+		netease: newNeteaseClient(config.NeteaseAPIBase, config.NeteaseCookie, config.NeteaseCookieFile),
 	}
 	if server.netease.enabled() {
 		log.Printf("netease source enabled, upstream=%s (cookie=%v)",

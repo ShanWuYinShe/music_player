@@ -37,8 +37,10 @@ go run -C music_server . -library-review
 | 本地曲库 | (省略) | 相对路径 sha256 前 16 hex | 直读文件,ServeContent 原生 Range |
 | 网易云网络源 | `netease` | `ne_<上游歌曲数字id>` | 解析时效直链后由本服务反向代理转发 |
 
-- 网络源上游匿名只能播免费曲目;`NETEASE_MUSIC_COOKIE` 配置账号 cookie
-  (如 `MUSIC_U=...`)可解锁登录权限内曲目
+- 网络源上游匿名只能播免费曲目且部分仅有 30~60s 试听片段;配置网易账号
+  cookie 后返回完整音频。cookie 来源:`NETEASE_COOKIE_FILE` 文件优先
+  (管理面板扫码登录写入,30s 热加载,删除文件即登出回匿名),env
+  `NETEASE_MUSIC_COOKIE` 为回退初值
 - 上游为非官方接口,仅限个人使用,可能随平台变动失效(降级不影响本地源)
 
 ## API(nginx 去前缀后,外部路径为 /api/music/<path>)
@@ -64,7 +66,8 @@ go run -C music_server . -library-review
 | `LIBRARY_DIR` | /data/library | 曲库目录(容器内 ro 挂载) |
 | `RATE_LIMIT_PER_MINUTE` | 120 | per-IP 限流阈值 |
 | `NETEASE_API_BASE` | (空=禁用) | netease_api 上游地址(compose 内 `http://netease_api:3000`) |
-| `NETEASE_MUSIC_COOKIE` | (空) | 可选:网易账号 cookie,解锁登录态曲目 |
+| `NETEASE_MUSIC_COOKIE` | (空) | 可选:网易账号 cookie 初值(文件不存在时生效) |
+| `NETEASE_COOKIE_FILE` | (空) | 可选:cookie 文件路径(扫码登录写入,热加载优先) |
 
 ## 部署
 
