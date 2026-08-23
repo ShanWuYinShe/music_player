@@ -14,7 +14,7 @@
 - **后台播放**：`audioPlayback` 长驻任务，退到后台持续播放
 - **媒体控制**：AVSession 接入系统媒体中心，支持通知栏与锁屏播控（播放/暂停/切歌/进度）
 - **演示曲目**：内置 3 段合成演示音频，「载入演示曲目」一键入库，开箱可听
-- **在线源预留**：`MusicSource` 抽象 + 设置页 Base URL 配置（本期仅持久化，接口已预留）
+- **在线音乐**：首页「本地 / 在线」源切换；设置页配置 `music_server` 服务地址（含 `/api` 前缀）后，在线拉取曲库、搜索并流式播放（HTTP Range，AVPlayer 网络直连）
 - **深浅色**：全部颜色使用系统分层资源，自动跟随系统深浅色模式
 
 ## 工程结构
@@ -31,7 +31,7 @@ entry/src/main/
 │   ├── components/                SongItem、MiniPlayerBar、MenuItemRow
 │   ├── player/                    PlayerController(AVPlayer内核)、SessionController(媒体会话)
 │   ├── library/                   MusicLibrary(曲库)、Id3Parser(ID3v2解析)
-│   ├── source/                    MusicSource 抽象（本地/在线）
+│   ├── source/                    MusicSource 抽象、OnlineApi(在线响应解析)
 │   ├── viewmodel/                 AppStore 全局状态、UserData(喜欢/最近播放)
 │   ├── model/                     Song、PlayMode
 │   └── common/                    TimeUtils、LibraryFilter(筛选排序纯逻辑)
@@ -92,5 +92,5 @@ HarmonyOS（API 24）已移除 `READ_MEDIA_AUDIO` 权限，应用无法静默扫
 
 ## 后续计划
 
-- 在线音乐源接入（`OnlineSource`）：按设置页配置的 Base URL 对接同仓库 `music_server/` 的 providers / songs / stream API
+- 在线源升级：服务端关键词搜索（`/songs?q=`）、在线歌单、喜欢/最近跨源聚合
 - 歌词显示、桌面卡片、自建歌单

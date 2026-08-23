@@ -3,6 +3,7 @@ import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMod
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
 import { LibraryTab, SortMode, filterAndSort } from '../main/ets/common/LibraryFilter';
+import { ONLINE_ID_PREFIX, normalizeBaseUrl, songsUrl, parseOnlineSongs, OnlineSongItem, OnlineSongsResponse } from '../main/ets/source/OnlineApi';
 
 /** 构造测试歌曲记录 */
 function mk(id: string, title: string, artist: string, duration: number): SongRecord {
@@ -152,6 +153,52 @@ export default function LocalUnitSuite() {
         recentIds: []
       });
       expect(result.length).assertEqual(0);
+    });
+  });
+
+  describe('OnlineApiTest', () => {
+    const item1: OnlineSongItem = {
+      id: 'a1b2c3d4e5f60718', title: '晴天', artist: '周杰伦',
+      album: '叶惠美', durationMs: 0, format: 'mp3', sizeBytes: 1024
+    };
+    const item2: OnlineSongItem = { id: 'b266199c9eea8d0b', title: '江南', durationMs: 269000 };
+    const response: OnlineSongsResponse = { songs: [item1, item2], total: 2 };
+    const BODY = JSON.stringify(response);
+
+    it('normalizeBaseUrlTrimsTrailingSlashes', 0, () => {
+      expect(normalizeBaseUrl('  http://10.0.2.2:8790/api/  ')).assertEqual('http://10.0.2.2:8790/api');
+      expect(normalizeBaseUrl('')).assertEqual('');
+      expect(normalizeBaseUrl('///')).assertEqual('');
+    });
+
+    it('songsUrlJoinsPath', 0, () => {
+      expect(songsUrl('http://host/api/music/')).assertEqual('http://host/api/music/songs');
+    });
+
+    it('parseMapsIdTitleAndStreamUrl', 0, () => {
+      const list = parseOnlineSongs('http://host/api/music', BODY);
+      expect(list.length).assertEqual(2);
+      expect(list[0].id).assertEqual(`${ONLINE_ID_PREFIX}a1b2c3d4e5f60718`);
+      expect(list[0].fileName).assertEqual('http://host/api/music/stream/a1b2c3d4e5f60718');
+      expect(list[0].title).assertEqual('晴天');
+      expect(list[0].artist).assertEqual('周杰伦');
+      expect(list[0].album).assertEqual('叶惠美');
+    });
+
+    it('parseFillsOptionalFields', 0, () => {
+      const list = parseOnlineSongs('http://h/api', BODY);
+      // 服务端省略 artist/album 时映射为空串，durationMs 正常透传
+      expect(list[1].artist).assertEqual('');
+      expect(list[1].album).assertEqual('');
+      expect(list[1].duration).assertEqual(269000);
+    });
+
+    it('parseRejectsInvalidInput', 0, () => {
+      expect(parseOnlineSongs('http://h/api', '').length).assertEqual(0);
+      expect(parseOnlineSongs('http://h/api', 'not json').length).assertEqual(0);
+      expect(parseOnlineSongs('http://h/api', '{"total":0}').length).assertEqual(0);
+      // 未配置 Base URL 直接返回空
+      expect(parseOnlineSongs('', BODY).length).assertEqual(0);
     });
   });
 }

@@ -16,6 +16,11 @@ const KEY_LAST_SONG = 'last_song_id';
 const KEY_LAST_POS = 'last_position_ms';
 const KEY_PLAY_MODE = 'play_mode';
 
+/** 判定 fileName 是否为网络流地址（http/https，在线曲目由 OnlineSource 生成） */
+function isNetworkUrl(fileName: string): boolean {
+  return fileName.startsWith('http://') || fileName.startsWith('https://');
+}
+
 /**
  * 播放内核与 UI 状态中心：
  * 封装 AVPlayer 状态机、播放队列与播放模式，@Trace 字段直接驱动界面刷新。
@@ -57,6 +62,8 @@ export class PlayerController {
   private pendingSeekMs: number = 0;
   private pref: preferences.Preferences | null = null;
   private sleepTimerId: number = -1;
+  /** 当前队列 id → SongRecord 索引（本地曲库或在线列表），playSong/currentSong 查找用 */
+  private songIndex: Map<string, SongRecord> = new Map();
 
   constructor(library: MusicLibrary, userData: UserData) {
     this.library = library;
@@ -82,13 +89,20 @@ export class PlayerController {
     await this.session.destroy();
   }
 
-  /** 导入/删除歌曲后刷新队列 */
+  /** 导入/删除歌曲后刷新队列（本地曲库队列） */
   refreshSongs(): void {
     this.songs = this.library.getAllSongs();
+    this.rebuildIndex(this.songs);
+  }
+
+  /** 切换为在线曲目队列（在线列表拉取成功后调用） */
+  setOnlineQueue(list: SongRecord[]): void {
+    this.songs = list.slice();
+    this.rebuildIndex(this.songs);
   }
 
   get currentSong(): SongRecord | null {
-    return this.library.getSongById(this.currentSongId);
+    return this.findSong(this.currentSongId);
   }
 
   /** 插播队列长度（UI 展示用） */
@@ -119,7 +133,7 @@ export class PlayerController {
 
   /** 点击列表项播放指定曲目 */
   playSong(id: string): void {
-    const song = this.library.getSongById(id);
+    const song = this.findSong(id);
     if (!song) {
       return;
     }
@@ -132,7 +146,7 @@ export class PlayerController {
   /** 播放/暂停切换；未加载时优先恢复当前曲（续播），否则从第一首开始 */
   togglePlay(): void {
     if (!this.player) {
-      const target = this.currentSongId !== '' ? this.library.getSongById(this.currentSongId) : null;
+      const target = this.currentSongId !== '' ? this.findSong(this.currentSongId) : null;
       if (target) {
         // 续播：pendingSeekMs 已在恢复时记录
         this.loadAndPlay(target);
@@ -252,8 +266,12 @@ export class PlayerController {
     this.sleepRemainSec = -1;
   }
 
-  /** 删除歌曲：若删除的是当前曲则停止播放，并清理用户数据引用与插播队列 */
+  /** 删除歌曲：若删除的是当前曲则停止播放，并清理用户数据引用与插播队列（仅本地曲目） */
   removeSong(id: string): void {
+    const song = this.findSong(id);
+    if (!song || isNetworkUrl(song.fileName)) {
+      return; // 在线曲目由服务端曲库管理，本地无删除语义
+    }
     const isCurrent = id === this.currentSongId;
     this.playNextQueue = this.playNextQueue.filter((item) => item !== id);
     this.userData.removeSongRefs(id);
@@ -338,7 +356,7 @@ export class PlayerController {
     if (songId === '') {
       return;
     }
-    const song = this.library.getSongById(songId);
+    const song = this.findSong(songId);
     if (!song) {
       return;
     }
@@ -353,11 +371,32 @@ export class PlayerController {
   private shiftQueuedExisting(): string {
     while (this.playNextQueue.length > 0) {
       const id = this.playNextQueue.shift() as string;
-      if (this.library.getSongById(id)) {
+      if (this.findSong(id)) {
         return id;
       }
     }
     return '';
+  }
+
+  /** 重建队列索引；正在播放的曲目不在新队列时保留其条目，切源不打断播放 */
+  private rebuildIndex(songs: SongRecord[]): void {
+    const index = new Map<string, SongRecord>();
+    for (const song of songs) {
+      index.set(song.id, song);
+    }
+    const current = this.songIndex.get(this.currentSongId);
+    if (current && current.id !== '' && !index.has(current.id)) {
+      index.set(current.id, current);
+    }
+    this.songIndex = index;
+  }
+
+  /** 队列查找：当前队列索引优先，本地曲库兜底（启动恢复等场景） */
+  private findSong(id: string): SongRecord | null {
+    if (id === '') {
+      return null;
+    }
+    return this.songIndex.get(id) ?? this.library.getSongById(id);
   }
 
   /** 加载曲目并自动播放：重建 AVPlayer 实例，状态推进全部由 stateChange 事件驱动 */
@@ -379,11 +418,16 @@ export class PlayerController {
       }
       this.player = player;
       this.registerPlayerEvents(player, gen, song);
-      // 本地文件必须走文件描述符（url 仅支持网络协议与 fd:// 协议）；
-      // 赋值后状态迁移(initialized)为异步事件，prepare 须在 stateChange 回调中触发
-      const file = fs.openSync(this.library.songPath(song), fs.OpenMode.READ_ONLY);
-      this.currentFd = file.fd;
-      player.url = `fd://${file.fd}`;
+      if (isNetworkUrl(song.fileName)) {
+        // 在线流媒体：url 属性原生支持 http(s) 网络协议，Range 分段由内核处理
+        player.url = song.fileName;
+      } else {
+        // 本地文件必须走文件描述符（url 仅支持网络协议与 fd:// 协议）；
+        // 赋值后状态迁移(initialized)为异步事件，prepare 须在 stateChange 回调中触发
+        const file = fs.openSync(this.library.songPath(song), fs.OpenMode.READ_ONLY);
+        this.currentFd = file.fd;
+        player.url = `fd://${file.fd}`;
+      }
       await this.session.updateMetadata(song);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load song failed: %{public}s', JSON.stringify(err));
@@ -420,9 +464,16 @@ export class PlayerController {
       this.isPrepared = true;
       if (player.duration > 0) {
         this.duration = player.duration;
-        this.library.updateDuration(song.id, player.duration);
-        // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
-        this.songs = this.library.getAllSongs().slice();
+        if (isNetworkUrl(song.fileName)) {
+          // 在线曲目不落本地库，直接改对象字段并整体替换数组引用刷新列表
+          song.duration = player.duration;
+          this.songs = this.songs.slice();
+        } else {
+          this.library.updateDuration(song.id, player.duration);
+          // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
+          this.songs = this.library.getAllSongs().slice();
+        }
+        this.rebuildIndex(this.songs);
         // 时长回填后再刷新一次媒体中心元数据（锁屏进度更准确）
         this.session.updateMetadata(song);
       }

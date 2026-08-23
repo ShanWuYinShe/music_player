@@ -9,8 +9,14 @@ import { MiniPlayerBar } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
 
+/** 曲目来源：本地曲库 / 在线服务 */
+enum SourceTab {
+  LOCAL = 0,
+  ONLINE = 1
+}
+
 /**
- * 主页面：搜索/分类/排序 + 歌曲列表 + 迷你播放条，
+ * 主页面：源切换（本地/在线）+ 搜索/分类/排序 + 歌曲列表 + 迷你播放条，
  * Navigation 承载播放页与设置页。
  */
 @Entry
@@ -21,9 +27,25 @@ struct Index {
   @Local tab: LibraryTab = LibraryTab.ALL;
   @Local sortMode: SortMode = SortMode.DEFAULT;
   @Local scanning: boolean = false;
+  @Local sourceTab: SourceTab = SourceTab.LOCAL;
+  @Local onlineLoading: boolean = false;
+  /** 在线拉取失败提示（有旧缓存时仍展示缓存列表） */
+  @Local onlineError: string = '';
+  /** 最近一次成功拉取的在线列表（切回在线 tab 时的兜底缓存） */
+  @Local onlineSongs: SongRecord[] = [];
 
-  /** 当前 Tab 与搜索词过滤后的列表 */
+  /** 当前 Tab 与搜索词过滤后的列表；在线模式固定全部+默认序，避免跨源收藏/最近语义 */
   private visibleSongs(): SongRecord[] {
+    if (this.sourceTab === SourceTab.ONLINE) {
+      const opts: FilterOptions = {
+        query: this.searchText,
+        tab: LibraryTab.ALL,
+        sort: SortMode.DEFAULT,
+        favoriteIds: [],
+        recentIds: []
+      };
+      return filterAndSort(appStore.player.songs, opts);
+    }
     const opts: FilterOptions = {
       query: this.searchText,
       tab: this.tab,
@@ -56,7 +78,9 @@ struct Index {
               .fontSize(30)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.ink'))
-            Text(appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐')
+            Text(this.sourceTab === SourceTab.ONLINE
+              ? (appStore.player.songs.length > 0 ? `在线 · ${appStore.player.songs.length} 首歌曲` : '在线音乐')
+              : (appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐'))
               .fontSize(13)
               .fontColor($r('app.color.ink_soft'))
           }
@@ -72,7 +96,15 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 16, top: 14, bottom: 4 })
 
-        // 搜索 + 排序
+        // 源切换：本地曲库 / 在线服务
+        Row({ space: 8 }) {
+          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
+          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+        }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 6, bottom: 2 })
+
+        // 搜索 + 排序（在线列表为服务端顺序，隐藏排序入口）
         Row({ space: 10 }) {
           Row({ space: 6 }) {
             SymbolGlyph($r('sys.symbol.magnifyingglass'))
@@ -112,36 +144,42 @@ struct Index {
           .backgroundColor($r('app.color.surface_alt'))
           .padding({ left: 12, right: 12 })
 
-          // 排序入口
-          Row({ space: 3 }) {
-            Text(sortLabel(this.sortMode))
-              .fontSize(13)
-              .fontColor($r('app.color.ink'))
-            SymbolGlyph($r('sys.symbol.chevron_down'))
-              .fontSize(12)
-              .fontColor([$r('app.color.ink_soft')])
+          if (this.sourceTab === SourceTab.LOCAL) {
+            // 排序入口
+            Row({ space: 3 }) {
+              Text(sortLabel(this.sortMode))
+                .fontSize(13)
+                .fontColor($r('app.color.ink'))
+              SymbolGlyph($r('sys.symbol.chevron_down'))
+                .fontSize(12)
+                .fontColor([$r('app.color.ink_soft')])
+            }
+            .height(38)
+            .borderRadius(19)
+            .backgroundColor($r('app.color.surface'))
+            .padding({ left: 13, right: 11 })
+            .bindMenu(this.SortMenu())
           }
-          .height(38)
-          .borderRadius(19)
-          .backgroundColor($r('app.color.surface'))
-          .padding({ left: 13, right: 11 })
-          .bindMenu(this.SortMenu())
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
-        // 分类 Tab：全部 / 喜欢 / 最近
-        Row({ space: 8 }) {
-          this.TabChip(LibraryTab.ALL, '全部')
-          this.TabChip(LibraryTab.FAVORITES, '喜欢')
-          this.TabChip(LibraryTab.RECENT, '最近')
+        // 分类 Tab：全部 / 喜欢 / 最近（本地源语义，在线隐藏）
+        if (this.sourceTab === SourceTab.LOCAL) {
+          Row({ space: 8 }) {
+            this.TabChip(LibraryTab.ALL, '全部')
+            this.TabChip(LibraryTab.FAVORITES, '喜欢')
+            this.TabChip(LibraryTab.RECENT, '最近')
+          }
+          .width('100%')
+          .padding({ left: 20, right: 20, top: 10, bottom: 6 })
         }
-        .width('100%')
-        .padding({ left: 20, right: 20, top: 10, bottom: 6 })
 
         // 歌曲列表 / 空态
         if (this.visibleSongs().length === 0) {
-          if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
+          if (this.sourceTab === SourceTab.ONLINE) {
+            this.OnlineStatusView()
+          } else if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
             this.LibraryEmptyView()
           } else if (this.searchText.trim() !== '') {
             this.NoResultView()
@@ -223,6 +261,113 @@ struct Index {
       })
   }
 
+  /** 源切换 chip */
+  @Builder
+  SourceChip(tab: SourceTab, label: string, icon: Resource) {
+    Row({ space: 5 }) {
+      SymbolGlyph(icon)
+        .fontSize(14)
+        .fontColor([this.sourceTab === tab ? $r('app.color.paper') : $r('app.color.ink_soft')])
+      Text(label)
+        .fontSize(13)
+        .fontColor(this.sourceTab === tab ? $r('app.color.paper') : $r('app.color.ink_soft'))
+        .fontWeight(this.sourceTab === tab ? FontWeight.Medium : FontWeight.Normal)
+    }
+    .padding({ left: 14, right: 14, top: 5, bottom: 5 })
+    .borderRadius(15)
+    .backgroundColor(this.sourceTab === tab ? $r('app.color.ink') : $r('app.color.surface'))
+    .onClick(() => this.switchSource(tab))
+  }
+
+  /** 在线列表状态视图：加载中 / 未配置 / 拉取失败 / 服务器空库 / 搜索无结果 */
+  @Builder
+  OnlineStatusView() {
+    if (this.onlineLoading) {
+      Column({ space: 14 }) {
+        LoadingProgress()
+          .width(38)
+          .height(38)
+          .color($r('app.color.ink_faint'))
+        Text('正在拉取在线曲库…')
+          .fontSize(14)
+          .fontColor($r('app.color.ink_soft'))
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .justifyContent(FlexAlign.Center)
+    } else if (appStore.onlineSource.baseUrl.trim() === '') {
+      Column({ space: 14 }) {
+        SymbolGlyph($r('sys.symbol.wifi'))
+          .fontSize(40)
+          .fontColor([$r('app.color.ink_faint')])
+        Text('还未配置在线服务')
+          .fontSize(15)
+          .fontColor($r('app.color.ink_soft'))
+        Text('在设置中填写服务地址，即可在线搜索与播放')
+          .fontSize(12)
+          .fontColor($r('app.color.ink_faint'))
+        Button('去设置')
+          .height(38)
+          .fontSize(14)
+          .borderRadius(19)
+          .backgroundColor($r('app.color.ink'))
+          .fontColor($r('app.color.paper'))
+          .onClick(() => this.pathStack.pushPathByName('settings', null))
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .justifyContent(FlexAlign.Center)
+    } else if (this.onlineError !== '' && appStore.player.songs.length === 0) {
+      Column({ space: 14 }) {
+        SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
+          .fontSize(40)
+          .fontColor([$r('app.color.ink_faint')])
+        Text('在线曲库拉取失败')
+          .fontSize(15)
+          .fontColor($r('app.color.ink_soft'))
+        Text(this.onlineError)
+          .fontSize(12)
+          .fontColor($r('app.color.ink_faint'))
+        Button('重试')
+          .height(38)
+          .fontSize(14)
+          .borderRadius(19)
+          .buttonStyle(ButtonStyleMode.NORMAL)
+          .backgroundColor($r('app.color.surface_alt'))
+          .fontColor($r('app.color.ink'))
+          .onClick(() => this.enterOnline())
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .justifyContent(FlexAlign.Center)
+    } else if (this.searchText.trim() !== '') {
+      this.NoResultView()
+    } else {
+      Column({ space: 14 }) {
+        SymbolGlyph($r('sys.symbol.music_note_list'))
+          .fontSize(40)
+          .fontColor([$r('app.color.ink_faint')])
+        Text('服务器曲库还是空的')
+          .fontSize(15)
+          .fontColor($r('app.color.ink_soft'))
+        Text('向服务端曲库目录投放音频后，下拉这里重试')
+          .fontSize(12)
+          .fontColor($r('app.color.ink_faint'))
+        Button('重试')
+          .height(38)
+          .fontSize(14)
+          .borderRadius(19)
+          .buttonStyle(ButtonStyleMode.NORMAL)
+          .backgroundColor($r('app.color.surface_alt'))
+          .fontColor($r('app.color.ink'))
+          .onClick(() => this.enterOnline())
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .justifyContent(FlexAlign.Center)
+    }
+  }
+
   /** 长按歌曲菜单 */
   @Builder
   SongMenu(song: SongRecord) {
@@ -243,12 +388,14 @@ struct Index {
           promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
         }
       })
-      MenuItemRow({
-        label: '从曲库删除',
-        icon: $r('sys.symbol.trash'),
-        danger: true,
-        onSelect: () => appStore.player.removeSong(song.id)
-      })
+      if (this.sourceTab === SourceTab.LOCAL) {
+        MenuItemRow({
+          label: '从曲库删除',
+          icon: $r('sys.symbol.trash'),
+          danger: true,
+          onSelect: () => appStore.player.removeSong(song.id)
+        })
+      }
     }
     .width(196)
     .padding(6)
@@ -317,18 +464,20 @@ struct Index {
         promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
       })
 
-      Column() {
-        SymbolGlyph($r('sys.symbol.trash'))
-          .fontSize(20)
-          .fontColor([$r('app.color.paper')])
+      if (this.sourceTab === SourceTab.LOCAL) {
+        Column() {
+          SymbolGlyph($r('sys.symbol.trash'))
+            .fontSize(20)
+            .fontColor([$r('app.color.paper')])
+        }
+        .width(52)
+        .height('100%')
+        .borderRadius(12)
+        .backgroundColor($r('app.color.danger'))
+        .justifyContent(FlexAlign.Center)
+        .margin({ left: 6 })
+        .onClick(() => appStore.player.removeSong(id))
       }
-      .width(52)
-      .height('100%')
-      .borderRadius(12)
-      .backgroundColor($r('app.color.danger'))
-      .justifyContent(FlexAlign.Center)
-      .margin({ left: 6 })
-      .onClick(() => appStore.player.removeSong(id))
     }
     .height('100%')
   }
@@ -434,6 +583,50 @@ struct Index {
         SettingsPage({ navPathStack: this.pathStack })
       }
       .hideTitleBar(true)
+    }
+  }
+
+  /** 从设置页返回时重新拉取在线曲库（Base URL 可能刚配置/修改过） */
+  onPageShow(): void {
+    if (this.sourceTab === SourceTab.ONLINE) {
+      this.enterOnline();
+    }
+  }
+
+  /** 切换曲目来源：本地回读曲库，在线重新拉取（重复点击在线等同刷新） */
+  private switchSource(tab: SourceTab): void {
+    if (this.sourceTab === tab && tab === SourceTab.LOCAL) {
+      return;
+    }
+    this.sourceTab = tab;
+    this.searchText = '';
+    if (tab === SourceTab.ONLINE) {
+      this.enterOnline();
+    } else {
+      appStore.player.refreshSongs();
+    }
+  }
+
+  /** 进入在线源：拉取曲目并替换播放队列；失败时回退旧缓存并提示 */
+  private async enterOnline(): Promise<void> {
+    if (this.onlineLoading || appStore.onlineSource.baseUrl.trim() === '') {
+      return;
+    }
+    this.onlineLoading = true;
+    this.onlineError = '';
+    try {
+      const list = await appStore.onlineSource.fetchSongs();
+      this.onlineSongs = list;
+      appStore.player.setOnlineQueue(list);
+    } catch (err) {
+      this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
+      if (this.onlineSongs.length > 0) {
+        // 拉取失败但有旧缓存：继续用旧列表，不打断已有队列
+        appStore.player.setOnlineQueue(this.onlineSongs);
+        promptAction.showToast({ message: '在线列表拉取失败，正在展示上次结果' });
+      }
+    } finally {
+      this.onlineLoading = false;
     }
   }
 
