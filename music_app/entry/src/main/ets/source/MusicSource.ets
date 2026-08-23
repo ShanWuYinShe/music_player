@@ -34,8 +34,8 @@ export class LocalSource implements MusicSource {
 
 /**
  * 在线音乐源（预留骨架）：
- * 计划对接 NeteaseCloudMusicApi 等 REST 服务，Base URL 由设置页配置。
- * 接入时实现 search/getSongs 并将结果映射为 SongRecord（fileName 存 URL，
+ * 对接同仓库 music_server（providers/songs/stream API），Base URL 由设置页配置。
+ * 接入时实现 search/getSongs 并将结果映射为 SongRecord（fileName 存 stream URL，
  * PlayerController 需按 online 标记走网络播放分支）。
  */
 export class OnlineSource implements MusicSource {

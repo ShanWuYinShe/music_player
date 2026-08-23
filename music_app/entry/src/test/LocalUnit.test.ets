@@ -124,10 +124,12 @@ export default function LocalUnitSuite() {
     });
 
     it('sortArtistThenTitle', 0, () => {
+      // 歌手名用 ASCII:LocalUnit(Node)环境 localeCompare 对中文退化为
+      // 码点序(乙 U+4E59 < 甲 U+7532),拼音排序假设不成立
       const list: SongRecord[] = [
-        mk('x', 'B歌', '甲', 1000),
-        mk('y', 'A歌', '乙', 1000),
-        mk('z', 'A歌', '甲', 1000)
+        mk('x', 'B歌', 'artist2', 1000),
+        mk('y', 'A歌', 'artist1', 1000),
+        mk('z', 'A歌', 'artist2', 1000)
       ];
       const result = filterAndSort(list, {
         query: '',
@@ -136,9 +138,9 @@ export default function LocalUnitSuite() {
         favoriteIds: [],
         recentIds: []
       });
-      expect(result[0].id).assertEqual('z'); // 甲·A歌
-      expect(result[1].id).assertEqual('x'); // 甲·B歌
-      expect(result[2].id).assertEqual('y'); // 乙·A歌
+      expect(result[0].id).assertEqual('y'); // artist1·A歌
+      expect(result[1].id).assertEqual('z'); // artist2·A歌
+      expect(result[2].id).assertEqual('x'); // artist2·B歌
     });
 
     it('emptyLibraryReturnsEmpty', 0, () => {

@@ -1,18 +1,3 @@
-# 构建产物与依赖
-/node_modules
-/oh_modules
-**/build
-/.hvigor
-/.cxx
-**/.test
-
-# IDE 与本地配置
-/.idea
-/local.properties
-/.clangd
-/.clang-format
-/.clang-tidy
-
 # AI 会话工作目录
 /.workwork/
 /.worktrees/
@@ -22,3 +7,6 @@
 /.clhome/
 /.emu/
 /code-linter.json5
+
+# 操作系统
+.DS_Store
