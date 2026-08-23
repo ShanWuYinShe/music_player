@@ -123,6 +123,47 @@ export class MusicLibrary {
     this.save();
   }
 
+  /**
+   * 清空曲库：删除沙盒内全部音乐文件与封面缓存并重置索引。
+   * 调用方需先停止播放（当前 fd 指向待删文件）。
+   */
+  clearAll(): void {
+    this.removeDirContents(this.musicDir());
+    this.removeDirContents(this.coverDir());
+    this.songs = [];
+    this.save();
+  }
+
+  /** 曲库总时长（毫秒），未播放过的曲目按 0 计 */
+  totalDurationMs(): number {
+    let total = 0;
+    for (const song of this.songs) {
+      if (song.duration > 0) {
+        total += song.duration;
+      }
+    }
+    return total;
+  }
+
+  /** 删除目录内全部文件（保留目录本身） */
+  private removeDirContents(dir: string): void {
+    try {
+      if (!fs.accessSync(dir)) {
+        return;
+      }
+      const names = fs.listFileSync(dir);
+      for (const name of names) {
+        try {
+          fs.unlinkSync(`${dir}/${name}`);
+        } catch (err) {
+          hilog.warn(DOMAIN, TAG, 'unlink %{public}s failed: %{public}s', name, JSON.stringify(err));
+        }
+      }
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, 'clear dir failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
   /** 首次播放获得时长后回填并持久化 */
   updateDuration(id: string, duration: number): void {
     const song = this.getSongById(id);

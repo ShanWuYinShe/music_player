@@ -14,6 +14,7 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, TAG, 'Ability onDestroy');
+    appStore.persistAll();
     appStore.player.destroy();
   }
 

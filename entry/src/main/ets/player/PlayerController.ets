@@ -1,24 +1,31 @@
 import { common } from '@kit.AbilityKit';
 import { media } from '@kit.MediaKit';
+import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { SongRecord } from '../model/Song';
 import { PlayMode, nextPlayMode } from '../model/PlayMode';
 import { MusicLibrary } from '../library/MusicLibrary';
+import { UserData } from '../viewmodel/UserData';
 import { SessionController, SessionHandlers } from './SessionController';
 
 const TAG = 'PlayerController';
 const DOMAIN = 0x0003;
 
+const KEY_LAST_SONG = 'last_song_id';
+const KEY_LAST_POS = 'last_position_ms';
+const KEY_PLAY_MODE = 'play_mode';
+
 /**
  * 播放内核与 UI 状态中心：
  * 封装 AVPlayer 状态机、播放队列与播放模式，@Trace 字段直接驱动界面刷新。
+ * 附加能力：下一首插播队列、音量、定时关闭、退出续播。
  */
 @ObservedV2
 export class PlayerController {
   /** 曲目列表 */
   @Trace songs: SongRecord[] = [];
-  /** 当前播放曲目 id，空表示未播放 */
+  /** 当前播放曲目 id，空表示未播放（含「恢复上次会话」的未加载态） */
   @Trace currentSongId: string = '';
   /** 是否正在播放 */
   @Trace isPlaying: boolean = false;
@@ -30,8 +37,13 @@ export class PlayerController {
   @Trace duration: number = 0;
   /** 播放模式 */
   @Trace playMode: PlayMode = PlayMode.SEQUENCE;
+  /** 音量 0~1 */
+  @Trace volume: number = 1;
+  /** 定时关闭剩余秒数，-1 表示未启用 */
+  @Trace sleepRemainSec: number = -1;
 
   private library: MusicLibrary;
+  private userData: UserData;
   private session: SessionController = new SessionController();
   private player: media.AVPlayer | null = null;
   /** 当前曲目占用的文件描述符，release 时关闭 */
@@ -39,21 +51,33 @@ export class PlayerController {
   private context: common.UIAbilityContext | null = null;
   /** 切歌代际号：递增后旧实例的异步回调全部作废 */
   private generation: number = 0;
+  /** 「下一首播放」插播队列：任何前进切歌优先消费 */
+  @Trace playNextQueue: string[] = [];
+  /** 续播位置：prepared 后先 seek 再播，消费后清零 */
+  private pendingSeekMs: number = 0;
+  private pref: preferences.Preferences | null = null;
+  private sleepTimerId: number = -1;
 
-  constructor(library: MusicLibrary) {
+  constructor(library: MusicLibrary, userData: UserData) {
     this.library = library;
+    this.userData = userData;
   }
 
   /** 应用启动时初始化（UIAbility onCreate 调用） */
-  async init(context: common.UIAbilityContext): Promise<void> {
+  async init(context: common.UIAbilityContext, pref: preferences.Preferences | null): Promise<void> {
     this.context = context;
+    this.pref = pref;
     this.refreshSongs();
+    this.restorePlayMode();
+    this.restoreLastSession();
     await this.session.init(context, this.buildHandlers());
   }
 
-  /** 应用退出时释放资源 */
+  /** 应用退出时释放资源并持久化会话状态 */
   async destroy(): Promise<void> {
     this.generation++;
+    this.cancelSleepTimer();
+    this.persistState();
     await this.releasePlayer();
     await this.session.destroy();
   }
@@ -67,6 +91,32 @@ export class PlayerController {
     return this.library.getSongById(this.currentSongId);
   }
 
+  /** 插播队列长度（UI 展示用） */
+  get playNextCount(): number {
+    return this.playNextQueue.length;
+  }
+
+  /** 插播队列快照 */
+  playNextIds(): string[] {
+    return this.playNextQueue.slice();
+  }
+
+  /**
+   * 加入「下一首播放」队列；已在队列或正在播放时不重复加入。
+   * @returns 加入后的队列长度
+   */
+  queueNext(id: string): number {
+    if (id === this.currentSongId || this.playNextQueue.indexOf(id) >= 0) {
+      return this.playNextQueue.length;
+    }
+    this.playNextQueue.push(id);
+    return this.playNextQueue.length;
+  }
+
+  clearPlayNextQueue(): void {
+    this.playNextQueue = [];
+  }
+
   /** 点击列表项播放指定曲目 */
   playSong(id: string): void {
     const song = this.library.getSongById(id);
@@ -74,14 +124,19 @@ export class PlayerController {
       return;
     }
     this.currentSongId = id;
+    this.pendingSeekMs = 0;
+    this.userData.addRecent(id);
     this.loadAndPlay(song);
   }
 
-  /** 播放/暂停切换 */
+  /** 播放/暂停切换；未加载时优先恢复当前曲（续播），否则从第一首开始 */
   togglePlay(): void {
     if (!this.player) {
-      // 尚未加载任何曲目时，播放列表第一首
-      if (this.songs.length > 0) {
+      const target = this.currentSongId !== '' ? this.library.getSongById(this.currentSongId) : null;
+      if (target) {
+        // 续播：pendingSeekMs 已在恢复时记录
+        this.loadAndPlay(target);
+      } else if (this.songs.length > 0) {
         this.playSong(this.songs[0].id);
       }
       return;
@@ -93,9 +148,14 @@ export class PlayerController {
     }
   }
 
-  /** 下一首（手动操作，单曲循环模式下同样切歌） */
+  /** 下一首（手动操作，单曲循环模式下同样切歌）；优先消费插播队列 */
   next(): void {
     if (this.songs.length === 0) {
+      return;
+    }
+    const queuedId = this.shiftQueuedExisting();
+    if (queuedId !== '') {
+      this.playSong(queuedId);
       return;
     }
     const index = this.currentIndex();
@@ -121,6 +181,11 @@ export class PlayerController {
       this.playSong(this.songs[0].id);
       return;
     }
+    if (this.currentTime > 5000) {
+      // 播放超 5 秒时上一首回到曲首（符合常见交互习惯）
+      this.seek(0);
+      return;
+    }
     if (this.playMode === PlayMode.SHUFFLE) {
       this.playSong(this.songs[this.randomIndex(index)].id);
       return;
@@ -129,22 +194,69 @@ export class PlayerController {
     this.playSong(this.songs[prevIndex].id);
   }
 
-  /** 循环切换播放模式 */
+  /** 循环切换播放模式并持久化 */
   cyclePlayMode(): void {
     this.playMode = nextPlayMode(this.playMode);
+    this.persistState();
   }
 
   /** 进度拖拽（毫秒） */
   seek(positionMs: number): void {
     if (this.player && this.isPrepared) {
-      this.player.seek(positionMs);
+      try {
+        this.player.seek(positionMs);
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'seek failed: %{public}s', JSON.stringify(err));
+      }
       this.currentTime = positionMs;
     }
   }
 
-  /** 删除歌曲：若删除的是当前曲则停止播放 */
+  /** 设置音量（0~1），对后续曲目同样生效 */
+  setVolume(value: number): void {
+    const clamped = Math.min(1, Math.max(0, value));
+    this.volume = clamped;
+    this.applyVolume();
+  }
+
+  private applyVolume(): void {
+    if (!this.player) {
+      return;
+    }
+    try {
+      // setVolume 仅在 prepared/playing/paused/completed 态可调用，其余态由 prepared 时统一应用
+      this.player.setVolume(this.volume);
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'set volume failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 启动定时关闭（分钟） */
+  startSleepTimer(minutes: number): void {
+    this.cancelSleepTimer();
+    this.sleepRemainSec = Math.max(1, Math.round(minutes * 60));
+    this.sleepTimerId = setInterval(() => {
+      this.sleepRemainSec -= 1;
+      if (this.sleepRemainSec <= 0) {
+        this.cancelSleepTimer();
+        this.pause(); // 到点柔和暂停而非销毁现场
+      }
+    }, 1000);
+  }
+
+  cancelSleepTimer(): void {
+    if (this.sleepTimerId >= 0) {
+      clearInterval(this.sleepTimerId);
+      this.sleepTimerId = -1;
+    }
+    this.sleepRemainSec = -1;
+  }
+
+  /** 删除歌曲：若删除的是当前曲则停止播放，并清理用户数据引用与插播队列 */
   removeSong(id: string): void {
     const isCurrent = id === this.currentSongId;
+    this.playNextQueue = this.playNextQueue.filter((item) => item !== id);
+    this.userData.removeSongRefs(id);
     this.library.removeSong(id);
     this.refreshSongs();
     if (isCurrent) {
@@ -170,6 +282,7 @@ export class PlayerController {
     }
     try {
       await this.player.pause();
+      this.persistState(); // 记录断点，供下次续播
       // 暂停仅退出播放态：保留长驻任务，避免频繁起停；完全停止时再结束
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'pause failed: %{public}s', JSON.stringify(err));
@@ -184,8 +297,67 @@ export class PlayerController {
     this.isPrepared = false;
     this.currentTime = 0;
     this.duration = 0;
+    this.pendingSeekMs = 0;
     this.session.updatePlaybackState(false, 0, 1.0);
     this.session.stopBackground();
+    this.persistState();
+  }
+
+  /** 持久化当前会话（当前曲/进度/模式），供下次启动续播 */
+  persistState(): void {
+    if (!this.pref) {
+      return;
+    }
+    try {
+      this.pref.putSync(KEY_LAST_SONG, this.currentSongId);
+      this.pref.putSync(KEY_LAST_POS, Math.floor(this.currentTime));
+      this.pref.putSync(KEY_PLAY_MODE, this.playMode);
+      this.pref.flush();
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'persist state failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 恢复播放模式偏好 */
+  private restorePlayMode(): void {
+    if (!this.pref) {
+      return;
+    }
+    const raw = this.pref.getSync(KEY_PLAY_MODE, 0) as number;
+    if (raw === PlayMode.SINGLE || raw === PlayMode.SHUFFLE || raw === PlayMode.SEQUENCE) {
+      this.playMode = raw as PlayMode;
+    }
+  }
+
+  /** 恢复上次退出时的曲目与进度（仅展示，首次点播放时真正加载） */
+  private restoreLastSession(): void {
+    if (!this.pref || this.currentSongId !== '') {
+      return;
+    }
+    const songId = this.pref.getSync(KEY_LAST_SONG, '') as string;
+    if (songId === '') {
+      return;
+    }
+    const song = this.library.getSongById(songId);
+    if (!song) {
+      return;
+    }
+    const pos = this.pref.getSync(KEY_LAST_POS, 0) as number;
+    this.currentSongId = songId;
+    this.duration = song.duration;
+    this.currentTime = pos > 0 && pos < song.duration ? pos : 0;
+    this.pendingSeekMs = this.currentTime;
+  }
+
+  /** 弹出插播队列中仍存在的曲目 id */
+  private shiftQueuedExisting(): string {
+    while (this.playNextQueue.length > 0) {
+      const id = this.playNextQueue.shift() as string;
+      if (this.library.getSongById(id)) {
+        return id;
+      }
+    }
+    return '';
   }
 
   /** 加载曲目并自动播放：重建 AVPlayer 实例，状态推进全部由 stateChange 事件驱动 */
@@ -193,7 +365,7 @@ export class PlayerController {
     const gen = ++this.generation;
     this.isPlaying = false;
     this.isPrepared = false;
-    this.currentTime = 0;
+    this.currentTime = this.pendingSeekMs;
     this.duration = song.duration;
     await this.releasePlayer();
     if (gen !== this.generation) {
@@ -251,7 +423,20 @@ export class PlayerController {
         this.library.updateDuration(song.id, player.duration);
         // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
         this.songs = this.library.getAllSongs().slice();
+        // 时长回填后再刷新一次媒体中心元数据（锁屏进度更准确）
+        this.session.updateMetadata(song);
       }
+      this.applyVolume();
+      // 续播：先跳到断点再开播
+      if (this.pendingSeekMs > 0 && (player.duration <= 0 || this.pendingSeekMs < player.duration)) {
+        try {
+          player.seek(this.pendingSeekMs);
+          this.currentTime = this.pendingSeekMs;
+        } catch (err) {
+          hilog.warn(DOMAIN, TAG, 'resume seek failed: %{public}s', JSON.stringify(err));
+        }
+      }
+      this.pendingSeekMs = 0;
       player.play().catch((err: Object) => {
         hilog.error(DOMAIN, TAG, 'play failed: %{public}s', JSON.stringify(err));
       });
@@ -280,12 +465,14 @@ export class PlayerController {
       return;
     }
     const index = this.currentIndex();
-    if (index >= 0 && index === this.songs.length - 1 && this.playMode === PlayMode.SEQUENCE) {
-      // 顺序播放到列表末尾：停止
+    if (index >= 0 && index === this.songs.length - 1 && this.playMode === PlayMode.SEQUENCE
+      && this.playNextQueue.length === 0) {
+      // 顺序播放到列表末尾且无插播：停止
       this.isPlaying = false;
       this.currentTime = 0;
       this.session.updatePlaybackState(false, 0, 1.0);
       this.session.stopBackground();
+      this.persistState();
       return;
     }
     this.next();

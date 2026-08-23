@@ -2,7 +2,47 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#FFFFFF"
+      "value": "#F6F3EC"
+    },
+    {
+      "name": "page_bg",
+      "value": "#F6F3EC"
+    },
+    {
+      "name": "surface",
+      "value": "#FEFDFB"
+    },
+    {
+      "name": "surface_alt",
+      "value": "#ECE8DC"
+    },
+    {
+      "name": "ink",
+      "value": "#26221B"
+    },
+    {
+      "name": "ink_soft",
+      "value": "#6D6759"
+    },
+    {
+      "name": "ink_faint",
+      "value": "#A29B8A"
+    },
+    {
+      "name": "paper",
+      "value": "#FBFAF5"
+    },
+    {
+      "name": "accent",
+      "value": "#A5691E"
+    },
+    {
+      "name": "danger",
+      "value": "#BC4A2F"
+    },
+    {
+      "name": "line",
+      "value": "#E7E2D4"
     }
   ]
 }

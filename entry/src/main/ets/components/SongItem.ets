@@ -2,7 +2,7 @@ import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
 
 const COVER_SIZE = 48;
-const CURRENT_COLOR = '#34C77B';
+const CURRENT_COLOR = $r('app.color.accent');
 
 /**
  * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放高亮
@@ -29,12 +29,12 @@ export struct SongItem {
           Column() {
             SymbolGlyph($r('sys.symbol.music_note_list'))
               .fontSize(22)
-              .fontColor([$r('sys.color.font_secondary')])
+              .fontColor([$r('app.color.ink_soft')])
           }
           .width(COVER_SIZE)
           .height(COVER_SIZE)
           .borderRadius(10)
-          .backgroundColor($r('sys.color.background_tertiary'))
+          .backgroundColor($r('app.color.surface_alt'))
           .justifyContent(FlexAlign.Center)
         }
       }
@@ -44,12 +44,12 @@ export struct SongItem {
         Text(this.song.title)
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.isCurrent ? CURRENT_COLOR : $r('sys.color.font_primary'))
+          .fontColor(this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(this.song.artist)
           .fontSize(13)
-          .fontColor($r('sys.color.font_secondary'))
+          .fontColor($r('app.color.ink_soft'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
@@ -64,12 +64,12 @@ export struct SongItem {
       }
       Text(this.song.duration > 0 ? formatTime(this.song.duration) : '--:--')
         .fontSize(12)
-        .fontColor($r('sys.color.font_tertiary'))
+        .fontColor($r('app.color.ink_faint'))
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .borderRadius(12)
-    .backgroundColor(this.isCurrent ? $r('sys.color.background_secondary') : $r('sys.color.background_primary'))
+    .backgroundColor(this.isCurrent ? $r('app.color.surface') : $r('app.color.page_bg'))
     .onClick(() => this.onItemClick(this.song.id))
   }
 }

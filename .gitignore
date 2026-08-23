@@ -17,3 +17,8 @@
 /.workwork/
 /.worktrees/
 /.zcode/
+
+# 本地工具与模拟器
+/.clhome/
+/.emu/
+/code-linter.json5
