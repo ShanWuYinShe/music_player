@@ -150,11 +150,18 @@ func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error
 }
 
 // cloudsearchSongs / songURLData 是上游响应的用到的子集。
+// /cloudsearch 走新版 eapi 形态：ar=歌手数组、al=专辑对象、dt=时长(毫秒)；
+// 旧版 /search 形态为 artists/album/duration。两种形态都解析，取非零者，
+// 只认旧形态会把搜索结果的歌手/时长全部丢成空值(已踩坑)。
 type cloudsearchSongs struct {
 	Result struct {
 		Songs []struct {
-			ID       int64 `json:"id"`
-			Name     string
+			ID   int64 `json:"id"`
+			Name string
+			Ar   []struct{ Name string } `json:"ar"`
+			Al   struct{ Name string }   `json:"al"`
+			Dt   int64                   `json:"dt"`
+
 			Artists  []struct{ Name string } `json:"artists"`
 			Album    struct{ Name string }   `json:"album"`
 			Duration int64                   `json:"duration"`
@@ -233,16 +240,28 @@ func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]
 	}
 	songs := make([]Song, 0, len(resp.Result.Songs))
 	for _, s := range resp.Result.Songs {
-		artists := make([]string, 0, len(s.Artists))
-		for _, a := range s.Artists {
+		ar := s.Ar
+		if len(ar) == 0 {
+			ar = s.Artists // 旧形态回退
+		}
+		artists := make([]string, 0, len(ar))
+		for _, a := range ar {
 			artists = append(artists, a.Name)
+		}
+		duration := s.Dt
+		if duration <= 0 {
+			duration = s.Duration // 旧形态回退
+		}
+		album := s.Al.Name
+		if album == "" {
+			album = s.Album.Name // 旧形态回退
 		}
 		songs = append(songs, Song{
 			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, s.ID),
 			Title:      s.Name,
 			Artist:     strings.Join(artists, "/"),
-			Album:      s.Album.Name,
-			DurationMs: s.Duration,
+			Album:      album,
+			DurationMs: duration,
 			Format:     "mp3",
 			Source:     "netease",
 		})

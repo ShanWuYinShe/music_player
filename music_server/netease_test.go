@@ -50,9 +50,11 @@ func newFakeNetease(t *testing.T) *fakeNetease {
 		}
 		switch r.URL.Path {
 		case "/cloudsearch":
+			// 真实 /cloudsearch 为新版 eapi 形态(ar/al/dt)；另一条用旧形态
+			// (artists/album/duration)，覆盖双形态兼容。
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"result":{"songs":[` +
-				`{"id":167855,"name":"有何不可","artists":[{"name":"许嵩"}],"album":{"name":"自定义"},"duration":240000},` +
+				`{"id":167855,"name":"有何不可","ar":[{"name":"许嵩"}],"al":{"name":"自定义"},"dt":240000},` +
 				`{"id":186016,"name":"晴天","artists":[{"name":"周杰伦"}],"album":{"name":"叶惠美"},"duration":269000}]}}`))
 		case "/song/url/v1":
 			id := r.URL.Query().Get("id")
