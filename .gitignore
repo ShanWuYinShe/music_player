@@ -1,3 +1,7 @@
+# IDE 与本地配置（music_app 子目录的构建产物见 music_app/.gitignore）
+/.idea/
+/local.properties
+
 # AI 会话工作目录
 /.workwork/
 /.worktrees/
