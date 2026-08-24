@@ -59,7 +59,7 @@ export function songsUrl(baseUrl: string, query: string = ''): string {
  * 解析曲目列表响应为 SongRecord 列表：
  * - id 加 online: 前缀隔离本地曲库 id 空间
  * - fileName 存流媒体绝对地址（PlayerController 按 http 前缀走网络播放分支）
- * - durationMs 服务端恒为 0（不做音频头解析），prepared 后由客户端回填
+ * - durationMs 网络源带真实时长；本地曲库恒为 0，prepared 后由客户端回填
  * 非法响应（空串/非 JSON/缺 songs）返回空数组，不抛异常。
  */
 export function parseOnlineSongs(baseUrl: string, body: string): SongRecord[] {

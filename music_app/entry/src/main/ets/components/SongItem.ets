@@ -56,9 +56,9 @@ export struct SongItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      // 当前播放标记 + 时长
+      // 当前播放标记 + 时长（图标语义与 MiniPlayerBar 一致：播放中显示暂停符）
       if (this.isCurrent) {
-        SymbolGlyph(this.isPlaying ? $r('sys.symbol.play_fill') : $r('sys.symbol.pause_fill'))
+        SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
           .fontSize(16)
           .fontColor([CURRENT_COLOR])
       }

@@ -214,7 +214,7 @@ struct Index {
                   }
                 }
               })
-            }, (song: SongRecord) => song.id)
+            }, (song: SongRecord) => `${song.id}#${song.duration}`)
           }
           .width('100%')
           .layoutWeight(1)
