@@ -207,7 +207,7 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// 网络源结果追加在本地匹配之后;q 为空时不拉网络源(列表语义仍是"曲库")。
+	// 网络源结果追加在本地匹配之后;q 为空时不拉网络搜索(列表语义仍是"曲库")。
 	if query != "" && s.netease.enabled() && len(matched) < limit {
 		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
 		online, err := s.netease.search(ctx, query, limit-len(matched))
@@ -218,6 +218,13 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 		} else {
 			matched = append(matched, online...)
 		}
+	}
+	// 空曲库开箱体验:q 为空且本地一首都没有时,回填网易「新歌速递」推荐,
+	// 让"在线"列表开箱即有歌(用户上传过音频后恢复纯曲库语义)。
+	if query == "" && len(matched) == 0 && s.netease.enabled() {
+		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
+		matched = s.netease.discover(ctx)
+		cancel()
 	}
 	total := len(matched)
 	if len(matched) > limit {

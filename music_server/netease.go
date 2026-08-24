@@ -57,6 +57,10 @@ type neteaseClient struct {
 	fileRead     time.Time
 	fileValue    string
 	hasFileValue bool
+
+	discoverMu    sync.Mutex
+	discoverCache []Song
+	discoverAt    time.Time
 }
 
 // cookieReloadInterval 是 cookie 文件的重读检查间隔。
@@ -163,6 +167,57 @@ type songURLData struct {
 		URL  string `json:"url"`
 		Code int    `json:"code"`
 	} `json:"data"`
+}
+
+// topSongResp 是上游 /top/song(新歌速递)响应的用到的子集。
+type topSongResp struct {
+	Data []struct {
+		ID       int64 `json:"id"`
+		Name     string
+		Artists  []struct{ Name string } `json:"artists"`
+		Album    struct{ Name string }   `json:"album"`
+		Duration int64                   `json:"duration"`
+	} `json:"data"`
+}
+
+// discover 返回网易「新歌速递」推荐曲目(匿名可用),供空曲库时回填在线
+// 列表,让"在线"开箱即有歌。结果缓存 60s(与曲库扫描 TTL 一致),上游
+// 失败降级为空(不影响请求成功)。
+func (c *neteaseClient) discover(ctx context.Context) []Song {
+	c.discoverMu.Lock()
+	if time.Since(c.discoverAt) < scanTTL && c.discoverCache != nil {
+		defer c.discoverMu.Unlock()
+		return c.discoverCache
+	}
+	c.discoverMu.Unlock()
+
+	var resp topSongResp
+	if err := c.getJSON(ctx, "/top/song", &resp); err != nil {
+		log.Printf("netease discover: %v", err)
+		return nil
+	}
+	songs := make([]Song, 0, len(resp.Data))
+	for _, item := range resp.Data {
+		artists := make([]string, 0, len(item.Artists))
+		for _, a := range item.Artists {
+			artists = append(artists, a.Name)
+		}
+		songs = append(songs, Song{
+			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, item.ID),
+			Title:      item.Name,
+			Artist:     strings.Join(artists, "/"),
+			Album:      item.Album.Name,
+			DurationMs: item.Duration,
+			Format:     "mp3",
+			Source:     "netease",
+		})
+	}
+
+	c.discoverMu.Lock()
+	c.discoverCache = songs
+	c.discoverAt = time.Now()
+	c.discoverMu.Unlock()
+	return songs
 }
 
 // search 调上游 /cloudsearch 并映射为对外 Song(id 加 ne_ 前缀)。

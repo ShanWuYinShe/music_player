@@ -273,3 +273,62 @@ func TestNeteaseCookieFallback(t *testing.T) {
 		t.Fatalf("expect env fallback, got %v", gotCookie.Load())
 	}
 }
+
+// 空曲库回填:q 为空且本地为空时返回网易新歌推荐;本地有曲库时不掺入。
+func TestNeteaseDiscoverBackfill(t *testing.T) {
+	f := newFakeNetease(t)
+	// 假上游补 /top/song。
+	handler := f.api.Config.Handler
+	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/top/song" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":111,"name":"新歌A","artists":[{"name":"歌手甲"}],"album":{"name":"专辑"},"duration":200000}]}`))
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
+
+	// 空曲库:q 为空 → 回填推荐。
+	server := newTestServerWithNetease(t, f.api.URL)
+	server.library = nil // 置空曲库
+	server.byID = map[string]songFile{}
+	rec := httptest.NewRecorder()
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
+	var resp struct {
+		Total int    `json:"total"`
+		Songs []Song `json:"songs"`
+	}
+	if err := decodeJSONBody(t, rec.Body.String(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Total != 1 || resp.Songs[0].ID != "ne_111" || resp.Songs[0].Source != "netease" {
+		t.Fatalf("expect discover backfill, got %s", rec.Body.String())
+	}
+
+	// 本地有曲库:q 为空 → 只回本地,不掺推荐。
+	server2 := newTestServerWithNetease(t, f.api.URL)
+	rec = httptest.NewRecorder()
+	server2.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
+	resp = struct {
+		Total int    `json:"total"`
+		Songs []Song `json:"songs"`
+	}{}
+	if err := decodeJSONBody(t, rec.Body.String(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Total == 0 || resp.Songs[0].Source == "netease" {
+		t.Fatalf("local library should stay pure, got %s", rec.Body.String())
+	}
+
+	// 上游 /top/song 失败:降级返回空列表(200),不报错。
+	f2 := newFakeNetease(t)
+	f2.api.Close()
+	server3 := newTestServerWithNetease(t, f2.api.URL)
+	server3.library = nil
+	server3.byID = map[string]songFile{}
+	rec = httptest.NewRecorder()
+	server3.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("degraded discover must still 200, got %d", rec.Code)
+	}
+}
