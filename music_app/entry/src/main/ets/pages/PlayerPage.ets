@@ -30,28 +30,37 @@ export struct PlayerPage {
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
-    this.applySystemBarLight(true);
+    this.applyImmersion(true);
   }
 
   aboutToDisappear(): void {
-    this.applySystemBarLight(false);
+    this.applyImmersion(false);
   }
 
-  /** 深色可视化底配浅色系统栏字；离开时按应用深浅模式恢复 */
-  private applySystemBarLight(light: boolean): void {
+  /**
+   * 播放页沉浸态切换：系统栏背景、window 背景与可视化深底同色，
+   * 字色切浅；离开时按应用深浅模式恢复（bar 色对齐 page_bg，避免
+   * 转场或三键导航栏露出异色）。
+   */
+  private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
     if (ctx === null) {
       return;
     }
     window.getLastWindow(ctx).then((win) => {
       const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
-      const color = light || dark ? '#F3EFE4' : '#26221B';
+      // 与可视化近黑底（hue 微调 L0.065）同族的暖黑
+      const bg = enter ? '#161310' : (dark ? '#16140F' : '#F6F3EC');
+      const fg = enter || dark ? '#F3EFE4' : '#26221B';
+      win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
-        statusBarContentColor: color,
-        navigationBarContentColor: color
+        statusBarColor: bg,
+        navigationBarColor: bg,
+        statusBarContentColor: fg,
+        navigationBarContentColor: fg
       });
     }).catch((err: Error) => {
-      console.info(`set system bar failed: ${err.message}`);
+      console.info(`apply immersion failed: ${err.message}`);
     });
   }
 

@@ -17,7 +17,7 @@ import {
 } from '../common/VisualizerCore';
 
 /** 离屏画布最长边上限：全屏模式下降采样，反馈拖尾本身柔和，拉伸显示无损观感 */
-const OFFSCREEN_MAX_DIM = 720;
+const OFFSCREEN_MAX_DIM = 500;
 /** 暂停后收敛动画时长（ms），之后停帧保留静帧 */
 const FADE_MS = 900;
 
@@ -334,26 +334,41 @@ export struct VisualizerView {
     ctx.fill();
   }
 
+  /** Canvas onReady 公共初始化：按内部分辨率建双离屏画布 */
+  private initOffscreens(): void {
+    const wPx = this.displayCtx.width;
+    const hPx = this.displayCtx.height;
+    if (wPx <= 0 || hPx <= 0) {
+      return;
+    }
+    const scale = this.variant === 'mini'
+      ? 1
+      : Math.min(1, OFFSCREEN_MAX_DIM / Math.max(wPx, hPx));
+    this.offW = Math.max(2, Math.round(wPx * scale));
+    this.offH = Math.max(2, Math.round(hPx * scale));
+    // 两个离屏画布各自独立 settings，避免共享状态
+    this.offA = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
+    this.offB = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
+    this.ready = true;
+    this.syncState();
+  }
+
   build() {
-    Canvas(this.displayCtx)
-      .width('100%')
-      .height('100%')
-      .onReady(() => {
-        const wPx = this.displayCtx.width;
-        const hPx = this.displayCtx.height;
-        if (wPx <= 0 || hPx <= 0) {
-          return;
-        }
-        const scale = this.variant === 'mini'
-          ? 1
-          : Math.min(1, OFFSCREEN_MAX_DIM / Math.max(wPx, hPx));
-        this.offW = Math.max(2, Math.round(wPx * scale));
-        this.offH = Math.max(2, Math.round(hPx * scale));
-        // 两个离屏画布各自独立 settings，避免共享状态
-        this.offA = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
-        this.offB = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
-        this.ready = true;
-        this.syncState();
-      })
+    if (this.variant === 'mini') {
+      Canvas(this.displayCtx)
+        .width('100%')
+        .height('100%')
+        .onReady(() => this.initOffscreens())
+    } else {
+      // full：显示画布布局取 1/3 尺寸再 scale 放大铺满——内部分辨率与每帧
+      // 光栅化面积降为 1/9（真机全分辨率 CPU 光栅化一帧数百毫秒），合成拉伸
+      // 由 GPU 完成，拖尾画面本身柔和、无肉眼损失；33.33%×3 的 0.01% 缺口
+      // 不足 0.2px 且与 window 深底同色，不可见
+      Canvas(this.displayCtx)
+        .width('33.33%')
+        .height('33.33%')
+        .scale({ x: 3, y: 3, centerX: '0%', centerY: '0%' })
+        .onReady(() => this.initOffscreens())
+    }
   }
 }
