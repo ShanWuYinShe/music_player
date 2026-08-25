@@ -192,6 +192,21 @@ export struct VisualizerView {
 
     active.globalCompositeOperation = mini ? 'source-over' : 'lighter';
     active.globalAlpha = 1;
+    if (!mini) {
+      // 全屏氛围底光：内圈保亮 + 平缓三档衰减（lighter 叠加不遮反馈内容），
+      // 消灭图形间隙与画面上下的死黑区，整屏保持光的流动感
+      const hue = this.hueBase(t);
+      const glowR = Math.max(W, H) * (0.66 + 0.30 * beat);
+      const c0 = hslToRgb(hue, 0.75, 0.16 + 0.10 * beat);
+      const c1 = hslToRgb(hue + 30, 0.7, 0.10);
+      const c2 = hslToRgb(hue + 40, 0.7, 0.05);
+      const grad = active.createRadialGradient(W / 2, H * 0.46, glowR * 0.32, W / 2, H * 0.46, glowR);
+      grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
+      grad.addColorStop(0.55, `rgb(${c1[0]},${c1[1]},${c1[2]})`);
+      grad.addColorStop(1, `rgb(${c2[0]},${c2[1]},${c2[2]})`);
+      active.fillStyle = grad;
+      active.fillRect(0, 0, W, H);
+    }
     if (preset === 1) {
       this.drawRadial(active, t, beat, bars, W, H);
     } else if (preset === 2) {
@@ -227,7 +242,7 @@ export struct VisualizerView {
     return (t * 0.02) % 360 + (this.seed % 360);
   }
 
-  /** preset 0：水平镜像波形带（MilkDrop 经典画面），多层相位错开叠加发光；
+  /** preset 0：多条波形带竖向分区摆动铺满全屏（MilkDrop 经典画面）；
    *  mini 变体为单色金光带：横向渐变两端渐隐，融入卡片 */
   private drawWaves(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
@@ -235,10 +250,11 @@ export struct VisualizerView {
     const lanes = mini ? 2 : 3;
     const step = Math.max(4, Math.floor(W / 90));
     for (let k = 0; k < lanes; k++) {
-      // mini 振幅用满条高，full 大幅摆动铺满竖向画面
+      // mini 振幅用满条高；full 三条带中心分布在上/中/下三个区，整屏摆动
+      const cy = mini ? H / 2 : H * (0.26 + 0.24 * k);
       const amp = mini
         ? H * (0.36 + 0.10 * k) * (0.6 + 0.4 * beat)
-        : H * (0.22 + 0.13 * k) * (0.5 + 0.5 * beat);
+        : H * 0.15 * (0.55 + 0.45 * beat);
       const phase = this.beatPhase * 6.28 + k * 2.1;
       const dir = k % 2 === 0 ? 1 : -1;
       ctx.beginPath();
@@ -248,7 +264,7 @@ export struct VisualizerView {
         const env = Math.sin(Math.PI * p);
         const yOff = bars[bi] * amp * env *
           Math.sin(p * 6.28 * (1 + k * 0.4) + phase + t * 0.0024 * (k + 1));
-        const y = H / 2 + yOff * dir;
+        const y = cy + yOff * dir;
         if (x === 0) {
           ctx.moveTo(x, y);
         } else {
@@ -284,20 +300,20 @@ export struct VisualizerView {
     }
   }
 
-  /** preset 1：径向频谱花环，内缘随节拍呼吸、整体缓慢旋转，尺寸放大至弥漫大半屏 */
+  /** preset 1：径向频谱花环，中心近屏中、触须伸至屏幕边缘，整体缓慢旋转 */
   private drawRadial(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const cx = W / 2;
-    const cy = H * 0.44;
+    const cy = H * 0.47;
     const m = Math.min(W, H);
-    const r0 = m * 0.20 * (1 + 0.20 * beat);
+    const r0 = m * 0.28 * (1 + 0.20 * beat);
     const rot = t * 0.00025;
     const n = bars.length;
     ctx.lineWidth = 1.5 + 1.5 * beat;
     for (let i = 0; i < n; i++) {
       const angle = rot + i * 6.2831853 / n;
       const inner = r0 + m * 0.02 * Math.sin(angle * 3 + t * 0.001);
-      const outer = inner + bars[i] * m * (0.14 + 0.26 * beat);
+      const outer = inner + bars[i] * m * (0.22 + 0.38 * beat);
       ctx.beginPath();
       ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
       ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
@@ -311,13 +327,13 @@ export struct VisualizerView {
     ctx.stroke();
   }
 
-  /** preset 2：放射星爆，长线长度随频段铺满大半屏，色相快速漂移 */
+  /** preset 2：放射星爆，长线伸至屏幕边缘，色相快速漂移 */
   private drawBurst(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const cx = W / 2;
-    const cy = H * 0.44;
+    const cy = H * 0.47;
     const m = Math.min(W, H);
-    const maxR = m * (0.42 + 0.30 * beat);
+    const maxR = m * (0.55 + 0.35 * beat);
     const n = bars.length;
     const rot = -t * 0.00018;
     for (let i = 0; i < n; i++) {
@@ -362,10 +378,11 @@ export struct VisualizerView {
         .height('100%')
         .onReady(() => this.initOffscreens())
     } else {
-      // full：全屏容器保证画布布局基点在屏幕原点（配合外层 expandSafeArea
-      // 铺到系统栏下）；内部显示画布布局取 1/4 尺寸再 scale(4) 放大铺满
-      // ——内部分辨率与每帧光栅化面积降为 1/16，合成拉伸由 GPU 完成
-      Stack() {
+      // full：全屏容器自身扩展进系统栏（不依赖外层传导）；子画布必须从
+      // 容器左上角布局（Stack 默认居中会把 scale 放大后的画面推偏、顶部
+      // 露出 window 兜底色），内部显示画布布局取 1/4 尺寸再 scale(4)
+      // 放大铺满——内部分辨率与每帧光栅化面积降为 1/16，合成拉伸由 GPU 完成
+      Stack({ alignContent: Alignment.TopStart }) {
         Canvas(this.displayCtx)
           .width('25%')
           .height('25%')
@@ -374,6 +391,7 @@ export struct VisualizerView {
       }
       .width('100%')
       .height('100%')
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     }
   }
 }
