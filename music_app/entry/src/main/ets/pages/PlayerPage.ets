@@ -5,6 +5,7 @@ import { SongRecord } from '../model/Song';
 import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
+import { VisualizerView } from '../components/VisualizerView';
 
 const COVER_SIZE = 300;
 const SPIN_STEP = 0.6; // 每 tick 旋转角度，配合 animateTo 平滑衔接
@@ -53,20 +54,20 @@ export struct PlayerPage {
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      // 沉浸背景：封面放大模糊（无封面时用弱色占位），延伸至系统栏下方
+      // 可视化底景：MilkDrop 风格频谱流动层，位于封面模糊层之下
+      VisualizerView({ player: this.player, variant: 'full' })
+        .width('100%')
+        .height('100%')
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+      // 沉浸背景：有封面时封面模糊叠于可视化之上混合色调；无封面时可视化直接作背景
       if (this.player.currentSong && this.player.currentSong.coverPath !== '') {
         Image(this.player.currentSong.coverPath)
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
           .blur(60)
-          .opacity(0.35)
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-      } else {
-        Column()
-          .width('100%')
-          .height('100%')
-          .backgroundColor($r('app.color.surface_alt'))
+          .opacity(0.28)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
       }
 
@@ -75,13 +76,13 @@ export struct PlayerPage {
         Row() {
           SymbolGlyph($r('sys.symbol.chevron_left'))
             .fontSize(24)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .padding(12)
             .onClick(() => this.navPathStack.pop())
           Blank()
           Text(this.player.currentSong ? this.player.currentSong.title : '')
             .fontSize(15)
-            .fontColor($r('app.color.ink_soft'))
+            .fontColor($r('app.color.viz_fg_soft'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: '52%' })
@@ -89,7 +90,7 @@ export struct PlayerPage {
           Blank()
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .padding(12)
             .onClick(() => {
               console.info('queue button clicked');
@@ -110,19 +111,19 @@ export struct PlayerPage {
               .height(COVER_SIZE)
               .borderRadius(24)
               .objectFit(ImageFit.Cover)
-              .border({ width: 0.5, color: $r('app.color.line') })
+              .border({ width: 0.5, color: $r('app.color.viz_line') })
               .shadow({ radius: 40, color: 'rgba(0,0,0,0.25)', offsetY: 8 })
               .rotate({ angle: this.spinAngle })
           } else {
             Column() {
               SymbolGlyph($r('sys.symbol.music_note_list'))
                 .fontSize(96)
-                .fontColor([$r('app.color.ink_faint')])
+                .fontColor([$r('app.color.viz_fg')])
             }
             .width(COVER_SIZE)
             .height(COVER_SIZE)
             .borderRadius(24)
-            .backgroundColor($r('app.color.surface_alt'))
+            .backgroundColor($r('app.color.viz_surface'))
             .justifyContent(FlexAlign.Center)
             .shadow({ radius: 40, color: 'rgba(0,0,0,0.12)', offsetY: 8 })
           }
@@ -133,12 +134,12 @@ export struct PlayerPage {
           Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.ink'))
+            .fontColor($r('app.color.viz_fg'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(this.player.currentSong ? this.player.currentSong.artist : '')
             .fontSize(15)
-            .fontColor($r('app.color.ink_soft'))
+            .fontColor($r('app.color.viz_fg_soft'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -153,7 +154,7 @@ export struct PlayerPage {
             style: SliderStyle.OutSet
           })
             .selectedColor($r('app.color.accent'))
-            .trackColor($r('app.color.line'))
+            .trackColor($r('app.color.viz_line'))
             .blockColor($r('app.color.accent'))
             .enabled(this.player.isPrepared)
             .onChange((value: number, mode: SliderChangeMode) => {
@@ -167,11 +168,11 @@ export struct PlayerPage {
           Row() {
             Text(formatTime(this.sliderValue()))
               .fontSize(12)
-              .fontColor($r('app.color.ink_faint'))
+              .fontColor($r('app.color.viz_fg_faint'))
             Blank()
             Text(formatTime(this.player.duration))
               .fontSize(12)
-              .fontColor($r('app.color.ink_faint'))
+              .fontColor($r('app.color.viz_fg_faint'))
           }
           .width('100%')
           .padding({ left: 4, right: 4 })
@@ -183,7 +184,7 @@ export struct PlayerPage {
         Row({ space: 30 }) {
           SymbolGlyph(playModeSymbol(this.player.playMode))
             .fontSize(26)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .onClick(() => {
               this.player.cyclePlayMode();
               promptAction.showToast({ message: playModeLabel(this.player.playMode) });
@@ -191,7 +192,7 @@ export struct PlayerPage {
 
           SymbolGlyph($r('sys.symbol.backward_end_fill'))
             .fontSize(34)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .onClick(() => this.player.previous())
 
           Stack({ alignContent: Alignment.Center }) {
@@ -202,18 +203,18 @@ export struct PlayerPage {
           .width(72)
           .height(72)
           .borderRadius(36)
-          .backgroundColor($r('app.color.ink'))
-          .shadow({ radius: 16, color: 'rgba(0,0,0,0.15)' })
+          .backgroundColor($r('app.color.accent'))
+          .shadow({ radius: 16, color: 'rgba(0,0,0,0.35)', offsetY: 2 })
           .onClick(() => this.player.togglePlay())
 
           SymbolGlyph($r('sys.symbol.forward_end_fill'))
             .fontSize(34)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .onClick(() => this.player.next())
 
           SymbolGlyph(this.isFavorite() ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
             .fontSize(26)
-            .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.ink')])
+            .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.viz_fg')])
             .onClick(() => this.toggleFavorite())
         }
         .margin({ top: 22 })
@@ -222,7 +223,7 @@ export struct PlayerPage {
         Row({ space: 10 }) {
           SymbolGlyph(this.volumeIcon())
             .fontSize(20)
-            .fontColor([$r('app.color.ink')])
+            .fontColor([$r('app.color.viz_fg')])
             .onClick(() => this.toggleMute())
 
           Slider({
@@ -233,7 +234,7 @@ export struct PlayerPage {
           })
             .layoutWeight(1)
             .selectedColor($r('app.color.accent'))
-            .trackColor($r('app.color.line'))
+            .trackColor($r('app.color.viz_line'))
             .blockColor($r('app.color.accent'))
             .onChange((value: number, mode: SliderChangeMode) => {
               if (mode === SliderChangeMode.Moving || mode === SliderChangeMode.End) {

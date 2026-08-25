@@ -1,10 +1,13 @@
 import { PlayerController } from '../player/PlayerController';
+import { VisualizerView } from './VisualizerView';
 
 const BAR_HEIGHT = 62;
+/** 底部迷你可视化光带高度 */
+const MINI_VIZ_HEIGHT = 20;
 
 /**
  * 底部迷你播放条：封面 + 歌名 + 播放/暂停 + 下一首，顶部细线为实时播放进度，
- * 点击整条进入播放页。
+ * 底部为 MilkDrop 风格迷你可视化光带，点击整条进入播放页。
  */
 @ComponentV2
 export struct MiniPlayerBar {
@@ -24,6 +27,13 @@ export struct MiniPlayerBar {
       // clip 使进度细线跟随卡片圆角
       Column() {
         Stack({ alignContent: Alignment.TopStart }) {
+          // 底部迷你可视化光带（先声明垫底，position 定位到卡片底部）
+          VisualizerView({ player: this.player, variant: 'mini' })
+            .width('100%')
+            .height(MINI_VIZ_HEIGHT)
+            .position({ x: 0, y: BAR_HEIGHT - MINI_VIZ_HEIGHT })
+            .opacity(0.9)
+
           Row({ space: 12 }) {
             if (this.player.currentSong?.coverPath !== '') {
               Image(this.player.currentSong?.coverPath ?? '')

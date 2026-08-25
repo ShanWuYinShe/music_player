@@ -43,6 +43,26 @@
     {
       "name": "line",
       "value": "#E7E2D4"
+    },
+    {
+      "name": "viz_fg",
+      "value": "#F3EFE4"
+    },
+    {
+      "name": "viz_fg_soft",
+      "value": "#C6C0B0"
+    },
+    {
+      "name": "viz_fg_faint",
+      "value": "#8E8878"
+    },
+    {
+      "name": "viz_line",
+      "value": "#464135"
+    },
+    {
+      "name": "viz_surface",
+      "value": "#221E17"
     }
   ]
 }
