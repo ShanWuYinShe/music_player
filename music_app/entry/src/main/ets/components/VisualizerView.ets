@@ -165,11 +165,12 @@ export struct VisualizerView {
     const H = this.offH;
 
     active.clearRect(0, 0, W, H);
-    // full：近黑沉浸底（色相随乐曲微调、低饱和接近中性黑，与 window 兜底色
-    // 无肉眼色差），全屏铺满含系统栏；mini 叠在卡片 surface 上保持透明底
+    // full：底色固定为 window/系统栏兜底色 #161310（rgb 22,19,16），
+    // 画面边缘经渐晕收敛回同色，顶底区域无论露出哪层都无色差；
+    // mini 叠在卡片 surface 上保持透明底
+    const UNIFY_BG = 'rgb(22,19,16)';
     if (this.variant !== 'mini') {
-      const bg = hslToRgb(this.hueBase(t), 0.3, 0.062);
-      active.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+      active.fillStyle = UNIFY_BG;
       active.fillRect(0, 0, W, H);
     }
     // 反馈层：上一帧放大重绘，旧画面向外流动并渐隐；较长尾让光流弥漫全屏
@@ -193,17 +194,16 @@ export struct VisualizerView {
     active.globalCompositeOperation = mini ? 'source-over' : 'lighter';
     active.globalAlpha = 1;
     if (!mini) {
-      // 全屏氛围底光：内圈保亮 + 平缓三档衰减（lighter 叠加不遮反馈内容），
-      // 消灭图形间隙与画面上下的死黑区，整屏保持光的流动感
+      // 全屏氛围底光：中心彩色呼吸、向外衰减到完全透明（lighter 叠加），
+      // 光只留在画面中域，边缘回归兜底色
       const hue = this.hueBase(t);
       const glowR = Math.max(W, H) * (0.66 + 0.30 * beat);
       const c0 = hslToRgb(hue, 0.75, 0.16 + 0.10 * beat);
       const c1 = hslToRgb(hue + 30, 0.7, 0.10);
-      const c2 = hslToRgb(hue + 40, 0.7, 0.05);
       const grad = active.createRadialGradient(W / 2, H * 0.46, glowR * 0.32, W / 2, H * 0.46, glowR);
       grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
       grad.addColorStop(0.55, `rgb(${c1[0]},${c1[1]},${c1[2]})`);
-      grad.addColorStop(1, `rgb(${c2[0]},${c2[1]},${c2[2]})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
       active.fillStyle = grad;
       active.fillRect(0, 0, W, H);
     }
@@ -215,6 +215,20 @@ export struct VisualizerView {
       this.drawWaves(active, t, beat, bars, W, H);
     }
     active.globalCompositeOperation = 'source-over';
+    if (!mini) {
+      // 渐晕收边：四周向画面中心渐透的反向径向渐变，把边缘强制收敛回
+      // 兜底色，与系统栏区域（window 背景）完全同色，消除顶底割裂
+      const cx = W / 2;
+      const cy = H * 0.46;
+      const inner = Math.max(W, H) * 0.40;
+      const outer = Math.sqrt(W * W + H * H) / 2;
+      const vg = active.createRadialGradient(cx, cy, inner, cx, cy, outer);
+      vg.addColorStop(0, 'rgba(22,19,16,0)');
+      vg.addColorStop(0.55, 'rgba(22,19,16,0.55)');
+      vg.addColorStop(1, 'rgb(22,19,16)');
+      active.fillStyle = vg;
+      active.fillRect(0, 0, W, H);
+    }
 
     const bmp = active.transferToImageBitmap();
     this.displayCtx.clearRect(0, 0, this.displayCtx.width, this.displayCtx.height);
