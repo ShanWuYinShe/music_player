@@ -59,10 +59,6 @@
     {
       "name": "viz_line",
       "value": "#38342B"
-    },
-    {
-      "name": "viz_surface",
-      "value": "#241F18"
     }
   ]
 }

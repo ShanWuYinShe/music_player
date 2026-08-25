@@ -1,4 +1,5 @@
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
+import { ConfigurationConstant } from '@kit.AbilityKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -7,10 +8,6 @@ import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
 import { VisualizerView } from '../components/VisualizerView';
 
-const COVER_SIZE = 300;
-const SPIN_STEP = 0.6; // 每 tick 旋转角度，配合 animateTo 平滑衔接
-const SPIN_INTERVAL = 100;
-
 /** 队列表项 */
 interface QueueEntry {
   song: SongRecord;
@@ -18,8 +15,9 @@ interface QueueEntry {
 }
 
 /**
- * 播放页：沉浸背景 / 旋转封面 / 进度与音量 / 收藏与定时 /
- * 主控制区 / 播放队列半模态。
+ * 播放页：全屏 MilkDrop 可视化背景（无封面卡片，控件浮于其上）/
+ * 进度与音量 / 收藏与定时 / 主控制区 / 播放队列半模态。
+ * 进入时系统栏字色切浅色以融合深底，离开时按深浅模式恢复。
  */
 @ComponentV2
 export struct PlayerPage {
@@ -27,49 +25,43 @@ export struct PlayerPage {
   @Param navPathStack: NavPathStack = new NavPathStack();
   /** 拖动进度条期间的本地值，避免与 timeUpdate 抖动 */
   @Local dragValue: number = -1;
-  /** 封面旋转角度，播放中由定时器递增 */
-  @Local spinAngle: number = 0;
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
-  private spinTimer: number = -1;
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
-    this.spinTimer = setInterval(() => {
-      if (this.player.isPlaying) {
-        // animateTo 让相邻两帧间线性过渡，旋转更顺滑
-        this.getUIContext().animateTo({ duration: SPIN_INTERVAL, curve: Curve.Linear }, () => {
-          this.spinAngle = (this.spinAngle + SPIN_STEP * (SPIN_INTERVAL / 100)) % 360;
-        });
-      }
-    }, SPIN_INTERVAL);
+    this.applySystemBarLight(true);
   }
 
   aboutToDisappear(): void {
-    if (this.spinTimer >= 0) {
-      clearInterval(this.spinTimer);
-      this.spinTimer = -1;
+    this.applySystemBarLight(false);
+  }
+
+  /** 深色可视化底配浅色系统栏字；离开时按应用深浅模式恢复 */
+  private applySystemBarLight(light: boolean): void {
+    const ctx = appStore.abilityContext;
+    if (ctx === null) {
+      return;
     }
+    window.getLastWindow(ctx).then((win) => {
+      const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+      const color = light || dark ? '#F3EFE4' : '#26221B';
+      win.setWindowSystemBarProperties({
+        statusBarContentColor: color,
+        navigationBarContentColor: color
+      });
+    }).catch((err: Error) => {
+      console.info(`set system bar failed: ${err.message}`);
+    });
   }
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      // 可视化底景：MilkDrop 风格频谱流动层，位于封面模糊层之下
+      // 全屏可视化底景：MilkDrop 风格频谱流动层，延伸至系统栏下自然融合
       VisualizerView({ player: this.player, variant: 'full' })
         .width('100%')
         .height('100%')
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-      // 沉浸背景：有封面时封面模糊叠于可视化之上混合色调；无封面时可视化直接作背景
-      if (this.player.currentSong && this.player.currentSong.coverPath !== '') {
-        Image(this.player.currentSong.coverPath)
-          .width('100%')
-          .height('100%')
-          .objectFit(ImageFit.Cover)
-          .blur(60)
-          .opacity(0.28)
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-      }
 
       Column() {
         // 顶部栏：返回 + 当前歌名 + 队列入口
@@ -103,33 +95,7 @@ export struct PlayerPage {
 
         Blank()
 
-        // 旋转封面
-        Stack() {
-          if (this.player.currentSong && this.player.currentSong.coverPath !== '') {
-            Image(this.player.currentSong.coverPath)
-              .width(COVER_SIZE)
-              .height(COVER_SIZE)
-              .borderRadius(24)
-              .objectFit(ImageFit.Cover)
-              .border({ width: 0.5, color: $r('app.color.viz_line') })
-              .shadow({ radius: 40, color: 'rgba(0,0,0,0.25)', offsetY: 8 })
-              .rotate({ angle: this.spinAngle })
-          } else {
-            Column() {
-              SymbolGlyph($r('sys.symbol.music_note_list'))
-                .fontSize(96)
-                .fontColor([$r('app.color.viz_fg')])
-            }
-            .width(COVER_SIZE)
-            .height(COVER_SIZE)
-            .borderRadius(24)
-            .backgroundColor($r('app.color.viz_surface'))
-            .justifyContent(FlexAlign.Center)
-            .shadow({ radius: 40, color: 'rgba(0,0,0,0.12)', offsetY: 8 })
-          }
-        }
-
-        // 歌名 / 歌手
+        // 歌名 / 歌手（悬浮于全屏可视化之上）
         Column({ space: 6 }) {
           Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
             .fontSize(22)

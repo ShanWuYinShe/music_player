@@ -32,6 +32,8 @@ export struct VisualizerView {
   private offA: OffscreenCanvasRenderingContext2D | null = null;
   private offB: OffscreenCanvasRenderingContext2D | null = null;
   private prevBitmap: ImageBitmap | null = null;
+  /** 上屏位图环形缓冲：显示合成是异步的，立即 close 会被 GPU 采样到脏数据（真机花屏），延迟数帧释放 */
+  private recycle: ImageBitmap[] = [];
   private ds: displaySync.DisplaySync | null = null;
 
   private offW = 0;
@@ -67,6 +69,10 @@ export struct VisualizerView {
       this.prevBitmap.close();
       this.prevBitmap = null;
     }
+    for (const b of this.recycle) {
+      b.close();
+    }
+    this.recycle = [];
   }
 
   @Monitor('player.isPlaying', 'player.currentSongId')
@@ -129,6 +135,10 @@ export struct VisualizerView {
       return;
     }
     const now = Date.now();
+    // 真机高刷屏上 displaySync 可能超预期回调，节流保证实际绘制不超过 30fps
+    if (now - this.lastNow < 30) {
+      return;
+    }
     const dt = Math.min(now - this.lastNow, 66);
     this.lastNow = now;
     const playing = this.player.isPlaying;
@@ -138,29 +148,26 @@ export struct VisualizerView {
     const t = this.playClock;
     const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
     const span = presetAt(t, this.seed);
+    const mini = this.variant === 'mini';
     // mini 变体只保留波形带，小空间内径向/星爆不可辨
-    const preset = this.variant === 'mini' ? 0 : span.index;
+    const preset = mini ? 0 : span.index;
     if (preset !== this.curPreset) {
       this.curPreset = preset;
       this.switchFade = 4;
     }
     this.feedbackSpin += (preset - 1) * 0.0000318 * dt;
 
-    const bars = synthSpectrum(this.seed, t, this.variant === 'mini' ? 24 : 48);
+    const bars = synthSpectrum(this.seed, t, mini ? 24 : 48);
     const active = this.flip ? this.offA : this.offB;
     const W = this.offW;
     const H = this.offH;
 
     active.clearRect(0, 0, W, H);
-    // full：近黑沉浸底（色相随乐曲微调），顶部渐变透出避免系统栏字色不可读；
+    // full：近黑沉浸底（色相随乐曲微调），全屏铺满与系统栏自然融合；
     // mini 叠在卡片 surface 上，保持透明底
     if (this.variant !== 'mini') {
       const bg = hslToRgb(this.hueBase(t), 0.5, 0.065);
-      const grad = active.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, `rgba(${bg[0]},${bg[1]},${bg[2]},0)`);
-      grad.addColorStop(0.09, `rgba(${bg[0]},${bg[1]},${bg[2]},0.94)`);
-      grad.addColorStop(1, `rgba(${bg[0]},${bg[1]},${bg[2]},0.94)`);
-      active.fillStyle = grad;
+      active.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
       active.fillRect(0, 0, W, H);
     }
     // 反馈层：上一帧放大重绘，旧画面向外流动并渐隐
@@ -173,7 +180,7 @@ export struct VisualizerView {
       }
       active.globalAlpha = a;
       active.translate(W / 2, H / 2);
-      const zoom = 1 + (0.016 + 0.020 * beat) * (this.variant === 'mini' ? 0.5 : 1);
+      const zoom = 1 + (0.016 + 0.020 * beat) * (mini ? 0.5 : 1);
       active.scale(zoom, zoom);
       active.rotate(this.feedbackSpin);
       active.translate(-W / 2, -H / 2);
@@ -181,7 +188,7 @@ export struct VisualizerView {
       active.restore();
     }
 
-    active.globalCompositeOperation = 'lighter';
+    active.globalCompositeOperation = mini ? 'source-over' : 'lighter';
     active.globalAlpha = 1;
     if (preset === 1) {
       this.drawRadial(active, t, beat, bars, W, H);
@@ -196,7 +203,14 @@ export struct VisualizerView {
     this.displayCtx.clearRect(0, 0, this.displayCtx.width, this.displayCtx.height);
     this.displayCtx.drawImage(bmp, 0, 0, this.displayCtx.width, this.displayCtx.height);
     if (this.prevBitmap !== null) {
-      this.prevBitmap.close();
+      // prevBitmap 仍被反馈层引用；把已上屏数帧的旧位图延迟回收，避开合成管线
+      this.recycle.push(this.prevBitmap);
+      if (this.recycle.length > 4) {
+        const oldest = this.recycle.shift();
+        if (oldest !== undefined) {
+          oldest.close();
+        }
+      }
     }
     this.prevBitmap = bmp;
     this.flip = !this.flip;
@@ -211,7 +225,8 @@ export struct VisualizerView {
     return (t * 0.02) % 360 + (this.seed % 360);
   }
 
-  /** preset 0：水平镜像波形带（MilkDrop 经典画面），多层相位错开叠加发光 */
+  /** preset 0：水平镜像波形带（MilkDrop 经典画面），多层相位错开叠加发光；
+   *  mini 变体为单色金光带：横向渐变两端渐隐，融入卡片 */
   private drawWaves(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const mini = this.variant === 'mini';
@@ -238,13 +253,30 @@ export struct VisualizerView {
           ctx.lineTo(x, y);
         }
       }
+      if (mini) {
+        // accent 金色调（hue≈42），亮度分层；横向两端渐隐融入卡片
+        const gold = hslToRgb(42, 0.72, k === 0 ? 0.56 : 0.44);
+        const grad = ctx.createLinearGradient(0, 0, W, 0);
+        grad.addColorStop(0, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
+        grad.addColorStop(0.18, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
+        grad.addColorStop(0.82, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
+        grad.addColorStop(1, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2.2 + 1.4 * beat;
+        ctx.stroke();
+        ctx.globalAlpha = 0.22;
+        ctx.lineWidth = 8;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       const hue = this.hueBase(t) + k * 26;
       ctx.strokeStyle = rgbStyle(hslToRgb(hue, 0.92, 0.58 + 0.1 * beat));
-      ctx.lineWidth = mini ? 2.4 + 1.6 * beat : 2.2 + 2.0 * beat;
+      ctx.lineWidth = 2.2 + 2.0 * beat;
       ctx.stroke();
       // 宽描边低透明度一遍，形成光晕
-      ctx.globalAlpha = mini ? 0.35 : 0.32;
-      ctx.lineWidth = mini ? 10 : 14;
+      ctx.globalAlpha = 0.32;
+      ctx.lineWidth = 14;
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -317,9 +349,9 @@ export struct VisualizerView {
           : Math.min(1, OFFSCREEN_MAX_DIM / Math.max(wPx, hPx));
         this.offW = Math.max(2, Math.round(wPx * scale));
         this.offH = Math.max(2, Math.round(hPx * scale));
-        const settings = new RenderingContextSettings(true);
-        this.offA = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, settings);
-        this.offB = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, settings);
+        // 两个离屏画布各自独立 settings，避免共享状态
+        this.offA = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
+        this.offB = new OffscreenCanvasRenderingContext2D(this.offW, this.offH, new RenderingContextSettings(true));
         this.ready = true;
         this.syncState();
       })

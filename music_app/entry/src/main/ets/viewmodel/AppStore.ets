@@ -21,6 +21,8 @@ export class AppStore {
   readonly userData: UserData = new UserData();
   readonly player: PlayerController;
   readonly onlineSource: OnlineSource = new OnlineSource();
+  /** 主 Ability 上下文（页面取 window 设置系统栏样式用） */
+  abilityContext: common.UIAbilityContext | null = null;
   private pref: preferences.Preferences | null = null;
 
   constructor() {
@@ -29,6 +31,7 @@ export class AppStore {
   }
 
   async init(context: common.UIAbilityContext): Promise<void> {
+    this.abilityContext = context;
     this.pref = preferences.getPreferencesSync(context, { name: PREF_NAME });
     this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
     this.userData.init(this.pref);
