@@ -17,9 +17,11 @@ import {
 } from '../common/VisualizerCore';
 
 /** 离屏画布最长边上限：全屏模式下降采样，反馈拖尾本身柔和，拉伸显示无损观感 */
-const OFFSCREEN_MAX_DIM = 500;
+const OFFSCREEN_MAX_DIM = 420;
 /** 暂停后收敛动画时长（ms），之后停帧保留静帧 */
 const FADE_MS = 900;
+/** 绘帧最小间隔：24fps 对拖尾流动观感无感知差异，控制 CPU 总耗 */
+const FRAME_MIN_INTERVAL = 42;
 
 @ComponentV2
 export struct VisualizerView {
@@ -135,8 +137,8 @@ export struct VisualizerView {
       return;
     }
     const now = Date.now();
-    // 真机高刷屏上 displaySync 可能超预期回调，节流保证实际绘制不超过 30fps
-    if (now - this.lastNow < 30) {
+    // 真机高刷屏上 displaySync 可能超预期回调，按 24fps 节流绘制
+    if (now - this.lastNow < FRAME_MIN_INTERVAL) {
       return;
     }
     const dt = Math.min(now - this.lastNow, 66);
@@ -360,14 +362,13 @@ export struct VisualizerView {
         .height('100%')
         .onReady(() => this.initOffscreens())
     } else {
-      // full：显示画布布局取 1/3 尺寸再 scale 放大铺满——内部分辨率与每帧
-      // 光栅化面积降为 1/9（真机全分辨率 CPU 光栅化一帧数百毫秒），合成拉伸
-      // 由 GPU 完成，拖尾画面本身柔和、无肉眼损失；33.33%×3 的 0.01% 缺口
-      // 不足 0.2px 且与 window 深底同色，不可见
+      // full：显示画布布局取 1/4 尺寸再 scale(4) 放大铺满——内部分辨率与每帧
+      // 光栅化面积降为 1/16（真机全分辨率 CPU 光栅化一帧数百毫秒），合成拉伸
+      // 由 GPU 完成；拖尾光带本身柔和，观感优先于分辨率
       Canvas(this.displayCtx)
-        .width('33.33%')
-        .height('33.33%')
-        .scale({ x: 3, y: 3, centerX: '0%', centerY: '0%' })
+        .width('25%')
+        .height('25%')
+        .scale({ x: 4, y: 4, centerX: '0%', centerY: '0%' })
         .onReady(() => this.initOffscreens())
     }
   }
