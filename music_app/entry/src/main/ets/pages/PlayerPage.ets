@@ -38,9 +38,10 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态切换：进入时系统栏背景设透明（canvas 铺满系统栏下透出，
-   * window 深色兜底）、字色切浅；离开时系统栏与 window 恢复 page_bg 色
-   * （避免不透明栏把可视化挡在安全区内形成"矩形画布"观感）。
+   * 播放页沉浸态切换：进入时系统栏背景与 window 背景统一为不透明 #161310
+   * （可视化画面边缘经渐晕收敛到同色，三层同色即无缝，不依赖系统栏透明
+   * 或 canvas 延伸行为——透明色在部分真机导航栏不生效会露系统纯黑）；
+   * 字色切浅，离开时按深浅模式恢复 page_bg 色。
    */
   private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
@@ -53,8 +54,8 @@ export struct PlayerPage {
       const fg = enter || dark ? '#F3EFE4' : '#26221B';
       win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
-        statusBarColor: enter ? '#00000000' : bg,
-        navigationBarColor: enter ? '#00000000' : bg,
+        statusBarColor: bg,
+        navigationBarColor: bg,
         statusBarContentColor: fg,
         navigationBarContentColor: fg
       });
