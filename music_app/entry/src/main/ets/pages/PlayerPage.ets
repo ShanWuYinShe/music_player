@@ -38,9 +38,9 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态切换：系统栏背景、window 背景与可视化深底同色，
-   * 字色切浅；离开时按应用深浅模式恢复（bar 色对齐 page_bg，避免
-   * 转场或三键导航栏露出异色）。
+   * 播放页沉浸态切换：进入时系统栏背景设透明（canvas 铺满系统栏下透出，
+   * window 深色兜底）、字色切浅；离开时系统栏与 window 恢复 page_bg 色
+   * （避免不透明栏把可视化挡在安全区内形成"矩形画布"观感）。
    */
   private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
@@ -49,13 +49,12 @@ export struct PlayerPage {
     }
     window.getLastWindow(ctx).then((win) => {
       const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
-      // 与可视化近黑底（hue 微调 L0.065）同族的暖黑
       const bg = enter ? '#161310' : (dark ? '#16140F' : '#F6F3EC');
       const fg = enter || dark ? '#F3EFE4' : '#26221B';
       win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
-        statusBarColor: bg,
-        navigationBarColor: bg,
+        statusBarColor: enter ? '#00000000' : bg,
+        navigationBarColor: enter ? '#00000000' : bg,
         statusBarContentColor: fg,
         navigationBarContentColor: fg
       });

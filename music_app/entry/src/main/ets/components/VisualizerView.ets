@@ -165,24 +165,24 @@ export struct VisualizerView {
     const H = this.offH;
 
     active.clearRect(0, 0, W, H);
-    // full：近黑沉浸底（色相随乐曲微调），全屏铺满与系统栏自然融合；
-    // mini 叠在卡片 surface 上，保持透明底
+    // full：近黑沉浸底（色相随乐曲微调、低饱和接近中性黑，与 window 兜底色
+    // 无肉眼色差），全屏铺满含系统栏；mini 叠在卡片 surface 上保持透明底
     if (this.variant !== 'mini') {
-      const bg = hslToRgb(this.hueBase(t), 0.5, 0.065);
+      const bg = hslToRgb(this.hueBase(t), 0.3, 0.062);
       active.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
       active.fillRect(0, 0, W, H);
     }
-    // 反馈层：上一帧放大重绘，旧画面向外流动并渐隐
+    // 反馈层：上一帧放大重绘，旧画面向外流动并渐隐；较长尾让光流弥漫全屏
     if (this.prevBitmap !== null) {
       active.save();
-      let a = playing ? 0.965 : 0.90;
+      let a = playing ? 0.972 : 0.90;
       if (this.switchFade > 0) {
         a *= 0.55;
         this.switchFade--;
       }
       active.globalAlpha = a;
       active.translate(W / 2, H / 2);
-      const zoom = 1 + (0.016 + 0.020 * beat) * (mini ? 0.5 : 1);
+      const zoom = 1 + (0.018 + 0.024 * beat) * (mini ? 0.5 : 1);
       active.scale(zoom, zoom);
       active.rotate(this.feedbackSpin);
       active.translate(-W / 2, -H / 2);
@@ -235,10 +235,10 @@ export struct VisualizerView {
     const lanes = mini ? 2 : 3;
     const step = Math.max(4, Math.floor(W / 90));
     for (let k = 0; k < lanes; k++) {
-      // mini 振幅用满条高，full 保持带状居中
+      // mini 振幅用满条高，full 大幅摆动铺满竖向画面
       const amp = mini
         ? H * (0.36 + 0.10 * k) * (0.6 + 0.4 * beat)
-        : H * (0.14 + 0.09 * k) * (0.5 + 0.5 * beat);
+        : H * (0.22 + 0.13 * k) * (0.5 + 0.5 * beat);
       const phase = this.beatPhase * 6.28 + k * 2.1;
       const dir = k % 2 === 0 ? 1 : -1;
       ctx.beginPath();
@@ -284,20 +284,20 @@ export struct VisualizerView {
     }
   }
 
-  /** preset 1：径向频谱花环，内缘随节拍呼吸、整体缓慢旋转 */
+  /** preset 1：径向频谱花环，内缘随节拍呼吸、整体缓慢旋转，尺寸放大至弥漫大半屏 */
   private drawRadial(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const cx = W / 2;
     const cy = H * 0.44;
     const m = Math.min(W, H);
-    const r0 = m * 0.14 * (1 + 0.18 * beat);
+    const r0 = m * 0.20 * (1 + 0.20 * beat);
     const rot = t * 0.00025;
     const n = bars.length;
     ctx.lineWidth = 1.5 + 1.5 * beat;
     for (let i = 0; i < n; i++) {
       const angle = rot + i * 6.2831853 / n;
       const inner = r0 + m * 0.02 * Math.sin(angle * 3 + t * 0.001);
-      const outer = inner + bars[i] * m * (0.08 + 0.16 * beat);
+      const outer = inner + bars[i] * m * (0.14 + 0.26 * beat);
       ctx.beginPath();
       ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
       ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
@@ -311,13 +311,13 @@ export struct VisualizerView {
     ctx.stroke();
   }
 
-  /** preset 2：放射星爆，长线长度随频段，色相快速漂移 */
+  /** preset 2：放射星爆，长线长度随频段铺满大半屏，色相快速漂移 */
   private drawBurst(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const cx = W / 2;
     const cy = H * 0.44;
     const m = Math.min(W, H);
-    const maxR = m * (0.26 + 0.24 * beat);
+    const maxR = m * (0.42 + 0.30 * beat);
     const n = bars.length;
     const rot = -t * 0.00018;
     for (let i = 0; i < n; i++) {
@@ -362,14 +362,18 @@ export struct VisualizerView {
         .height('100%')
         .onReady(() => this.initOffscreens())
     } else {
-      // full：显示画布布局取 1/4 尺寸再 scale(4) 放大铺满——内部分辨率与每帧
-      // 光栅化面积降为 1/16（真机全分辨率 CPU 光栅化一帧数百毫秒），合成拉伸
-      // 由 GPU 完成；拖尾光带本身柔和，观感优先于分辨率
-      Canvas(this.displayCtx)
-        .width('25%')
-        .height('25%')
-        .scale({ x: 4, y: 4, centerX: '0%', centerY: '0%' })
-        .onReady(() => this.initOffscreens())
+      // full：全屏容器保证画布布局基点在屏幕原点（配合外层 expandSafeArea
+      // 铺到系统栏下）；内部显示画布布局取 1/4 尺寸再 scale(4) 放大铺满
+      // ——内部分辨率与每帧光栅化面积降为 1/16，合成拉伸由 GPU 完成
+      Stack() {
+        Canvas(this.displayCtx)
+          .width('25%')
+          .height('25%')
+          .scale({ x: 4, y: 4, centerX: '0%', centerY: '0%' })
+          .onReady(() => this.initOffscreens())
+      }
+      .width('100%')
+      .height('100%')
     }
   }
 }
