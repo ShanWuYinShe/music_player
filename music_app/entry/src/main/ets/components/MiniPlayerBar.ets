@@ -4,8 +4,8 @@ import { VisualizerView } from './VisualizerView';
 const BAR_HEIGHT = 62;
 
 /**
- * 底部迷你播放条：封面 + 歌名 + 频谱/播放 + 下一首，顶部细线为实时播放进度，
- * 播放中按钮位置显示跳动的金色频谱柱，点击整条进入播放页。
+ * 底部迷你播放条：封面 + 歌名 + 播放/暂停 + 下一首，顶部细线为实时播放进度，
+ * 整卡片区垫全宽金色频谱背景（播放中跳动），点击整条进入播放页。
  */
 @ComponentV2
 export struct MiniPlayerBar {
@@ -25,6 +25,12 @@ export struct MiniPlayerBar {
       // clip 使进度细线跟随卡片圆角
       Column() {
         Stack({ alignContent: Alignment.TopStart }) {
+          // 全卡片频谱背景（先声明垫底；固定高度与内容行一致，'100%' 会
+          // 与 Stack 高度互引把迷你条撑高）
+          VisualizerView({ player: this.player, variant: 'mini' })
+            .width('100%')
+            .height(BAR_HEIGHT)
+
           Row({ space: 12 }) {
             if (this.player.currentSong?.coverPath !== '') {
               Image(this.player.currentSong?.coverPath ?? '')
@@ -60,18 +66,10 @@ export struct MiniPlayerBar {
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
 
-            // 播放中按钮位置显示跳动频谱柱（点击暂停），暂停时显示播放图标
-            if (this.player.isPlaying) {
-              VisualizerView({ player: this.player, variant: 'mini' })
-                .width(36)
-                .height(26)
-                .onClick(() => this.player.togglePlay())
-            } else {
-              SymbolGlyph($r('sys.symbol.play_fill'))
-                .fontSize(26)
-                .fontColor([$r('app.color.ink')])
-                .onClick(() => this.player.togglePlay())
-            }
+            SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+              .fontSize(26)
+              .fontColor([$r('app.color.ink')])
+              .onClick(() => this.player.togglePlay())
 
             SymbolGlyph($r('sys.symbol.forward_end_fill'))
               .fontSize(26)

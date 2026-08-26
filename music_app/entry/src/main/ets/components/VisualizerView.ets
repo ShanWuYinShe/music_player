@@ -2,10 +2,12 @@
  * VisualizerView：MilkDrop 风格音乐可视化（@ComponentV2）。
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
- * full：双离屏画布 ping-pong 反馈——上一帧经 blur(3px) + 缩放 + 随节拍
- * 起伏的旋转重绘为基底，锐利边缘随帧指数衰减成色雾，叠加液态光域
- * （metaball，lighter 融合），呈大面积柔和流转的流体色彩。
- * mini：经典频谱柱（金色圆头竖柱），挂于迷你条播放按钮位。
+ * full：双离屏画布 ping-pong 反馈——上一帧按网格分块沿连续正弦流场偏移
+ * 重绘（domain warp 变形，shader 式），叠加 Superformula 超级公式花域
+ * （光滑有机曲线，参数 m/n 由 styleParam 在参数空间慢速漂移演化——
+ * 不预设形态，几个基元函数产生无穷变换；三层自相似缩放呈分形层次，
+ * 色相经域扭曲流动），上屏整帧 blur 柔化，无任何多边形锐边。
+ * mini：全宽金色频谱柱，垫于迷你条卡片底层。
  * 帧驱动 displaySync 限 24fps，暂停后跑约 0.9s 收敛动画即停。
  */
 
@@ -21,6 +23,8 @@ const OFFSCREEN_MAX_DIM = 360;
 const FADE_MS = 900;
 /** 绘帧最小间隔：24fps 对拖尾流动观感无感知差异，控制 CPU 总耗 */
 const FRAME_MIN_INTERVAL = 42;
+/** 风格参数演化周期（ms）：参数空间在此周期间平滑漂移，效果无穷演化 */
+const STYLE_PERIOD = 24000;
 
 @ComponentV2
 export struct VisualizerView {
@@ -146,10 +150,10 @@ export struct VisualizerView {
     const t = this.playClock;
     const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
     const mini = this.variant === 'mini';
-    // 涡流：旋转速度随节拍起伏，画面绕中心持续缓旋
-    this.feedbackSpin += (0.0000095 + 0.0000180 * beat) * dt;
+    // 涡流：旋转只是微弱配角，变形才是主角
+    this.feedbackSpin += (0.0000045 + 0.0000090 * beat) * dt;
 
-    const bars = synthSpectrum(this.seed, t, mini ? 4 : 48);
+    const bars = synthSpectrum(this.seed, t, mini ? 24 : 48);
     const active = this.flip ? this.offA : this.offB;
     const W = this.offW;
     const H = this.offH;
@@ -157,24 +161,47 @@ export struct VisualizerView {
     active.clearRect(0, 0, W, H);
     // full：底色为深暗色，画面边缘与屏幕物理边缘连续；mini 透明底
     if (!mini) {
-      active.fillStyle = 'rgb(22,19,16)';
+      active.fillStyle = 'rgb(12,10,9)';
       active.fillRect(0, 0, W, H);
     }
-    // 反馈层：上一帧经 blur 重绘成柔化拖尾——任何锐利边缘随帧指数衰减成
-    // 色雾（MilkDrop 的"柔"正源于此），叠加缩放+旋转形成涡流涌动
+    // 反馈层：网格流场变形（domain warp）——上一帧按网格分块，每块沿连续
+    // 正弦流场偏移重绘（shader 经典 warp 的 Canvas 近似），叠加微弱缩放
+    // 旋转与衰减，画面被持续揉捏变形而非简单旋转放大
     if (this.prevBitmap !== null) {
       active.save();
-      active.globalAlpha = playing ? (mini ? 0.55 : 0.978) : 0.90;
+      active.globalAlpha = playing ? (mini ? 0.50 : 0.958) : 0.90;
       active.translate(W / 2, H / 2);
-      const zoom = 1 + (0.018 + 0.024 * beat) * (mini ? 0.5 : 1);
+      const zoom = 1 + (0.008 + 0.012 * beat) * (mini ? 0.5 : 1);
       active.scale(zoom, zoom);
       active.rotate(this.feedbackSpin);
       active.translate(-W / 2, -H / 2);
-      if (!mini) {
-        active.filter = 'blur(3px)';
+      if (mini) {
+        active.drawImage(this.prevBitmap, 0, 0, W, H);
+      } else {
+        const GX = 8;
+        const GY = 11;
+        const cw = W / GX;
+        const ch = H / GY;
+        // 流场参数：频率/相位/幅度由种子与慢演化参数决定（见 styleParam）
+        const amp = W * (0.010 + 0.012 * beat) * this.styleParam(1, t, 0.5, 1.5);
+        const k1 = (2.0 + 4.0 * this.styleParam(2, t, 0, 1)) * 6.2831853 / H;
+        const k2 = (1.5 + 3.5 * this.styleParam(3, t, 0, 1)) * 6.2831853 / W;
+        const w1 = 0.00045 + 0.0009 * this.styleParam(4, t, 0, 1);
+        const w2 = 0.00035 + 0.0008 * this.styleParam(5, t, 0, 1);
+        for (let gy = 0; gy < GY; gy++) {
+          for (let gx = 0; gx < GX; gx++) {
+            const x0 = gx * cw;
+            const y0 = gy * ch;
+            const cx = x0 + cw / 2;
+            const cy = y0 + ch / 2;
+            const ox = amp * Math.sin(cy * k1 + t * w1);
+            const oy = amp * Math.sin(cx * k2 - t * w2);
+            // 目标块放大 8% 盖住邻块错位缝，配合上屏 blur 柔化
+            active.drawImage(this.prevBitmap, x0, y0, cw, ch,
+              x0 + ox, y0 + oy, cw * 1.08, ch * 1.08);
+          }
+        }
       }
-      active.drawImage(this.prevBitmap, 0, 0, W, H);
-      active.filter = 'none';
       active.restore();
     }
 
@@ -184,15 +211,15 @@ export struct VisualizerView {
       // 全屏氛围底光：中心彩色呼吸、向外衰减到完全透明（lighter 叠加）
       const hue = this.hueBase(t);
       const glowR = Math.max(W, H) * (0.66 + 0.30 * beat);
-      const c0 = hslToRgb(hue, 0.75, 0.16 + 0.10 * beat);
-      const c1 = hslToRgb(hue + 30, 0.7, 0.10);
+      const c0 = hslToRgb(hue, 0.75, 0.10 + 0.06 * beat);
+      const c1 = hslToRgb(hue + 30, 0.7, 0.06);
       const grad = active.createRadialGradient(W / 2, H * 0.46, glowR * 0.32, W / 2, H * 0.46, glowR);
       grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
       grad.addColorStop(0.55, `rgb(${c1[0]},${c1[1]},${c1[2]})`);
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       active.fillStyle = grad;
       active.fillRect(0, 0, W, H);
-      this.drawLiquid(active, t, beat, bars, W, H);
+      this.drawBlooms(active, t, beat, bars, W, H);
     } else {
       this.drawBars(active, t, beat, bars, W, H);
     }
@@ -200,7 +227,12 @@ export struct VisualizerView {
 
     const bmp = active.transferToImageBitmap();
     this.displayCtx.clearRect(0, 0, this.displayCtx.width, this.displayCtx.height);
+    // 上屏整帧 blur：网格接缝与一切锐边在此柔化（MilkDrop 的"柔"）
+    if (!mini) {
+      this.displayCtx.filter = 'blur(2.5px)';
+    }
     this.displayCtx.drawImage(bmp, 0, 0, this.displayCtx.width, this.displayCtx.height);
+    this.displayCtx.filter = 'none';
     if (this.prevBitmap !== null) {
       // prevBitmap 仍被反馈层引用；把已上屏数帧的旧位图延迟回收，避开合成管线
       this.recycle.push(this.prevBitmap);
@@ -225,16 +257,32 @@ export struct VisualizerView {
   }
 
   /**
-   * 液态光域（metaball）：少量大而柔的径向渐变光球按 Lissajous 曲线永不
-   * 重复地漂移，半径随频谱段与节拍呼吸；lighter 叠加相遇融合，配合 blur
-   * 反馈拖尾呈大面积柔和流转的色域——圆润无棱角。
+   * 风格参数自动化（shader 大赛式）：第 id 号参数在长周期 STYLE_PERIOD 之间
+   * 从一组 hash 值平滑过渡到下一组——参数空间连续漂移，效果无穷演化、
+   * 永不重复，无需预设任何具体形态。返回 [lo, hi] 区间值。
    */
-  private drawLiquid(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
+  private styleParam(id: number, t: number, lo: number, hi: number): number {
+    const ph = t / STYLE_PERIOD + hash01(this.seed + id * 131) * 64;
+    const k = Math.floor(ph);
+    const f = ph - k;
+    // smoothstep 缓动，避免周期边界跳变
+    const s = f * f * (3 - 2 * f);
+    const v0 = hash01(this.seed + id * 101 + k * 7);
+    const v1 = hash01(this.seed + id * 101 + (k + 1) * 7);
+    return lo + (hi - lo) * (v0 + (v1 - v0) * s);
+  }
+
+  /**
+   * 绽放花域（Superformula）：极坐标超级公式生成光滑有机曲线（花瓣/海星/
+   * 液滴等无穷形态由 m/n1/n2/n3 决定，全部连续无棱角），参数由 styleParam
+   * 慢速演化；每个花域叠三层自相似缩放（分形层次），色相经域扭曲
+   * （domain warp：hue 随位置正弦扰动），lighter 叠加融合。
+   */
+  private drawBlooms(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
-    const N = 6;
-    const m = Math.min(W, H);
+    const N = 5;
+    const m0 = Math.min(W, H);
     for (let i = 0; i < N; i++) {
-      // 互质近似频率的 Lissajous 轨迹：路径永不重复，变幻莫测
       const fx = 0.00022 + hash01(this.seed + i * 7 + 1) * 0.00062;
       const fy = 0.00019 + hash01(this.seed + i * 13 + 5) * 0.00055;
       const phx = hash01(this.seed + i * 29 + 11) * 6.2831853;
@@ -242,42 +290,74 @@ export struct VisualizerView {
       const x = W / 2 + W * 0.32 * Math.sin(t * fx + phx);
       const y = H * 0.47 + H * 0.28 * Math.sin(t * fy + phy);
       const bi = Math.min(bars.length - 1, Math.floor(i * bars.length / N));
-      const r = m * (0.16 + 0.16 * bars[bi]) * (0.84 + 0.26 * beat);
-      const hue = this.hueBase(t) + i * 30;
-      const l = 0.28 + 0.11 * beat + 0.07 * bars[bi];
-      const c = hslToRgb(hue, 0.8, l);
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},0.5)`);
-      g.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},0.18)`);
-      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, 6.2831853);
-      ctx.fill();
+      const baseR = m0 * (0.14 + 0.14 * bars[bi]) * (0.84 + 0.26 * beat);
+      // Superformula 参数：非整数 m 使花瓣错位缓旋，永不重复
+      const m = 1.5 + 5.5 * this.styleParam(10 + i, t, 0, 1);
+      const n1 = 0.3 + 1.0 * this.styleParam(20 + i, t, 0, 1);
+      const n2 = 0.3 + 1.7 * this.styleParam(30 + i, t, 0, 1);
+      const n3 = 0.3 + 1.7 * this.styleParam(40 + i, t, 0, 1);
+      const rot = t * (0.00008 + 0.00022 * this.styleParam(50 + i, t, 0, 1));
+      const baseHue = this.hueBase(t) + i * 30;
+      // 三层自相似缩放：分形层次感
+      const layers = [1.0, 0.58, 0.32];
+      for (let l = 0; l < layers.length; l++) {
+        const R = baseR * layers[l];
+        // 色相域扭曲：随位置与层深正弦扰动，色彩自身也在流动变形
+        const hue = baseHue
+          + 26 * Math.sin(t * 0.0006 + i * 2.1 + l * 1.3)
+          + 18 * Math.sin(t * 0.00023 + l * 0.9);
+        const lgt = 0.24 + 0.08 * beat + 0.05 * bars[bi] - l * 0.03;
+        const c = hslToRgb(hue, 0.82, lgt);
+        const alphaCore = 0.28 - l * 0.06;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+        g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${alphaCore})`);
+        g.addColorStop(0.6, `rgba(${c[0]},${c[1]},${c[2]},${alphaCore * 0.4})`);
+        g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        const STEPS = 84;
+        for (let s2 = 0; s2 <= STEPS; s2++) {
+          const th = s2 / STEPS * 6.2831853;
+          const t1 = Math.pow(Math.abs(Math.cos(m * th / 4)), n2);
+          const t2 = Math.pow(Math.abs(Math.sin(m * th / 4)), n3);
+          const r = R / Math.pow(t1 + t2, 1 / n1);
+          const px2 = x + r * Math.cos(th + rot + l * 0.6);
+          const py2 = y + r * Math.sin(th + rot + l * 0.6);
+          if (s2 === 0) {
+            ctx.moveTo(px2, py2);
+          } else {
+            ctx.lineTo(px2, py2);
+          }
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
-  /** mini 变体：经典频谱柱——4 根金色圆头竖柱随频段跳动，底部对齐 */
+  /** mini 变体：全宽背景频谱——金色圆头竖柱铺满迷你条卡片，垫在内容之下 */
   private drawBars(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const N = bars.length;
-    const pad = Math.max(2, Math.floor(W * 0.10));
+    const pad = Math.max(3, Math.floor(W * 0.03));
     const slot = (W - pad * 2) / N;
-    const bw = Math.max(2.5, slot * 0.42);
-    const gold = hslToRgb(38, 0.68, 0.50);
+    const bw = Math.max(2, slot * 0.42);
+    const gold = hslToRgb(38, 0.62, 0.48);
     ctx.strokeStyle = `rgb(${gold[0]},${gold[1]},${gold[2]})`;
     ctx.lineCap = 'round';
     ctx.lineWidth = bw;
+    ctx.globalAlpha = 0.5;
     for (let i = 0; i < N; i++) {
       const cx = pad + slot * (i + 0.5);
-      // 高度：频段能量 + 各柱相位差的轻微摆动，跳动错落
-      const sway = 0.85 + 0.15 * Math.sin(t * 0.004 + i * 1.7);
-      const h = Math.max(bw, bars[i] * H * 0.88 * sway);
+      // 高度：频段能量 + 相位差摆动，整排错落起伏
+      const sway = 0.82 + 0.18 * Math.sin(t * 0.0035 + i * 0.9);
+      const h = Math.max(bw, bars[i] * H * 0.9 * sway);
       ctx.beginPath();
       ctx.moveTo(cx, H - bw / 2 - 1);
       ctx.lineTo(cx, H - 1 - h);
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }
 
   

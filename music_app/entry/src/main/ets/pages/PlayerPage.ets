@@ -54,7 +54,7 @@ export struct PlayerPage {
     window.getLastWindow(ctx).then((win) => {
       const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
       const fg = enter || dark ? '#F3EFE4' : '#26221B';
-      const bg = enter ? '#161310' : (dark ? '#16140F' : '#F6F3EC');
+      const bg = enter ? '#0C0A09' : (dark ? '#16140F' : '#F6F3EC');
       if (enter) {
         const sys = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
         const nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
