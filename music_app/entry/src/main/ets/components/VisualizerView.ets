@@ -190,6 +190,7 @@ export struct VisualizerView {
       active.fillStyle = grad;
       active.fillRect(0, 0, W, H);
       this.drawBlooms(active, t, beat, bars, W, H);
+      this.drawMotes(active, t, W, H);
     } else {
       this.drawBars(active, t, beat, bars, W, H);
     }
@@ -254,15 +255,20 @@ export struct VisualizerView {
    */
   private drawBlooms(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
-    const N = 3;
+    const N = 4;
     const m0 = Math.min(W, H);
     for (let i = 0; i < N; i++) {
-      const fx = 0.00022 + hash01(this.seed + i * 7 + 1) * 0.00062;
-      const fy = 0.00019 + hash01(this.seed + i * 13 + 5) * 0.00055;
+      // 位置：主漂移 + 双频扰动（Lissajous）——更快更灵动的漂浮轨迹
+      const fx = 0.0007 + hash01(this.seed + i * 7 + 1) * 0.0016;
+      const fy = 0.0006 + hash01(this.seed + i * 13 + 5) * 0.0013;
+      const wx = 0.0016 + hash01(this.seed + i * 17 + 3) * 0.0022;
+      const wy = 0.0014 + hash01(this.seed + i * 23 + 7) * 0.0018;
       const phx = hash01(this.seed + i * 29 + 11) * 6.2831853;
       const phy = hash01(this.seed + i * 41 + 17) * 6.2831853;
-      const x = W / 2 + W * 0.32 * Math.sin(t * fx + phx);
-      const y = H * 0.47 + H * 0.28 * Math.sin(t * fy + phy);
+      const phx2 = hash01(this.seed + i * 67 + 19) * 6.2831853;
+      const phy2 = hash01(this.seed + i * 71 + 23) * 6.2831853;
+      const x = W / 2 + W * 0.30 * Math.sin(t * fx + phx) + W * 0.08 * Math.sin(t * wx + phx2);
+      const y = H * 0.47 + H * 0.26 * Math.sin(t * fy + phy) + H * 0.07 * Math.sin(t * wy + phy2);
       const bi = Math.min(bars.length - 1, Math.floor(i * bars.length / N));
       const baseR = m0 * (0.14 + 0.14 * bars[bi]) * (0.84 + 0.26 * beat);
       // Superformula 参数：非整数 m 使花瓣错位缓旋，永不重复
@@ -271,9 +277,9 @@ export struct VisualizerView {
       const n2 = 0.3 + 1.7 * this.styleParam(30 + i, t, 0, 1);
       const n3 = 0.3 + 1.7 * this.styleParam(40 + i, t, 0, 1);
       const rot = t * (0.00008 + 0.00022 * this.styleParam(50 + i, t, 0, 1));
-      const baseHue = this.hueBase(t) + i * 30;
-      // 两层自相似缩放：分形层次感
-      const layers = [1.0, 0.5];
+      // 各花色相以不同速率独立流动，色彩层次更丰富
+      const baseHue = (t * (0.020 + 0.0045 * i) + this.seed + i * 47) % 360;
+      const layers = [1.0];
       for (let l = 0; l < layers.length; l++) {
         const R = baseR * layers[l];
         // 色相域扭曲：随位置与层深正弦扰动，色彩自身也在流动变形
@@ -306,6 +312,32 @@ export struct VisualizerView {
         ctx.closePath();
         ctx.fill();
       }
+    }
+  }
+
+  /**
+   * 漂浮光斑：十余颗小光点沿 Lissajous 轨道缓慢漂移、亮度轻闪，色彩随
+   * 全色环低速流动。全部为局部小元素（半径 ≤6px 离屏单位），填充用
+   * 小矩形+径向渐变省去 path，不形成任何全屏/边界效应。
+   */
+  private drawMotes(ctx: OffscreenCanvasRenderingContext2D, t: number, W: number, H: number): void {
+    const N = 10;
+    for (let i = 0; i < N; i++) {
+      const w1 = 0.0008 + hash01(this.seed + i * 5 + 2) * 0.0012;
+      const w2 = 0.0010 + hash01(this.seed + i * 9 + 4) * 0.0016;
+      const px = hash01(this.seed + i * 31 + 6) * 6.2831853;
+      const py = hash01(this.seed + i * 37 + 8) * 6.2831853;
+      const x = W / 2 + W * 0.42 * Math.sin(t * w1 + px) * Math.cos(t * w2 * 0.6 + py);
+      const y = H * 0.47 + H * 0.34 * Math.cos(t * w1 * 0.8 + py) * Math.sin(t * w2 + px);
+      const r = 2 + 4 * hash01(this.seed + i * 43 + 12);
+      const flare = 0.55 + 0.45 * Math.sin(t * 0.002 + i * 1.7);
+      const hue = (t * 0.012 + this.seed + i * 31) % 360;
+      const c = hslToRgb(hue, 0.8, 0.5);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${0.5 * flare})`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
     }
   }
 
