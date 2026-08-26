@@ -16,6 +16,7 @@ const KEY_ONLINE_BASE_URL = 'online_base_url';
  * 应用全局状态：组装音乐库、用户数据、播放内核与在线源配置。
  * 以单例导出，页面直接引用。
  */
+@ObservedV2
 export class AppStore {
   readonly library: MusicLibrary = new MusicLibrary();
   readonly userData: UserData = new UserData();
@@ -23,6 +24,9 @@ export class AppStore {
   readonly onlineSource: OnlineSource = new OnlineSource();
   /** 主 Ability 上下文（页面取 window 设置系统栏样式用） */
   abilityContext: common.UIAbilityContext | null = null;
+  /** 全局恒定全屏布局下的状态栏/导航条避让高度（vp），页面加载完成后读入 */
+  @Trace safeTopVp: number = 0;
+  @Trace safeBottomVp: number = 0;
   private pref: preferences.Preferences | null = null;
   /** 在线源地址已变更待生效（首页 onPageShow 消费后重拉在线列表） */
   private onlineConfigDirty: boolean = false;

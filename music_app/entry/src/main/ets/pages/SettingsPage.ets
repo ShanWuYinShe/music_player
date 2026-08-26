@@ -172,7 +172,9 @@ export struct SettingsPage {
       }
       .width('100%')
       .height('100%')
-      .padding(16)
+      // 全局恒定全屏布局：前景内容按预读避让高度留白（背景层已延伸进系统栏）
+      .padding({ left: 16, right: 16,
+        top: appStore.safeTopVp + 16, bottom: appStore.safeBottomVp + 16 })
     }
     .width('100%')
     .height('100%')

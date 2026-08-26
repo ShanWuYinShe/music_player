@@ -306,6 +306,8 @@ struct Index {
         }
         .width('100%')
         .height('100%')
+        // 全局恒定全屏布局：背景层已延伸进系统栏，前景内容按预读避让高度留白
+        .padding({ top: appStore.safeTopVp, bottom: appStore.safeBottomVp })
       }
       .width('100%')
       .height('100%')

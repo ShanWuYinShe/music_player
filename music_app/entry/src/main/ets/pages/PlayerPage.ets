@@ -38,12 +38,11 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态：只切换系统栏透明与字色 + window 深色兜底，画面延伸
-   * 全靠 VisualizerView 组件自身 expandSafeArea（真机实测等效，且窗口
-   * 布局模式恒定）。不使用窗口级 setWindowLayoutFullScreen——它是整窗
-   * 属性，进出页面开关的恢复异步且滞后，返回首页时首页会在全屏布局
-   * 残留期以物理屏幕坐标渲染（内容顶进状态栏/导航条），恢复生效后再
-   * 骤然收缩，表现为返回时布局跳动。前景控件依赖窗口默认安全区避让。
+   * 播放页沉浸态：只切换系统栏透明与字色 + window 深色兜底。画面延伸到
+   * 系统栏下靠全局恒定的 setWindowLayoutFullScreen（EntryAbility 启动即
+   * 开启，组件级 expandSafeArea 无法让 Canvas 画进系统栏区域，真机踩坑）；
+   * 页面不得开关全屏布局——异步恢复滞后会让返回首页时布局跳动。
+   * 前景控件用 AppStore 预读的避让区高度自行留白。
    */
   private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
@@ -241,6 +240,8 @@ export struct PlayerPage {
       }
         .width('100%')
         .height('100%')
+        // 全局恒定全屏布局下系统避让关闭，前景内容按预读的避让区高度自行留白
+        .padding({ top: appStore.safeTopVp, bottom: appStore.safeBottomVp })
       }
       .width('100%')
       .height('100%')
