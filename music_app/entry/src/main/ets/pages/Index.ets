@@ -158,6 +158,15 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
+          if (this.sourceTab === SourceTab.LOCAL) {
+            // 本地曲库常驻导入入口：平台(API 24)已移除静默扫描公共媒体库的
+            // 权限与 API，AudioViewPicker 用户选择是唯一导入途径，不能只藏在空态
+            SymbolGlyph($r('sys.symbol.folder_badge_plus'))
+              .fontSize(22)
+              .fontColor([$r('app.color.ink')])
+              .padding(10)
+              .onClick(() => this.importFromPicker())
+          }
           SymbolGlyph($r('sys.symbol.gearshape'))
             .fontSize(22)
             .fontColor([$r('app.color.ink')])
@@ -731,10 +740,14 @@ struct Index {
       if (reqId !== this.onlineRequestId) {
         return; // 已有更新的查询在途，过期响应丢弃
       }
+      if (this.sourceTab !== SourceTab.ONLINE) {
+        return; // 已切回本地：晚到的响应不得替换 player.songs 污染本地列表
+        // （切回在线时 switchSource 会重新拉取）
+      }
       this.onlineSongs = list;
       appStore.player.setOnlineQueue(list);
     } catch (err) {
-      if (reqId !== this.onlineRequestId) {
+      if (reqId !== this.onlineRequestId || this.sourceTab !== SourceTab.ONLINE) {
         return;
       }
       this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
