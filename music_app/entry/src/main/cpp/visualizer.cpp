@@ -222,9 +222,9 @@ void VizRenderFrame(double t, double seed, bool playing) {
     if (gEglDisplay == EGL_NO_DISPLAY || !eglMakeCurrent(gEglDisplay, gEglSurface, gEglSurface, gEglContext)) {
         return;
     }
-    // 内部目标分辨率: 显示半分辨率(移动 GPU fragment 负载减 4 倍,上屏放大柔化)
-    gRenderW = gWidth / 3;
-    gRenderH = gHeight / 3;
+    // 内部目标分辨率: 显示 1/2(移动 GPU fragment 负载减 4 倍,上屏放大柔化)
+    gRenderW = gWidth / 2;
+    gRenderH = gHeight / 2;
     // 反馈纹理按内部尺寸初始化/重建
     if (gTexW != gRenderW || gTexH != gRenderH) {
         for (int i = 0; i < 2; i++) {

@@ -73,6 +73,8 @@ struct Index {
   @Local onlineSongs: SongRecord[] = [];
   /** 在线搜索防抖定时器 id（-1 无待触发任务） */
   private searchTimerId: number = -1;
+  /** 在线列表下拉刷新态（Refresh 组件绑定） */
+  @Local isRefreshing: boolean = false;
   /** 在线请求代际号：新查询使旧响应作废（latest-wins，慢网下不再丢新查询） */
   private onlineRequestId: number = 0;
   /** LazyForEach 数据源 */
@@ -203,6 +205,13 @@ struct Index {
                   this.tab = LibraryTab.ALL;
                 }
               })
+            if (this.sourceTab === SourceTab.ONLINE && this.onlineLoading) {
+              // 搜索发起处的即时加载指示（HarmonyOS 规范：异步操作在触发点反馈）
+              LoadingProgress()
+                .width(14)
+                .height(14)
+                .color($r('app.color.ink_faint'))
+            }
             if (this.searchText !== '') {
               SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
                 .fontSize(15)
@@ -267,32 +276,19 @@ struct Index {
           } else {
             this.EmptyHintView($r('sys.symbol.clock'), '还没有播放记录', '点一首歌开始听吧')
           }
-        } else {
-          List({ space: 2 }) {
-            LazyForEach(this.songSource, (song: SongRecord) => {
-              ListItem() {
-                SongItem({
-                  song: song,
-                  isCurrent: song.id === appStore.player.currentSongId,
-                  isPlaying: appStore.player.isPlaying,
-                  onItemClick: (id: string) => appStore.player.playSong(id)
-                })
-                  .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
-              }
-              .swipeAction({
-                end: {
-                  builder: (): void => {
-                    this.SwipeActions(song.id)
-                  }
-                }
-              })
-            }, (song: SongRecord) => song.id)
+        } else if (this.sourceTab === SourceTab.ONLINE) {
+          // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
+          Refresh({ refreshing: $$this.isRefreshing }) {
+            this.SongList()
           }
-          .cachedCount(6)
-          .width('100%')
+          .onRefreshing(() => {
+            this.enterOnline(this.searchText.trim()).finally(() => {
+              this.isRefreshing = false;
+            });
+          })
           .layoutWeight(1)
-          .padding({ left: 12, right: 12, bottom: 8 })
-          .scrollBar(BarState.Off)
+        } else {
+          this.SongList()
         }
 
         // 底部迷你播放条
@@ -315,6 +311,52 @@ struct Index {
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
     .navDestination(this.pageMap)
+  }
+
+  /** 歌曲列表：加载中在顶部显示轻量状态行（已有列表时的加载/搜索反馈） */
+  @Builder
+  SongList() {
+    List({ space: 2 }) {
+      if (this.onlineLoading) {
+        ListItem() {
+          Row({ space: 8 }) {
+            LoadingProgress()
+              .width(16)
+              .height(16)
+              .color($r('app.color.ink_faint'))
+            Text(this.searchText.trim() !== '' ? `正在搜索"${this.searchText.trim()}"…` : '正在更新在线曲库…')
+              .fontSize(13)
+              .fontColor($r('app.color.ink_soft'))
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .padding({ top: 10, bottom: 10 })
+        }
+      }
+      LazyForEach(this.songSource, (song: SongRecord) => {
+        ListItem() {
+          SongItem({
+            song: song,
+            isCurrent: song.id === appStore.player.currentSongId,
+            isPlaying: appStore.player.isPlaying,
+            onItemClick: (id: string) => appStore.player.playSong(id)
+          })
+            .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
+        }
+        .swipeAction({
+          end: {
+            builder: (): void => {
+              this.SwipeActions(song.id)
+            }
+          }
+        })
+      }, (song: SongRecord) => song.id)
+    }
+    .cachedCount(6)
+    .width('100%')
+    .layoutWeight(1)
+    .padding({ left: 12, right: 12, bottom: 8 })
+    .scrollBar(BarState.Off)
   }
 
   /** 分类计数：在 Builder 内部读取 @Computed 状态以建立响应依赖（按值传参不刷新） */
