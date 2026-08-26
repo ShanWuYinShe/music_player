@@ -18,7 +18,7 @@ import {
 } from '../common/VisualizerCore';
 
 /** 离屏画布最长边上限：全屏模式下降采样（blur 反馈本身柔化，观感优先） */
-const OFFSCREEN_MAX_DIM = 360;
+const OFFSCREEN_MAX_DIM = 300;
 /** 暂停后收敛动画时长（ms），之后停帧保留静帧 */
 const FADE_MS = 900;
 /** 绘帧最小间隔：24fps 对拖尾流动观感无感知差异，控制 CPU 总耗 */
@@ -178,8 +178,8 @@ export struct VisualizerView {
       if (mini) {
         active.drawImage(this.prevBitmap, 0, 0, W, H);
       } else {
-        const GX = 8;
-        const GY = 11;
+        const GX = 6;
+        const GY = 8;
         const cw = W / GX;
         const ch = H / GY;
         // 流场参数：频率/相位/幅度由种子与慢演化参数决定（见 styleParam）
@@ -227,12 +227,7 @@ export struct VisualizerView {
 
     const bmp = active.transferToImageBitmap();
     this.displayCtx.clearRect(0, 0, this.displayCtx.width, this.displayCtx.height);
-    // 上屏整帧 blur：网格接缝与一切锐边在此柔化（MilkDrop 的"柔"）
-    if (!mini) {
-      this.displayCtx.filter = 'blur(2.5px)';
-    }
     this.displayCtx.drawImage(bmp, 0, 0, this.displayCtx.width, this.displayCtx.height);
-    this.displayCtx.filter = 'none';
     if (this.prevBitmap !== null) {
       // prevBitmap 仍被反馈层引用；把已上屏数帧的旧位图延迟回收，避开合成管线
       this.recycle.push(this.prevBitmap);
@@ -280,7 +275,7 @@ export struct VisualizerView {
    */
   private drawBlooms(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
-    const N = 5;
+    const N = 4;
     const m0 = Math.min(W, H);
     for (let i = 0; i < N; i++) {
       const fx = 0.00022 + hash01(this.seed + i * 7 + 1) * 0.00062;
@@ -299,7 +294,7 @@ export struct VisualizerView {
       const rot = t * (0.00008 + 0.00022 * this.styleParam(50 + i, t, 0, 1));
       const baseHue = this.hueBase(t) + i * 30;
       // 三层自相似缩放：分形层次感
-      const layers = [1.0, 0.58, 0.32];
+      const layers = [1.0, 0.5];
       for (let l = 0; l < layers.length; l++) {
         const R = baseR * layers[l];
         // 色相域扭曲：随位置与层深正弦扰动，色彩自身也在流动变形
@@ -315,7 +310,7 @@ export struct VisualizerView {
         g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
         ctx.fillStyle = g;
         ctx.beginPath();
-        const STEPS = 84;
+        const STEPS = 64;
         for (let s2 = 0; s2 <= STEPS; s2++) {
           const th = s2 / STEPS * 6.2831853;
           const t1 = Math.pow(Math.abs(Math.cos(m * th / 4)), n2);
@@ -335,7 +330,9 @@ export struct VisualizerView {
     }
   }
 
-  /** mini 变体：全宽背景频谱——金色圆头竖柱铺满迷你条卡片，垫在内容之下 */
+  /** mini 变体：全宽背景频谱——金色圆头竖柱铺满迷你条卡片，垫在内容之下；
+   *  柱阵限制在卡片下半区、垂直渐隐（柱顶淡出）+ 横向两端包络，像从卡片
+   *  底部轻涌的金色微光，与卡片圆角和前景内容自然融合 */
   private drawBars(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
     const N = bars.length;
@@ -343,15 +340,21 @@ export struct VisualizerView {
     const slot = (W - pad * 2) / N;
     const bw = Math.max(2, slot * 0.42);
     const gold = hslToRgb(38, 0.62, 0.48);
-    ctx.strokeStyle = `rgb(${gold[0]},${gold[1]},${gold[2]})`;
+    // 垂直渐变：柱底清晰 → 柱顶淡出
+    const grad = ctx.createLinearGradient(0, H, 0, H * 0.35);
+    grad.addColorStop(0, `rgba(${gold[0]},${gold[1]},${gold[2]},0.5)`);
+    grad.addColorStop(1, `rgba(${gold[0]},${gold[1]},${gold[2]},0.08)`);
+    ctx.strokeStyle = grad;
     ctx.lineCap = 'round';
     ctx.lineWidth = bw;
-    ctx.globalAlpha = 0.5;
     for (let i = 0; i < N; i++) {
       const cx = pad + slot * (i + 0.5);
-      // 高度：频段能量 + 相位差摆动，整排错落起伏
+      // 高度：频段能量 + 相位差摆动，整排错落起伏；只占下半区
       const sway = 0.82 + 0.18 * Math.sin(t * 0.0035 + i * 0.9);
-      const h = Math.max(bw, bars[i] * H * 0.9 * sway);
+      const h = Math.max(bw, bars[i] * H * 0.42 * sway);
+      // 横向两端包络（sin 半波），边缘柱渐隐融入卡片圆角
+      const side = Math.sin(Math.PI * (i + 0.5) / N);
+      ctx.globalAlpha = 0.35 + 0.65 * side;
       ctx.beginPath();
       ctx.moveTo(cx, H - bw / 2 - 1);
       ctx.lineTo(cx, H - 1 - h);

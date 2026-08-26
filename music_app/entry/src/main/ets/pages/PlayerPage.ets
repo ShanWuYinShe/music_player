@@ -83,21 +83,13 @@ export struct PlayerPage {
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       Column() {
-        // 顶部栏：返回 + 当前歌名 + 队列入口
+        // 顶部栏：仅返回 + 队列入口（歌名由主标题承担，避免重复）
         Row() {
           SymbolGlyph($r('sys.symbol.chevron_left'))
             .fontSize(24)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
             .onClick(() => this.navPathStack.pop())
-          Blank()
-          Text(this.player.currentSong ? this.player.currentSong.title : '')
-            .fontSize(15)
-            .fontColor($r('app.color.viz_fg_soft'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .constraintSize({ maxWidth: '52%' })
-            .textAlign(TextAlign.Center)
           Blank()
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
@@ -109,64 +101,67 @@ export struct PlayerPage {
             })
         }
         .width('100%')
-        .height(56)
+        .height(48)
         .padding({ left: 8, right: 8 })
 
+        // 上部大舞台：可视化主展示区
         Blank()
 
-        // 歌名 / 歌手（悬浮于全屏可视化之上）
-        Column({ space: 6 }) {
-          Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.viz_fg'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(this.player.currentSong ? this.player.currentSong.artist : '')
-            .fontSize(15)
-            .fontColor($r('app.color.viz_fg_soft'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .margin({ top: 32 })
+        // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
+        Column() {
+          Column({ space: 6 }) {
+            Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.viz_fg'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.player.currentSong ? this.player.currentSong.artist : '')
+              .fontSize(15)
+              .fontColor($r('app.color.viz_fg_soft'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Center)
+          .width('100%')
 
-        // 进度条
-        Column({ space: 4 }) {
-          Slider({
-            value: this.sliderValue(),
-            min: 0,
-            max: Math.max(this.player.duration, 1),
-            style: SliderStyle.OutSet
-          })
-            .selectedColor($r('app.color.accent'))
-            .trackColor($r('app.color.viz_line'))
-            .blockColor($r('app.color.accent'))
-            .enabled(this.player.isPrepared)
-            .onChange((value: number, mode: SliderChangeMode) => {
-              if (mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving) {
-                this.dragValue = value;
-              } else if (mode === SliderChangeMode.End) {
-                this.player.seek(Math.floor(value));
-                this.dragValue = -1;
-              }
+          // 进度条
+          Column({ space: 4 }) {
+            Slider({
+              value: this.sliderValue(),
+              min: 0,
+              max: Math.max(this.player.duration, 1),
+              style: SliderStyle.OutSet
             })
-          Row() {
-            Text(formatTime(this.sliderValue()))
-              .fontSize(12)
-              .fontColor($r('app.color.viz_fg_faint'))
-            Blank()
-            Text(formatTime(this.player.duration))
-              .fontSize(12)
-              .fontColor($r('app.color.viz_fg_faint'))
+              .selectedColor($r('app.color.accent'))
+              .trackColor($r('app.color.viz_line'))
+              .blockColor($r('app.color.accent'))
+              .enabled(this.player.isPrepared)
+              .onChange((value: number, mode: SliderChangeMode) => {
+                if (mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving) {
+                  this.dragValue = value;
+                } else if (mode === SliderChangeMode.End) {
+                  this.player.seek(Math.floor(value));
+                  this.dragValue = -1;
+                }
+              })
+            Row() {
+              Text(formatTime(this.sliderValue()))
+                .fontSize(12)
+                .fontColor($r('app.color.viz_fg_faint'))
+              Blank()
+              Text(formatTime(this.player.duration))
+                .fontSize(12)
+                .fontColor($r('app.color.viz_fg_faint'))
+            }
+            .width('100%')
+            .padding({ left: 4, right: 4 })
           }
           .width('100%')
-          .padding({ left: 4, right: 4 })
-        }
-        .margin({ top: 20 })
-        .padding({ left: 28, right: 28 })
+          .margin({ top: 24 })
 
-        // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢
-        Row({ space: 30 }) {
+          // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢
+          Row({ space: 30 }) {
           SymbolGlyph(playModeSymbol(this.player.playMode))
             .fontSize(26)
             .fontColor([$r('app.color.viz_fg')])
@@ -202,7 +197,9 @@ export struct PlayerPage {
             .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.viz_fg')])
             .onClick(() => this.toggleFavorite())
         }
-        .margin({ top: 22 })
+        .justifyContent(FlexAlign.SpaceEvenly)
+        .width('100%')
+        .margin({ top: 18 })
 
         // 副控制：音量 + 定时关闭
         Row({ space: 10 }) {
@@ -244,13 +241,12 @@ export struct PlayerPage {
           .padding({ left: 10, right: 10 })
           .bindMenu(this.SleepMenu())
         }
-        .margin({ top: 18 })
+        .width('100%')
+        .margin({ top: 16 })
         .padding({ left: 28, right: 28 })
-
-        Blank()
-
-        // 底部留白（含安全区余量）
-        Row().height(36)
+        }
+        // 控制面板整体水平边距与底部收尾
+        .padding({ left: 28, right: 28, bottom: 8 })
       }
       .width('100%')
       .height('100%')
