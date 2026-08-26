@@ -27,9 +27,6 @@ export struct PlayerPage {
   @Local dragValue: number = -1;
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
-  /** 全屏布局下前景内容自行避让：系统栏/导航指示区高度（vp） */
-  @Local sysBarTop: number = 0;
-  @Local sysBarBottom: number = 0;
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
@@ -41,10 +38,12 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态：进入时开启全屏布局（应用真正延伸到系统栏下，系统栏
-   * 透明后直接透出 canvas 画面，不再存在独立色层——不依赖系统栏自定义
-   * 色，浅色模式下自定义色不生效的坑已实测）+ window 深色兜底；前景
-   * 内容按避让区高度自行留白。离开时关闭全屏布局并按深浅恢复。
+   * 播放页沉浸态：只切换系统栏透明与字色 + window 深色兜底，画面延伸
+   * 全靠 VisualizerView 组件自身 expandSafeArea（真机实测等效，且窗口
+   * 布局模式恒定）。不使用窗口级 setWindowLayoutFullScreen——它是整窗
+   * 属性，进出页面开关的恢复异步且滞后，返回首页时首页会在全屏布局
+   * 残留期以物理屏幕坐标渲染（内容顶进状态栏/导航条），恢复生效后再
+   * 骤然收缩，表现为返回时布局跳动。前景控件依赖窗口默认安全区避让。
    */
   private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
@@ -55,13 +54,6 @@ export struct PlayerPage {
       const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
       const fg = enter || dark ? '#F3EFE4' : '#26221B';
       const bg = enter ? '#0C0A09' : (dark ? '#16140F' : '#F6F3EC');
-      if (enter) {
-        const sys = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-        const nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-        this.sysBarTop = this.getUIContext().px2vp(sys.topRect.height);
-        this.sysBarBottom = this.getUIContext().px2vp(nav.bottomRect.height);
-      }
-      win.setWindowLayoutFullScreen(enter);
       win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
         statusBarColor: enter ? '#00000000' : bg,
@@ -247,14 +239,12 @@ export struct PlayerPage {
         // 控制面板整体水平边距与底部收尾
         .padding({ left: 28, right: 28, bottom: 8 })
       }
+        .width('100%')
+        .height('100%')
+      }
       .width('100%')
       .height('100%')
-      // 全屏布局下系统避让关闭，前景内容按避让区高度自行留白
-      .padding({ top: this.sysBarTop, bottom: this.sysBarBottom })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor($r('app.color.page_bg'))
+      .backgroundColor($r('app.color.page_bg'))
     .bindSheet(this.isQueueOpen, this.QueueSheet(), {
       height: SheetSize.MEDIUM,
       showClose: true,
