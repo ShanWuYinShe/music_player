@@ -99,6 +99,35 @@ float sdfWorld(vec3 w, float mB, float n1a, float n2a,
         mB, n1a, n2a, 1.2, m2v, n1b, n2b, 1.2) * size;
 }
 
+/** 峡谷 SDF：场缓旋 + z 向域重复平铺（每胞 hash 出形态/尺寸/偏置）∩ 中心管道外。
+ *  管道半径 0.55 保证相机走廊畅通——晶体只出现在两侧与前方，形成穿越峡谷。 */
+float sdfCanyon(vec3 w, mat2 ry, mat2 rx, float rep, float seed, float t) {
+    vec3 pp = w;
+    pp.xz = ry * pp.xz;
+    pp.yz = rx * pp.yz;
+    float zc = floor(pp.z / rep);
+    vec3 pq = pp;
+    pq.z = pp.z - (zc + 0.5) * rep;      // 胞内 z ∈ [-rep/2, rep/2]
+    // 胞参数：形态/尺寸/横向偏置（两侧分布，中线留走廊）
+    float hid = hash(zc * 17.31 + seed * 0.013);
+    float mB = 2.0 + 3.5 * hid;
+    float n1a = 0.8 + 0.6 * hash(zc * 31.7 + seed);
+    float n2a = 0.5 + 1.2 * hash(zc * 47.3 + seed);
+    float m2v = 2.0 + 3.5 * hash(zc * 53.9 + seed);
+    float n1b = 0.8 + 0.6 * hash(zc * 67.1 + seed);
+    float n2b = 0.5 + 1.2 * hash(zc * 79.7 + seed);
+    float size = 0.30 + 0.22 * hash(zc * 91.3 + seed);
+    float side = hid > 0.5 ? 1.0 : -1.0;
+    vec2 lateral = vec2(side * (0.78 + 0.3 * hash(zc * 11.7 + seed)),
+        (hash(zc * 13.1 + seed) - 0.5) * 0.9);
+    pq.xy -= lateral;
+    float len = length(pq);
+    float dCrystal = len - shapeR(pq / max(len, 1e-5),
+        mB, n1a, n2a, 1.2, m2v, n1b, n2b, 1.2) * size;
+    float dTube = length(pp.xy) - 0.55;   // 管道外为正
+    return max(dCrystal, dTube) * 0.6;    // 交集缩 Lipschitz
+}
+
 void main() {
     float t = uT;
     float seed = uSeed;
@@ -119,93 +148,113 @@ void main() {
     int preset = int(floor(cyc));
 
     if (preset == 0) {
-        // ===== 星云（2D 场：氛围光 + 花域）=====
+        // ===== 流动星野：相机匀速前行（方向缓旋），花域在世界空间平铺掠过 =====
         vec2 center = vec2(0.5, 0.47);
-        vec2 dp = (p - center) * vec2(aspect, 1.0);
-        float rr = length(dp);
+        vec2 sp = (p - center) * vec2(aspect, 1.0);
+        float drift = t * 0.052;                       // 行进距离(世界单位)
+        vec2 dir = vec2(cos(t * 0.00003), sin(t * 0.00003));
+        vec2 wp = sp + dir * drift;                    // 世界坐标
+        // 氛围光（屏幕空间，恒居中）
         {
-            float g = smoothstep(0.95, 0.0, rr);
+            float g = smoothstep(0.95, 0.0, length(sp));
             col += hsl2rgb(hue0, 0.75, 0.10) * g * g * 0.22;
         }
-        for (int i = 0; i < 4; i++) {
-            float fi = float(i);
-            vec2 pc = vec2(
-                0.5 + 0.30 * sin(t * (0.0007 + hash(seed + fi * 7.0 + 1.0) * 0.0016)
-                    + hash(seed + fi * 29.0 + 11.0) * 6.2832)
-                    + 0.08 * sin(t * (0.0016 + hash(seed + fi * 17.0 + 3.0) * 0.0022)
-                    + hash(seed + fi * 67.0 + 19.0) * 6.2832),
-                0.47 + 0.26 * sin(t * (0.0006 + hash(seed + fi * 13.0 + 5.0) * 0.0013)
-                    + hash(seed + fi * 41.0 + 17.0) * 6.2832)
-                    + 0.07 * sin(t * (0.0014 + hash(seed + fi * 23.0 + 7.0) * 0.0018)
-                    + hash(seed + fi * 71.0 + 23.0) * 6.2832));
-            vec2 d2 = (p - pc) * vec2(aspect, 1.0);
-            float rank = length(d2);
-            float rth = atan(d2.y, d2.x);
-            float m = 1.5 + 5.5 * styleParam(10.0 + fi, t, 0.0, 1.0, seed);
-            float n1 = 0.7 + 0.7 * styleParam(20.0 + fi, t, 0.0, 1.0, seed);
-            float n2 = 0.3 + 1.7 * styleParam(30.0 + fi, t, 0.0, 1.0, seed);
-            float n3 = 0.3 + 1.7 * styleParam(40.0 + fi, t, 0.0, 1.0, seed);
-            float rot = t * (0.00008 + 0.00022 * styleParam(50.0 + fi, t, 0.0, 1.0, seed));
-            float ca = cos(m * (rth + rot) / 4.0);
-            float sa = sin(m * (rth + rot) / 4.0);
-            float denom = pow(abs(ca), n2) + pow(abs(sa), n3);
-            float rSurf = 0.13 / pow(max(denom, 0.25), 1.0 / n1)
-                * (0.92 + 0.13 * uBeat + 0.06 * uBass);   // 节拍呼吸(局部尺寸)
-            float edge = exp(-abs(rank - rSurf) * 42.0);
-            float core = exp(-rank * rank * 180.0);
-            float hue = fract((t * 0.02 + seed * 0.001 + fi * 0.13)) * 360.0;
-            vec3 c = hsl2rgb(hue, 0.85, 0.55);
-            col += c * (edge * (0.11 + 0.05 * uBeat) + core * 0.02);
+        // 平铺花域：世界网格每 cell 一朵（hash 决定形态/相位），3x3 邻域
+        vec2 cellSz = vec2(1.05, 0.72);
+        vec2 base = floor(wp / cellSz);
+        for (int cy = -1; cy <= 1; cy++) {
+            for (int cx = -1; cx <= 1; cx++) {
+                vec2 gidx = base + vec2(float(cx), float(cy));
+                float hid = hash2(gidx + seed * 0.017);
+                // cell 内星点（世界空间固定 hash 位，随行进掠过；空 cell 也留星）
+                vec2 starPos = (gidx + vec2(hash2(gidx + 7.7), hash2(gidx + 3.3))) * cellSz;
+                float ds = length(wp - starPos);
+                float sflare = 0.5 + 0.5 * sin(t * 0.002 + hid * 40.0);
+                float shue = fract(t * 0.000012 + hid * 5.0) * 360.0;
+                col += hsl2rgb(shue, 0.8, 0.55) * exp(-ds * ds * 5200.0)
+                    * sflare * (0.06 + 0.05 * uTreble);
+                if (hid < 0.30) {
+                    continue;   // 空 cell：星野有疏密（只有星点）
+                }
+                vec2 gpos = (gidx + 0.5) / cellSz;     // cell 中心(世界)
+                // cell 内小幅 Lissajous 游动
+                vec2 jig = 0.10 * vec2(
+                    sin(t * (0.0005 + hid * 0.0011) + hid * 43.0),
+                    cos(t * (0.0006 + hid * 0.0009) + hid * 77.0));
+                vec2 d2 = wp - (gpos * cellSz + jig * cellSz);
+                float rank = length(d2);
+                float rth = atan(d2.y, d2.x);
+                float m = 1.5 + 5.5 * styleParam(10.0 + hid * 40.0, t, 0.0, 1.0, seed);
+                float n1 = 0.7 + 0.7 * styleParam(20.0 + hid * 40.0, t, 0.0, 1.0, seed);
+                float n2 = 0.3 + 1.7 * styleParam(30.0 + hid * 40.0, t, 0.0, 1.0, seed);
+                float n3 = 0.3 + 1.7 * styleParam(40.0 + hid * 40.0, t, 0.0, 1.0, seed);
+                float rot = t * (0.00008 + 0.00022 * styleParam(50.0 + hid * 40.0, t, 0.0, 1.0, seed));
+                float ca = cos(m * (rth + rot) / 4.0);
+                float sa = sin(m * (rth + rot) / 4.0);
+                float denom = pow(abs(ca), n2) + pow(abs(sa), n3);
+                float rSurf = 0.13 / pow(max(denom, 0.25), 1.0 / n1)
+                    * (0.92 + 0.13 * uBeat + 0.06 * uBass);
+                float edge = exp(-abs(rank - rSurf) * 42.0);
+                float core = exp(-rank * rank * 180.0);
+                float hue = fract(t * 0.02 + seed * 0.001 + hid * 0.61) * 360.0;
+                vec3 c = hsl2rgb(hue, 0.85, 0.55);
+                col += c * (edge * (0.11 + 0.05 * uBeat) + core * 0.02);
+            }
+        }
+        // 螺旋流带（世界角度推进）
+        {
+            float wang = atan(wp.y, wp.x);
+            float wrr = length(wp);
+            for (int s2 = 0; s2 < 2; s2++) {
+                float fs = float(s2);
+                float ph = wang + wrr * 9.0 - t * 0.00035 - fs * 2.6;
+                float d = abs(fract(ph / 6.2832) - 0.5) * 6.2832;
+                float band = exp(-d * d * 3.5) * exp(-(wrr - 0.26) * (wrr - 0.26) * 6.0);
+                float hueb = fract(t * 0.000016 + seed * 0.001 + fs * 0.36) * 360.0;
+                col += hsl2rgb(hueb, 0.85, 0.55) * band * 0.10;
+            }
         }
     } else if (preset == 1) {
-        // ===== 晶体：raymarching 3D 旋转体 =====
+        // ===== 穿越晶体峡谷：相机沿 z 匀速前行(蛇形)，晶体场域重复平铺 =====
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
-        vec3 ro = vec3(0.0, 0.0, -2.4);
+        float rep = 1.7;                               // z 向晶胞间距
+        float zt = t * 0.55;                           // 前行距离
+        vec3 ro = vec3(sin(t * 0.00019) * 0.30, cos(t * 0.00015) * 0.24, -zt);
         vec3 rd = normalize(vec3(q, 1.7));
-        float mB = 2.0 + 3.5 * styleParam(60.0, t, 0.0, 1.0, seed);
-        float n1a = 0.8 + 0.6 * styleParam(61.0, t, 0.0, 1.0, seed);
-        float n2a = 0.5 + 1.2 * styleParam(62.0, t, 0.0, 1.0, seed);
-        float m2v = 2.0 + 3.5 * styleParam(63.0, t, 0.0, 1.0, seed);
-        float n1b = 0.8 + 0.6 * styleParam(64.0, t, 0.0, 1.0, seed);
-        float n2b = 0.5 + 1.2 * styleParam(65.0, t, 0.0, 1.0, seed);
-        float size = 0.52 * (0.94 + 0.05 * sin(t * 0.00031 + seed)
-            + 0.04 * uBeat + 0.02 * uBass);
-        mat2 ry = rot2(t * 0.00042);
-        mat2 rx = rot2(t * 0.00027);
-        float tt = 0.35 + 0.05 * hash2(gl_FragCoord.xy * 0.37);
-        float nearest = 1e9;      // 射线全程最近表面逼近(像素软边 AA 用)
+        mat2 ry = rot2(t * 0.00018);
+        mat2 rx = rot2(t * 0.00011);
+        float tt = 0.10 + 0.05 * hash2(gl_FragCoord.xy * 0.37);
+        float nearest = 1e9;
         float hitT = -1.0;
+        // SDF：世界 -> 场缓旋 -> z 平铺取胞内最近晶体 -> 与中心管道求交
+        // （管道半径 0.55 保证相机走廊畅通，两侧晶体掠过）
         for (int i = 0; i < 46; i++) {
             vec3 pos = ro + rd * tt;
-            float diff = sdfWorld(pos, mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            nearest = min(nearest, abs(diff));
-            if (diff < 0.0016) {
+            float d = sdfCanyon(pos, ry, rx, rep, seed, t);
+            nearest = min(nearest, abs(d));
+            if (d < 0.0016) {
                 hitT = tt;
                 break;
             }
-            tt += max(diff * 0.45, 0.010);
+            tt += max(d * 0.42, 0.010);
             if (tt > 5.0) {
                 break;
             }
         }
-        // 像素软边：最近逼近距离 vs 该深度处一像素的世界宽度 -> 覆盖率
         float useT = hitT > 0.0 ? hitT : min(tt, 4.2);
         float pixW = useT * 2.2 / max(uRes.y, 1.0);
         float cover = hitT > 0.0 ? 1.0 : exp(-nearest / max(pixW, 1e-5) * 1.1);
         if (cover > 0.004) {
             float tv = hitT > 0.0 ? hitT : useT;
             vec3 pos = ro + rd * tv;
-            // 标准六采样中心差分法线
             float e = max(tv * 1.6 / max(uRes.y, 1.0), 0.0025);
-            float sC = sdfWorld(pos, mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sX1 = sdfWorld(pos + vec3(e, 0.0, 0.0), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sX2 = sdfWorld(pos - vec3(e, 0.0, 0.0), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sY1 = sdfWorld(pos + vec3(0.0, e, 0.0), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sY2 = sdfWorld(pos - vec3(0.0, e, 0.0), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sZ1 = sdfWorld(pos + vec3(0.0, 0.0, e), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            float sZ2 = sdfWorld(pos - vec3(0.0, 0.0, e), mB, n1a, n2a, m2v, n1b, n2b, ry, rx, size);
-            vec3 n = normalize(vec3(sX1 - sX2, sY1 - sY2, sZ1 - sZ2));
-            (void)sC;
+            float sX = sdfCanyon(pos + vec3(e, 0.0, 0.0), ry, rx, rep, seed, t)
+                - sdfCanyon(pos - vec3(e, 0.0, 0.0), ry, rx, rep, seed, t);
+            float sY = sdfCanyon(pos + vec3(0.0, e, 0.0), ry, rx, rep, seed, t)
+                - sdfCanyon(pos - vec3(0.0, e, 0.0), ry, rx, rep, seed, t);
+            float sZ = sdfCanyon(pos + vec3(0.0, 0.0, e), ry, rx, rep, seed, t)
+                - sdfCanyon(pos - vec3(0.0, 0.0, e), ry, rx, rep, seed, t);
+            vec3 n = normalize(vec3(sX, sY, sZ));
             vec3 ld = normalize(vec3(0.5 + 0.35 * sin(t * 0.00022), 0.55, -0.62));
             float dif = clamp(dot(n, ld), 0.0, 1.0);
             float rim = pow(1.0 - abs(dot(n, -rd)), 2.2);
@@ -216,16 +265,20 @@ void main() {
             float fade = exp(-(max(tv - 1.9, 0.0)) * 0.85);
             col = mix(col, lit, clamp(0.80 * cover * (0.35 + 0.65 * fade), 0.0, 1.0));
         }
-        // 体外晕
-        vec2 qo = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        // 前方深处辉光（行进目的地感）
         col += hsl2rgb(fract(t * 0.00002 + hash(seed + 91.0)) * 360.0, 0.7, 0.10)
-            * exp(-dot(qo, qo) * 7.0) * 0.16;
+            * exp(-dot(q, q) * 7.0) * 0.16;
     } else {
-        // ===== 涡旋隧道：伪 3D 深度管道 =====
-        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        // ===== 涡旋隧道：伪 3D 深度管道（弯道 + 提速）=====
+        vec2 q0 = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        float rad0 = max(length(q0), 0.045);
+        // 先按初始深度估弯曲偏移，再二次求角/径（管道转弯的视觉近似）
+        float dEst = 0.22 / rad0 + t * 0.00085;
+        vec2 curve = 0.20 * vec2(sin(dEst * 0.20 + t * 0.0003), cos(dEst * 0.16 + seed));
+        vec2 q = q0 + curve;
         float ang = atan(q.y, q.x);
         float rad = max(length(q), 0.045);
-        float depth = 0.22 / rad + t * 0.00042;
+        float depth = 0.22 / rad + t * 0.00085;
         float sway = 0.05 * sin(t * 0.00019 + seed);
         float aa = ang + sway + 0.14 * sin(depth * 1.7 + t * 0.00021);
         // 网格坐标：周向 6 格 x 深度向流动
