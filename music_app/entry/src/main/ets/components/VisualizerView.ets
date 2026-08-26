@@ -13,20 +13,31 @@
  */
 
 import displaySync from '@ohos.graphics.displaySync';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PlayerController } from '../player/PlayerController';
 import {
   seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb
 } from '../common/VisualizerCore';
+import entry from 'libentry.so';
+
+/** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
+interface XComponentNativeHandle {
+  getNativeHandle(): number;
+}
+
+interface XComponentVizContext {
+  __NATIVE_XCOMPONENT_OBJ__: XComponentNativeHandle;
+}
 
 /** 离屏画布最长边上限：全屏模式下降采样（blur 反馈本身柔化，观感优先） */
 const OFFSCREEN_MAX_DIM = 300;
 /** 暂停后收敛动画时长（ms），之后停帧保留静帧 */
 const FADE_MS = 900;
-/** 绘帧最小间隔：须小于 displaySync 回调间隔（24fps≈41.7ms）+ 余量才能
- * 保证每次回调都落帧、节奏均匀。真机实测 full 整帧 31ms（反馈 7 + 花域
- * 22 + 上屏 1）；此前 expected 30 配 42ms 阈值时回调全被跳过，实际只有
- * 15fps、画面以不规则脉冲整帧替换（观感=一闪一闪，已踩坑） */
-const FRAME_MIN_INTERVAL = 36;
+/** 绘帧最小间隔：须小于 displaySync 回调间隔 + 余量才能保证每次回调都
+ * 落帧。高刷真机上 displaySync 超预期回调（30fps≈33.3ms），阈值取 25ms
+ * 容差；此前 36ms 阈值把 33.3ms 回调成片跳过（实际 15fps 脉冲闪，已踩坑，
+ * 与 2D 管线内容耗时 46ms 时"内容主导"的失败模式不同）。 */
+const FRAME_MIN_INTERVAL = 25;
 /** 风格参数演化周期（ms）：参数空间在此周期间平滑漂移，效果无穷演化 */
 const STYLE_PERIOD = 24000;
 
@@ -59,10 +70,11 @@ export struct VisualizerView {
   private playClock = 0;
   private lastNow = 0;
   private fadeDeadline = 0;
+  private frameLog = 0;
 
   aboutToAppear(): void {
     this.ds = displaySync.create();
-    const range: ExpectedFrameRateRange = { min: 0, max: 30, expected: 24 };
+    const range: ExpectedFrameRateRange = { min: 0, max: 30, expected: 30 };
     this.ds.setExpectedFrameRateRange(range);
     this.ds.on('frame', () => this.frame());
   }
@@ -135,7 +147,11 @@ export struct VisualizerView {
   }
 
   private frame(): void {
-    if (this.disposed || !this.ready || this.offA === null || this.offB === null) {
+    if (this.disposed || !this.ready) {
+      return;
+    }
+    // mini 依赖离屏画布; full 走 XComponent 原生表面, 无离屏上下文
+    if (this.variant === 'mini' && (this.offA === null || this.offB === null)) {
       return;
     }
     const now = Date.now();
@@ -150,64 +166,40 @@ export struct VisualizerView {
       this.playClock += dt;
     }
     const t = this.playClock;
+    // full：shader 管线上屏（XComponent 原生表面，fragment 逐像素解算——
+    // 运算量与像素数相关、与效果复杂度无关，参数驱动）。帧驱动沿用
+    // displaySync 节流；暂停时不渲染即冻结帧。
+    if (this.variant !== 'mini') {
+      entry.renderFrame(t, this.seed, playing);
+      if (!playing && now > this.fadeDeadline) {
+        this.stopLoop();
+      }
+      return;
+    }
     const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
-    const mini = this.variant === 'mini';
 
-    const bars = synthSpectrum(this.seed, t, mini ? 24 : 48);
-    const active = this.flip ? this.offA : this.offB;
+    const bars = synthSpectrum(this.seed, t, 24);
+    const active = (this.flip ? this.offA : this.offB) as OffscreenCanvasRenderingContext2D;
     const W = this.offW;
     const H = this.offH;
 
     active.clearRect(0, 0, W, H);
-    // full：底色为深暗色，画面边缘与屏幕物理边缘连续；mini 透明底
-    if (!mini) {
-      active.fillStyle = 'rgb(12,10,9)';
-      active.fillRect(0, 0, W, H);
-    }
-    // 反馈层：网格流场变形（domain warp）——上一帧按网格分块，每块沿连续
-    // 正弦流场偏移重绘（shader 经典 warp 的 Canvas 近似），叠加微弱缩放
-    // 旋转与衰减，画面被持续揉捏变形而非简单旋转放大
+    // 反馈层：无变换整帧 alpha 叠加（颜色融合拖尾）。
     if (this.prevBitmap !== null) {
-      // 反馈层：无变换整帧 alpha 叠加（颜色融合拖尾）。
-      // 不加平移/旋转/缩放——旋转帧的矩形边缘会露出底色分界（明亮内容
-      // 下呈"矩形框"，用户可见）；内容应自然铺满画布、无任何区域边界感。
-      active.globalAlpha = playing ? (mini ? 0.50 : 0.958) : 0.90;
+      active.globalAlpha = playing ? 0.50 : 0.90;
       active.drawImage(this.prevBitmap, 0, 0, W, H);
     }
 
-    active.globalCompositeOperation = mini ? 'source-over' : 'lighter';
+    active.globalCompositeOperation = 'source-over';
     active.globalAlpha = 1;
-    if (!mini) {
-      // 全屏氛围底光：中心彩色呼吸、向外衰减到完全透明（lighter 叠加）
-      const hue = this.hueBase(t);
-      const glowR = Math.max(W, H) * 0.85;
-      const c0 = hslToRgb(hue, 0.75, 0.12);
-      const c1 = hslToRgb(hue + 30, 0.7, 0.06);
-      const grad = active.createRadialGradient(W / 2, H * 0.46, glowR * 0.32, W / 2, H * 0.46, glowR);
-      grad.addColorStop(0, `rgb(${c0[0]},${c0[1]},${c0[2]})`);
-      grad.addColorStop(0.55, `rgb(${c1[0]},${c1[1]},${c1[2]})`);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      active.fillStyle = grad;
-      active.fillRect(0, 0, W, H);
-      this.drawBlooms(active, t, beat, bars, W, H);
-      this.drawRibbons(active, t, W, H);
-      this.drawMotes(active, t, W, H);
-    } else {
-      this.drawBars(active, t, beat, bars, W, H);
-    }
+    this.drawBars(active, t, beat, bars, W, H);
     active.globalCompositeOperation = 'source-over';
 
     const bmp = active.transferToImageBitmap();
     // 原子上屏：copy 模式单条指令完成「清空+绘制」，避免 clearRect 与
     // drawImage 两条指令之间被合成器采样到空帧（整屏闪一下底色）。
-    // full 变体位图带不透明底色，copy 等价整帧替换；mini 透明底由 copy
-    // 一步清除，透明区不残留。上屏整帧 blur 柔化放大 4 倍后的位图硬边
-    // 与花域轮廓（设计意图一直在 AGENTS.md，此前实现遗漏）；mini 频谱柱
-    // 保持清晰。
     this.displayCtx.globalCompositeOperation = 'copy';
-    this.displayCtx.filter = mini ? 'none' : 'blur(1.2px)';
     this.displayCtx.drawImage(bmp, 0, 0, this.displayCtx.width, this.displayCtx.height);
-    this.displayCtx.filter = 'none';
     this.displayCtx.globalCompositeOperation = 'source-over';
     if (this.prevBitmap !== null) {
       // prevBitmap 仍被反馈层引用；把已上屏数帧的旧位图延迟回收，避开合成管线
@@ -458,16 +450,26 @@ export struct VisualizerView {
         .height('100%')
         .onReady(() => this.initOffscreens())
     } else {
-      // full：全屏容器自身扩展进系统栏（不依赖外层传导）；子画布必须从
-      // 容器左上角布局（Stack 默认居中会把 scale 放大后的画面推偏、顶部
-      // 露出 window 兜底色），内部显示画布布局取 1/4 尺寸再 scale(4)
-      // 放大铺满——内部分辨率与每帧光栅化面积降为 1/16，合成拉伸由 GPU 完成
+      // full：shader 渲染原生表面。XComponent(SURFACE) + EGL/GLES，
+      // fragment shader 逐像素解算全部效果——运算量固定、参数驱动，
+      // 无 Canvas 分块/位图放大等 CPU 管线与伪影。
       Stack({ alignContent: Alignment.TopStart }) {
-        Canvas(this.displayCtx)
-          .width('25%')
-          .height('25%')
-          .scale({ x: 4, y: 4, centerX: '0%', centerY: '0%' })
-          .onReady(() => this.initOffscreens())
+        XComponent({
+          id: 'viz_full',
+          type: XComponentType.SURFACE,
+          libraryname: 'entry'
+        })
+          .width('100%')
+          .height('100%')
+          .onLoad((context) => {
+            // 官方模板桥接：把 __NATIVE_XCOMPONENT_OBJ__ 包装对象传给 NAPI，
+            // native 侧 napi_unwrap 解出 OH_NativeXComponent* 再注册回调
+            entry.registerXComponent((context as XComponentVizContext).__NATIVE_XCOMPONENT_OBJ__);
+            // 渲染管线就绪(原 Canvas 路径由 onReady 置位, XComponent 无对应事件):
+            // 立即启动帧循环, 正在播放时画面即刻出现
+            this.ready = true;
+            this.syncState();
+          })
       }
       .width('100%')
       .height('100%')
