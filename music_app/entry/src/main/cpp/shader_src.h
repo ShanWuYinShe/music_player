@@ -88,44 +88,49 @@ float shapeR(vec3 dir, float m1, float n1a, float n2a, float n3a,
     return superR(phi, m1, n1a, n2a, n3a) * superR(theta, m2, n1b, n2b, n3b);
 }
 
-/** 世界空间 SDF：先逆旋转到物体空间再求径向差 */
-float sdfWorld(vec3 w, float mB, float n1a, float n2a,
-               float m2v, float n1b, float n2b, mat2 ry, mat2 rx, float size) {
-    vec3 pp = w;
-    pp.xz = ry * pp.xz;
-    pp.yz = rx * pp.yz;
-    float len = length(pp);
-    return len - shapeR(pp / max(len, 1e-5),
-        mB, n1a, n2a, 1.2, m2v, n1b, n2b, 1.2) * size;
+/** KIFS 分形 SDF：abs 折叠 + 坐标排序 + 旋转 + 缩放平移迭代 6 次，
+ *  参数(缩放比/折叠角/偏置)不同即产生无穷自相似形态(Menger 类变体)。 */
+float sdfKifs(vec3 p, float scaleK, float angK, vec3 offK) {
+    float ca = cos(angK);
+    float sa = sin(angK);
+    for (int i = 0; i < 6; i++) {
+        p = abs(p);
+        if (p.x < p.y) { float tmp = p.x; p.x = p.y; p.y = tmp; }
+        if (p.x < p.z) { float tmp = p.x; p.x = p.z; p.z = tmp; }
+        if (p.y < p.z) { float tmp = p.y; p.y = p.z; p.z = tmp; }
+        float rx = ca * p.x - sa * p.y;
+        float ry = sa * p.x + ca * p.y;
+        p.x = rx;
+        p.y = ry;
+        p = p * scaleK - offK * (scaleK - 1.0);
+    }
+    vec3 qb = abs(p) - vec3(0.9);
+    return (length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0)) * pow(scaleK, -6.0);
 }
 
-/** 峡谷 SDF：场缓旋 + z 向域重复平铺（每胞 hash 出形态/尺寸/偏置）∩ 中心管道外。
- *  管道半径 0.55 保证相机走廊畅通——晶体只出现在两侧与前方，形成穿越峡谷。 */
+/** 峡谷 SDF：场缓旋 + z 向域重复平铺（每胞 hash 出 KIFS 分形参数/偏置）∩ 中心管道外。
+ *  管道半径 0.55 保证相机走廊畅通——两侧分形结构掠过。 */
 float sdfCanyon(vec3 w, mat2 ry, mat2 rx, float rep, float seed, float t) {
     vec3 pp = w;
     pp.xz = ry * pp.xz;
     pp.yz = rx * pp.yz;
     float zc = floor(pp.z / rep);
     vec3 pq = pp;
-    pq.z = pp.z - (zc + 0.5) * rep;      // 胞内 z ∈ [-rep/2, rep/2]
-    // 胞参数：形态/尺寸/横向偏置（两侧分布，中线留走廊）
+    pq.z = pp.z - (zc + 0.5) * rep;
     float hid = hash(zc * 17.31 + seed * 0.013);
-    float mB = 2.0 + 3.5 * hid;
-    float n1a = 0.8 + 0.6 * hash(zc * 31.7 + seed);
-    float n2a = 0.5 + 1.2 * hash(zc * 47.3 + seed);
-    float m2v = 2.0 + 3.5 * hash(zc * 53.9 + seed);
-    float n1b = 0.8 + 0.6 * hash(zc * 67.1 + seed);
-    float n2b = 0.5 + 1.2 * hash(zc * 79.7 + seed);
-    float size = 0.30 + 0.22 * hash(zc * 91.3 + seed);
+    float scaleK = 1.55 + 0.75 * hash(zc * 23.7 + seed);
+    float angK = 0.35 + 0.85 * hash(zc * 37.3 + seed);
+    vec3 offK = vec3(1.0 + 1.6 * hash(zc * 41.1 + seed),
+        0.6 + 1.2 * hash(zc * 53.9 + seed),
+        0.4 + 0.8 * hash(zc * 61.3 + seed));
+    float size = 0.34 + 0.20 * hash(zc * 71.7 + seed);
     float side = hid > 0.5 ? 1.0 : -1.0;
-    vec2 lateral = vec2(side * (0.78 + 0.3 * hash(zc * 11.7 + seed)),
+    vec2 lateral = vec2(side * (0.82 + 0.3 * hash(zc * 11.7 + seed)),
         (hash(zc * 13.1 + seed) - 0.5) * 0.9);
     pq.xy -= lateral;
-    float len = length(pq);
-    float dCrystal = len - shapeR(pq / max(len, 1e-5),
-        mB, n1a, n2a, 1.2, m2v, n1b, n2b, 1.2) * size;
-    float dTube = length(pp.xy) - 0.55;   // 管道外为正
-    return max(dCrystal, dTube) * 0.6;    // 交集缩 Lipschitz
+    float dFrac = sdfKifs(pq / size, scaleK, angK, offK) * size;
+    float dTube = length(pp.xy) - 0.55;
+    return max(dFrac, dTube) * 0.6;
 }
 
 void main() {
@@ -144,7 +149,7 @@ void main() {
     float hue0 = fract(t * 0.000018 + hash(seed) * 3.0) * 360.0;
 
     // ---- 风格轮换：26s each，seed 决定起点 ----
-    float cyc = mod(t / 26000.0 + hash(seed) * 11.0, 3.0);
+    float cyc = mod(t / 26000.0 + hash(seed) * 11.0, 4.0);
     int preset = int(floor(cyc));
 
     if (preset == 0) {
@@ -268,6 +273,36 @@ void main() {
         // 前方深处辉光（行进目的地感）
         col += hsl2rgb(fract(t * 0.00002 + hash(seed + 91.0)) * 360.0, 0.7, 0.10)
             * exp(-dot(q, q) * 7.0) * 0.16;
+    } else if (preset == 2) {
+        // ===== Julia 之海：c 沿指数螺线漫游(形态无穷变形) + 缓慢变焦漂移 =====
+        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        float theta = t * 0.00009 + seed * 0.017;
+        float radius = 0.7885 * (0.97 + 0.05 * sin(t * 0.00013 + seed));
+        vec2 cJulia = vec2(cos(theta), sin(theta)) * radius;
+        vec2 pan = vec2(sin(t * 0.00007), cos(t * 0.00005)) * 0.30;
+        float zoomBase = 1.35 + 0.55 * sin(t * 0.00006 + seed);
+        vec2 zj = q * zoomBase + pan;
+        float esc = 0.0;
+        float mIter = 0.0;
+        for (int ij = 0; ij < 48; ij++) {
+            zj = vec2(zj.x * zj.x - zj.y * zj.y, 2.0 * zj.x * zj.y) + cJulia;
+            float dj = dot(zj, zj);
+            mIter += 1.0;
+            if (dj > 16.0) {
+                esc = 1.0;
+                break;
+            }
+        }
+        if (esc > 0.5) {
+            float nu = mIter - log2(log2(max(dot(zj, zj), 1.0001))) + 4.0;
+            float hueJ = fract(nu * 0.045 + t * 0.00001 + hash(seed + 0.3)) * 360.0;
+            float glowJ = exp(-mIter * 0.045);
+            col += hsl2rgb(hueJ, 0.85, 0.42 + 0.18 * uBeat)
+                * (0.05 + nu * 0.0024 + glowJ * 0.5) * (0.8 + 0.4 * uBass);
+        } else {
+            col += hsl2rgb(fract(t * 0.00002 + 0.55) * 360.0, 0.6, 0.16)
+                * (0.10 + 0.08 * uBass);
+        }
     } else {
         // ===== 涡旋隧道：伪 3D 深度管道（弯道 + 提速）=====
         vec2 q0 = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
