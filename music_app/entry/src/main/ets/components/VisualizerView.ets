@@ -20,6 +20,18 @@ import {
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
+/** 可视化风格总数（与 shader_src.h 的轮换模数保持一致） */
+const PRESET_COUNT = 8;
+/** 风格自动轮换周期（毫秒） */
+const PRESET_PERIOD = 26000;
+
+/** 与 shader 内 hash() 同式（保证自动轮换相位判断一致） */
+function shaderHash(n: number): number {
+  return (Math.sin(n) * 43758.5453123) % 1 < 0
+    ? (Math.sin(n) * 43758.5453123) % 1 + 1
+    : (Math.sin(n) * 43758.5453123) % 1;
+}
+
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {
   getNativeHandle(): number;
@@ -65,6 +77,8 @@ export struct VisualizerView {
 
   private lastSongId = '';
   private seed = 0;
+  /** 风格锁定号：-1 自动轮换；>=0 锁定指定风格（点击可视化区域循环切换） */
+  private presetLock: number = -1;
   private beatPhase = 0;
   /** 有效播放时钟：暂停期间不走，保证画面冻结在暂停时刻 */
   private playClock = 0;
@@ -146,6 +160,25 @@ export struct VisualizerView {
     }
   }
 
+  /** 点击可视化区域：循环切换到下一个风格（-1 自动 → 0..N-1 锁定 → 回自动） */
+  private cyclePreset(): void {
+    const current = this.currentPreset();
+    if (this.presetLock < 0) {
+      this.presetLock = (current + 1) % PRESET_COUNT;  // 从自动的当前风格切到下一个
+    } else if (this.presetLock >= PRESET_COUNT - 1) {
+      this.presetLock = -1;  // 末尾回到自动轮换
+    } else {
+      this.presetLock += 1;
+    }
+  }
+
+  /** 当前生效风格号（自动模式下按 shader 同式相位计算） */
+  private currentPreset(): number {
+    const t = this.playClock;
+    const cyc = ((t / PRESET_PERIOD) + shaderHash(this.seed) * 11.0) % PRESET_COUNT;
+    return Math.floor(cyc);
+  }
+
   private frame(): void {
     if (this.disposed || !this.ready) {
       return;
@@ -176,7 +209,7 @@ export struct VisualizerView {
       const spec = synthSpectrum(this.seed, t, 8);
       const bass = (spec[0] + spec[1]) / 2;
       const treble = (spec[6] + spec[7]) / 2;
-      entry.renderFrame(t, this.seed, playing, beat, bass, treble);
+      entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock);
       if (!playing && now > this.fadeDeadline) {
         this.stopLoop();
       }
@@ -467,6 +500,7 @@ export struct VisualizerView {
         })
           .width('100%')
           .height('100%')
+          .onClick(() => this.cyclePreset())
           .onLoad((context) => {
             // 官方模板桥接：把 __NATIVE_XCOMPONENT_OBJ__ 包装对象传给 NAPI，
             // native 侧 napi_unwrap 解出 OH_NativeXComponent* 再注册回调

@@ -215,7 +215,8 @@ void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window) {
     }
 }
 
-void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble) {
+void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
+                     double presetLock) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
         return;
     }
@@ -253,6 +254,8 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     glUniform1f(uBeat, static_cast<float>(beat));
     glUniform1f(uBass, static_cast<float>(bass));
     glUniform1f(uTreble, static_cast<float>(treble));
+    GLint uPresetSel = glGetUniformLocation(gProgramScene, "uPresetSel");
+    glUniform1f(uPresetSel, static_cast<float>(presetLock));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
     glUniform1i(uPrev, 0);

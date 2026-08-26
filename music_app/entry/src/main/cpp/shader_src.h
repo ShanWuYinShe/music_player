@@ -37,6 +37,7 @@ uniform vec2 uRes;
 uniform float uBeat;    // 节拍包络 [0.25,1]（合成，种子派生 BPM）
 uniform float uBass;    // 低频段能量 [0,1]
 uniform float uTreble;  // 高频段能量 [0,1]
+uniform float uPresetSel;  // 风格锁定号：-1 自动轮换，>=0 锁定该风格
 uniform sampler2D uPrev;
 
 float hash(float n) { return fract(sin(n) * 43758.5453123); }
@@ -148,9 +149,9 @@ void main() {
 
     float hue0 = fract(t * 0.000018 + hash(seed) * 3.0) * 360.0;
 
-    // ---- 风格轮换：26s each，seed 决定起点 ----
-    float cyc = mod(t / 26000.0 + hash(seed) * 11.0, 4.0);
-    int preset = int(floor(cyc));
+    // ---- 风格轮换：26s each，seed 决定起点；uPresetSel>=0 时锁定（点击切换） ----
+    float cyc = mod(t / 26000.0 + hash(seed) * 11.0, 8.0);
+    int preset = uPresetSel >= 0.0 ? int(uPresetSel) : int(floor(cyc));
 
     if (preset == 0) {
         // ===== 流动星野：相机匀速前行（方向缓旋），花域在世界空间平铺掠过 =====
@@ -303,7 +304,7 @@ void main() {
             col += hsl2rgb(fract(t * 0.00002 + 0.55) * 360.0, 0.6, 0.16)
                 * (0.10 + 0.08 * uBass);
         }
-    } else {
+    } else if (preset == 3) {
         // ===== 涡旋隧道：伪 3D 深度管道（弯道 + 提速）=====
         vec2 q0 = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
         float rad0 = max(length(q0), 0.045);
@@ -333,6 +334,108 @@ void main() {
         // 中心深处辉光
         col += hsl2rgb(mod(hue + 43.0, 360.0), 0.7, 0.42)
             * exp(-rad * rad * 26.0) * (0.08 + 0.05 * uBass + 0.03 * uBeat);
+    } else if (preset == 4) {
+        // ===== Mandelbrot 深潜：兴趣点持续放大（限精度域内呼吸重置）=====
+        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        // 兴趣点按 seed 三选一：海马谷/大象谷/双螺旋（经典边界富集区）
+        vec2 poi[3];
+        poi[0] = vec2(-0.743643887037151, 0.131825904205330);
+        poi[1] = vec2(0.286931868895045, 0.014286693904085);
+        poi[2] = vec2(-0.16, 1.0405);
+        vec2 poiSel = poi[int(mod(seed, 3.0))];
+        // 放大深度: 指数深潜到 1.6e4 倍(精度安全)后缓出重置
+        float dive = t * 0.00035;
+        float zoomM = 0.32 * pow(1.00013, mod(dive, 88.0)) * (1.0 + 0.1 * sin(t * 0.0002));
+        vec2 z0 = poiSel + q * zoomM;
+        float mIt = 0.0;
+        float esc = 0.0;
+        vec2 zm = vec2(0.0, 0.0);
+        for (int im = 0; im < 60; im++) {
+            zm = vec2(zm.x * zm.x - zm.y * zm.y, 2.0 * zm.x * zm.y) + z0;
+            float dm = dot(zm, zm);
+            mIt += 1.0;
+            if (dm > 16.0) { esc = 1.0; break; }
+        }
+        if (esc > 0.5) {
+            float nu = mIt - log2(log2(max(dot(zm, zm), 1.0001))) + 4.0;
+            float hueM = fract(nu * 0.03 + t * 0.000008 + hash(seed + 0.7)) * 360.0;
+            col += hsl2rgb(hueM, 0.85, 0.42 + 0.15 * uBeat) * (0.04 + nu * 0.0022) * (0.8 + 0.4 * uBass);
+        } else {
+            col += hsl2rgb(fract(t * 0.00003) * 360.0, 0.7, 0.10) * 0.20;
+        }
+    } else if (preset == 5) {
+        // ===== 极光幕：三层视差帘幕漂移 + 星空底 =====
+        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        for (int la = 0; la < 3; la++) {
+            float fl = float(la);
+            float depth = 1.0 + fl * 0.75;                 // 层深度(视差)
+            float xw = q.x * (2.2 + fl * 0.7) + t * (0.00009 + fl * 0.00005) + seed * 0.01;
+            float ridge = 0.34 + 0.16 * fl
+                + 0.06 * sin(xw * 2.1 + t * 0.0003)
+                + 0.04 * sin(xw * 4.7 - t * 0.00021);
+            float drape = exp(-abs(q.y - ridge) * (9.0 - fl * 2.0)) * (1.0 - q.y * 0.45);
+            float flick = 0.7 + 0.3 * sin(xw * 9.0 + t * 0.0011 + fl * 2.0);
+            float hueA = 120.0 + 55.0 * fl + 18.0 * sin(t * 0.00016 + fl);
+            col += hsl2rgb(hueA, 0.85, 0.42 + 0.10 * uBass) * drape * flick * (0.30 - fl * 0.06)
+                * (0.85 + 0.3 * uBeat);
+        }
+        // 星空底
+        {
+            vec2 sc = floor(q * 26.0);
+            float sid = hash2(sc + seed);
+            if (sid > 0.93) {
+                vec2 spos = (sc + 0.5) / 26.0;
+                col += vec3(0.7, 0.75, 0.8) * exp(-dot(q - spos, q - spos) * 4200.0)
+                    * (0.4 + 0.6 * sin(t * 0.003 + sid * 50.0)) * 0.30;
+            }
+        }
+    } else if (preset == 6) {
+        // ===== 万花筒：扇形镜像折叠 + 花域/光斑图案旋转 =====
+        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        float KSEG = 7.0;
+        float angK = atan(q.y, q.x) + t * 0.00014;
+        float ring = length(q) * (1.1 + 0.12 * sin(t * 0.0004));
+        float seg = mod(angK, 6.2831853 / KSEG);
+        seg = abs(seg - 3.1415927 / KSEG);            // 镜像折叠
+        vec2 fq = vec2(cos(seg), sin(seg)) * ring;
+        // 折叠坐标里画一朵 Superformula 花 + 双层光斑
+        float mm = 2.0 + 5.0 * styleParam(80.0, t, 0.0, 1.0, seed);
+        float n1k = 0.7 + 0.6 * styleParam(81.0, t, 0.0, 1.0, seed);
+        float n2k = 0.3 + 1.7 * styleParam(82.0, t, 0.0, 1.0, seed);
+        float n3k = 0.3 + 1.7 * styleParam(83.0, t, 0.0, 1.0, seed);
+        float ca = cos(mm * seg / 4.0);
+        float sa = sin(mm * seg / 4.0);
+        float denom = pow(abs(ca), n2k) + pow(abs(sa), n3k);
+        float rSurf = (0.20 + 0.10 * sin(t * 0.0005 + seed)) / pow(max(denom, 0.25), 1.0 / n1k)
+            * (0.92 + 0.13 * uBeat);
+        float edge = exp(-abs(ring - rSurf) * 34.0);
+        float hueW = fract(t * 0.016 + seed * 0.001 + ring * 0.8) * 360.0;
+        col += hsl2rgb(hueW, 0.85, 0.55) * edge * (0.14 + 0.06 * uBeat);
+        // 花心辉光 + 外圈珠链
+        col += hsl2rgb(mod(hueW + 40.0, 360.0), 0.8, 0.45)
+            * exp(-ring * ring * 26.0) * (0.10 + 0.08 * uBass);
+        float beads = exp(-pow(sin(ring * 34.0 - t * 0.0012) , 2.0) * 12.0)
+            * exp(-abs(ring - 0.62) * 9.0);
+        col += hsl2rgb(mod(hueW + 180.0, 360.0), 0.8, 0.5) * beads * (0.10 + 0.08 * uTreble);
+    } else {
+        // ===== 干涉波纹：四波源漂移干涉，径向外推行进 =====
+        vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
+        float acc = 0.0;
+        for (int wi = 0; wi < 4; wi++) {
+            float fw = float(wi);
+            vec2 src = vec2(
+                sin(t * (0.00011 + fw * 0.00007) + fw * 2.4 + seed) * 0.45,
+                cos(t * (0.00009 + fw * 0.00006) + fw * 1.7 + seed) * 0.38);
+            float dist = length(q - src);
+            acc += sin(dist * (34.0 - fw * 4.0) - t * (0.0016 + fw * 0.0004));
+        }
+        float ringI = (acc * 0.25 + 1.0) * 0.5;             // 0..1
+        float v = pow(ringI, 3.0);
+        float hueI = fract(t * 0.00002 + seed * 0.001 + v * 0.25) * 360.0;
+        col += hsl2rgb(hueI, 0.85, 0.5) * v * (0.16 + 0.10 * uBeat);
+        // 中心辉光
+        col += hsl2rgb(mod(hueI + 60.0, 360.0), 0.75, 0.4)
+            * exp(-dot(q, q) * 5.0) * (0.10 + 0.10 * uBass);
     }
 
     outColor = vec4(col, 1.0);
