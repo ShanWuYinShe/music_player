@@ -190,6 +190,7 @@ export struct VisualizerView {
       active.fillStyle = grad;
       active.fillRect(0, 0, W, H);
       this.drawBlooms(active, t, beat, bars, W, H);
+      this.drawRibbons(active, t, W, H);
       this.drawMotes(active, t, W, H);
     } else {
       this.drawBars(active, t, beat, bars, W, H);
@@ -312,6 +313,61 @@ export struct VisualizerView {
         ctx.closePath();
         ctx.fill();
       }
+    }
+  }
+
+  /**
+   * 曲线扩散光带：螺旋旋涡带（两次采样、阿基米德螺线、内亮外淡、慢速
+   * 自转）+ 扩散弧环（从中心向外推移淡出、相位错开循环）。全部为连续
+   * 曲线描边——无矩形边界、无全屏脉冲；alpha 低避免 lighter 累积过曝。
+   */
+  private drawRibbons(ctx: OffscreenCanvasRenderingContext2D, t: number, W: number, H: number): void {
+    const m0 = Math.min(W, H);
+    const cx = W / 2;
+    const cy = H * 0.47;
+    ctx.lineCap = 'round';
+    // 螺旋带：两条,不同速率与色相,分段绘制以做内亮外淡的衰减
+    for (let s = 0; s < 2; s++) {
+      const rot = t * (0.00010 + 0.00010 * s) + s * 2.6;
+      const hue = (t * (0.016 + 0.005 * s) + this.seed + s * 130) % 360;
+      const c = hslToRgb(hue, 0.85, 0.55);
+      const turns = 2.0 + 0.4 * s;
+      const segs = 6;
+      for (let seg = 0; seg < segs; seg++) {
+        const a0 = seg / segs;
+        const dt = 1 / segs;
+        ctx.beginPath();
+        const steps = Math.max(6, Math.round(turns * 36 / segs));
+        for (let j = 0; j <= steps; j++) {
+          const u = a0 + dt * j / steps;
+          const th = u * turns * 2 * Math.PI + rot;
+          const r = m0 * (0.06 + 0.85 * u) * (1 + 0.06 * Math.sin(t * 0.0004 + s * 1.3));
+          const x = cx + r * Math.cos(th);
+          const y = cy + r * Math.sin(th);
+          if (j === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${0.22 * (1 - a0)})`;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+    }
+    // 扩散弧环：三条相位错开,由内向外推移并淡出,周期循环
+    for (let q = 0; q < 3; q++) {
+      const prog = (t * 0.00022 + q / 3) % 1;
+      const rad = m0 * (0.16 + 0.72 * prog);
+      const alpha = 0.15 * (1 - prog);
+      const hue = (t * 0.012 + this.seed + q * 90) % 360;
+      const c = hslToRgb(hue, 0.8, 0.5);
+      ctx.beginPath();
+      const start = t * 0.0008 + q * 2.1;
+      ctx.arc(cx, cy, rad, start, start + Math.PI * 1.7);
+      ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+      ctx.lineWidth = 4;
+      ctx.stroke();
     }
   }
 
