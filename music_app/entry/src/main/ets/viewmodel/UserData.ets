@@ -1,4 +1,8 @@
 import { preferences } from '@kit.ArkData';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const TAG = 'UserData';
+const DOMAIN = 0x0004;
 
 const KEY_FAVORITE_IDS = 'favorite_ids';
 const KEY_RECENT_IDS = 'recent_ids';
@@ -74,9 +78,13 @@ export class UserData {
     }
     try {
       this.pref.putSync(key, value);
-      this.pref.flush();
+      // flush 是异步落盘：失败需捕获记日志，避免 unhandled rejection
+      this.pref.flush().catch((err: Object) => {
+        hilog.warn(DOMAIN, TAG, 'flush %{public}s failed: %{public}s', key, JSON.stringify(err));
+      });
     } catch (err) {
       // 持久化失败不影响功能，仅丢偏好数据
+      hilog.warn(DOMAIN, TAG, 'persist %{public}s failed: %{public}s', key, JSON.stringify(err));
     }
   }
 

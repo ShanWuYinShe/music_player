@@ -3,12 +3,14 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { SongRecord } from '../model/Song';
-import { parseId3 } from './Id3Parser';
+import { parseId3Async } from './Id3Parser';
 
 const TAG = 'MusicLibrary';
 const DOMAIN = 0x0001;
 const LIBRARY_FILE = 'library.json';
 const SUPPORTED_EXTS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'];
+/** 高频持久化变更的合并窗口（毫秒）：窗口内多次变更只落盘一次 */
+const SAVE_DEBOUNCE_MS = 500;
 const utf8Decoder = util.TextDecoder.create('utf-8');
 
 /**
@@ -18,6 +20,8 @@ const utf8Decoder = util.TextDecoder.create('utf-8');
 export class MusicLibrary {
   private context: common.Context | null = null;
   private songs: SongRecord[] = [];
+  /** 防抖落盘定时器 id（-1 无待写任务） */
+  private saveTimerId: number = -1;
 
   /** 注入应用上下文并加载持久化索引 */
   init(context: common.Context): void {
@@ -90,7 +94,11 @@ export class MusicLibrary {
         }
         const content: Uint8Array = await this.context.resourceManager.getRawFileContent(demoName);
         this.writeBytes(target, content);
-        this.songs.push(this.makeRecord(target, demoName));
+        const record = await this.makeRecord(target, demoName);
+        if (this.songs.some((item) => item.id === record.id)) {
+          continue; // 双击等并发触发的兜底：已有同名记录不入索引
+        }
+        this.songs.push(record);
         added++;
       } catch (err) {
         hilog.error(DOMAIN, TAG, 'import demo failed: %{public}s', JSON.stringify(err));
@@ -164,13 +172,24 @@ export class MusicLibrary {
     }
   }
 
-  /** 首次播放获得时长后回填并持久化 */
+  /** 首次播放获得时长后回填；高频变更走防抖合并落盘 */
   updateDuration(id: string, duration: number): void {
     const song = this.getSongById(id);
     if (song && song.duration !== duration) {
       song.duration = duration;
-      this.save();
+      this.scheduleSave();
     }
+  }
+
+  /** 高频变更的合并持久化：窗口内多次变更只全量写盘一次 */
+  private scheduleSave(): void {
+    if (this.saveTimerId >= 0) {
+      clearTimeout(this.saveTimerId);
+    }
+    this.saveTimerId = setTimeout(() => {
+      this.saveTimerId = -1;
+      this.save();
+    }, SAVE_DEBOUNCE_MS);
   }
 
   private async importUri(uri: string): Promise<SongRecord | null> {
@@ -178,23 +197,40 @@ export class MusicLibrary {
     const dot = displayName.lastIndexOf('.');
     const ext = dot >= 0 ? displayName.substring(dot + 1).toLowerCase() : '';
     const safeExt = SUPPORTED_EXTS.includes(ext) ? ext : 'mp3';
+    const normalized = this.normalizedFileName(displayName, safeExt);
+    // 拷贝前按「规范化文件名_大小」查重：直接重复导入同一 URI 时 uniqueName
+    // 会因同名冲突改出新文件名（id 随之不同），仅靠拷贝后比对 id 永远不命中。
+    let size = 0;
+    try {
+      size = fs.statSync(uri).size;
+    } catch (err) {
+      // 个别源 URI 不支持 stat：退回拷贝后判定
+    }
+    if (size > 0 && this.songs.some((item) => item.id === `${normalized}_${size}`)) {
+      return null;
+    }
     // 保留原文件名便于用户识别；同名不同内容靠 id（名称+大小）去重
-    const target = `${this.musicDir()}/${this.uniqueName(displayName, safeExt)}`;
+    const target = `${this.musicDir()}/${this.uniqueName(normalized)}`;
     await fs.copyFile(uri, target);
-    const record = this.makeRecord(target);
+    const record = await this.makeRecord(target);
     if (this.songs.some((item) => item.id === record.id)) {
-      fs.unlinkSync(target); // 重复导入，丢弃新拷贝
+      fs.unlinkSync(target); // stat 失败漏判的重复导入，丢弃新拷贝
       return null;
     }
     return record;
   }
 
-  /** 生成沙盒内不冲突的文件名 */
-  private uniqueName(displayName: string, ext: string): string {
+  /** 规范化显示名为沙盒文件名基础形态（去非法字符，确保带扩展名） */
+  private normalizedFileName(displayName: string, ext: string): string {
     let base = displayName.replace(/[\/\\:*?"<>|]/g, '_');
     if (!base.includes('.')) {
       base = `${base}.${ext}`;
     }
+    return base;
+  }
+
+  /** 在规范化文件名基础上生成沙盒内不冲突的文件名 */
+  private uniqueName(base: string): string {
     let candidate = base;
     let counter = 1;
     while (fs.accessSync(`${this.musicDir()}/${candidate}`)) {
@@ -205,8 +241,8 @@ export class MusicLibrary {
     return candidate;
   }
 
-  /** 由沙盒文件生成歌曲记录：mp3 走 ID3，其余按文件名解析「歌手 - 歌名」 */
-  private makeRecord(path: string, rawFileName?: string): SongRecord {
+  /** 由沙盒文件生成歌曲记录：mp3 走 ID3（taskpool 子线程解析），其余按文件名解析「歌手 - 歌名」 */
+  private async makeRecord(path: string, rawFileName?: string): Promise<SongRecord> {
     const fileName = path.substring(path.lastIndexOf('/') + 1);
     const size = fs.statSync(path).size;
     const record: SongRecord = {
@@ -219,7 +255,7 @@ export class MusicLibrary {
       coverPath: ''
     };
     if (fileName.toLowerCase().endsWith('.mp3')) {
-      const tag = parseId3(path);
+      const tag = await parseId3Async(path);
       record.title = tag.title;
       record.artist = tag.artist;
       record.album = tag.album;

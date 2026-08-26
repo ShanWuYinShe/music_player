@@ -96,7 +96,6 @@ export struct PlayerPage {
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
             .onClick(() => {
-              console.info('queue button clicked');
               this.isQueueOpen = true;
             })
         }
@@ -266,9 +265,11 @@ export struct PlayerPage {
     })
   }
 
-  /** 队列展示顺序：插播在前，其余按曲库顺序 */
-  private queueEntries(): QueueEntry[] {
-    const insertedIds = this.player.playNextIds();
+  /** 队列展示顺序：插播在前，其余按队列顺序。
+   * @Computed 缓存一次结果，sheet 汇总行/定位/List 数据源共享，插播查重用 Set */
+  @Computed
+  get queueEntries(): QueueEntry[] {
+    const insertedIds = new Set(this.player.playNextIds());
     const entries: QueueEntry[] = [];
     for (const id of insertedIds) {
       const song = appStore.library.getSongById(id);
@@ -277,7 +278,7 @@ export struct PlayerPage {
       }
     }
     for (const song of this.player.songs) {
-      if (!insertedIds.includes(song.id)) {
+      if (!insertedIds.has(song.id)) {
         entries.push({ song: song, inserted: false });
       }
     }
@@ -299,7 +300,7 @@ export struct PlayerPage {
     Column() {
       // 汇总行
       Row({ space: 8 }) {
-        Text(`${this.queueEntries().length} 首 · ${playModeLabel(this.player.playMode)}`)
+        Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.player.playMode)}`)
           .fontSize(12)
           .fontColor($r('app.color.ink_faint'))
         if (this.player.playNextCount > 0) {
@@ -316,8 +317,8 @@ export struct PlayerPage {
       .width('100%')
       .padding({ left: 20, right: 20, bottom: 8 })
 
-      List({ space: 2, initialIndex: this.currentIndexIn(this.queueEntries()) }) {
-        ForEach(this.queueEntries(), (entry: QueueEntry, index: number) => {
+      List({ space: 2, initialIndex: this.currentIndexIn(this.queueEntries) }) {
+        ForEach(this.queueEntries, (entry: QueueEntry, index: number) => {
           ListItem() {
             Row({ space: 12 }) {
               if (entry.song.id === this.player.currentSongId) {

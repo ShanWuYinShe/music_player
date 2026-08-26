@@ -15,6 +15,44 @@ enum SourceTab {
   ONLINE = 1
 }
 
+/** 在线搜索防抖：输入停顿该时长后触发服务端搜索（毫秒） */
+const SEARCH_DEBOUNCE_MS = 600;
+
+/**
+ * 歌曲列表数据源：包装过滤结果供 LazyForEach 按需创建列表项。
+ * 列表总是整体替换（曲库刷新/筛选条件变化后 reload），无增量增删场景。
+ */
+class SongListDataSource implements IDataSource {
+  private listeners: DataChangeListener[] = [];
+  private list: SongRecord[] = [];
+
+  reload(list: SongRecord[]): void {
+    this.list = list;
+    this.listeners.forEach((listener) => listener.onDataReloaded());
+  }
+
+  totalCount(): number {
+    return this.list.length;
+  }
+
+  getData(index: number): SongRecord {
+    return this.list[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) < 0) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const idx = this.listeners.indexOf(listener);
+    if (idx >= 0) {
+      this.listeners.splice(idx, 1);
+    }
+  }
+}
+
 /**
  * 主页面：源切换（本地/在线）+ 搜索/分类/排序 + 歌曲列表 + 迷你播放条，
  * Navigation 承载播放页与设置页。
@@ -35,11 +73,20 @@ struct Index {
   @Local onlineSongs: SongRecord[] = [];
   /** 在线搜索防抖定时器 id（-1 无待触发任务） */
   private searchTimerId: number = -1;
+  /** 在线请求代际号：新查询使旧响应作废（latest-wins，慢网下不再丢新查询） */
+  private onlineRequestId: number = 0;
+  /** LazyForEach 数据源 */
+  private songSource: SongListDataSource = new SongListDataSource();
 
-  /** 当前 Tab 与搜索词过滤后的列表。
+  aboutToAppear(): void {
+    this.songSource.reload(this.filteredSongs);
+  }
+
+  /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
    * 在线模式列表即最近一次服务端返回（q 已在服务端匹配并聚合网络源），
    * 不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉。 */
-  private visibleSongs(): SongRecord[] {
+  @Computed
+  get filteredSongs(): SongRecord[] {
     if (this.sourceTab === SourceTab.ONLINE) {
       return appStore.player.songs;
     }
@@ -53,8 +100,33 @@ struct Index {
     return filterAndSort(appStore.player.songs, opts);
   }
 
-  private existingCount(ids: string[]): number {
-    return ids.filter((id) => appStore.library.getSongById(id) !== null).length;
+  @Monitor('filteredSongs')
+  onFilteredSongsChange(): void {
+    this.songSource.reload(this.filteredSongs);
+  }
+
+  /** 分类计数缓存：三个 chip 多处读取共享一次计算 */
+  @Computed
+  get tabCounts(): Map<LibraryTab, number> {
+    const counts = new Map<LibraryTab, number>();
+    counts.set(LibraryTab.ALL, appStore.player.songs.length);
+    // O(曲目数+记录数)：以现有曲目 id 建 Set 替代逐条线性扫
+    const known = new Set(appStore.player.songs.map((song) => song.id));
+    let favCount = 0;
+    for (const id of appStore.userData.favoriteIds) {
+      if (known.has(id)) {
+        favCount++;
+      }
+    }
+    counts.set(LibraryTab.FAVORITES, favCount);
+    let recentCount = 0;
+    for (const id of appStore.userData.recentIds) {
+      if (known.has(id)) {
+        recentCount++;
+      }
+    }
+    counts.set(LibraryTab.RECENT, recentCount);
+    return counts;
   }
 
   build() {
@@ -182,7 +254,7 @@ struct Index {
         }
 
         // 歌曲列表 / 空态
-        if (this.visibleSongs().length === 0) {
+        if (this.filteredSongs.length === 0) {
           if (this.sourceTab === SourceTab.ONLINE) {
             this.OnlineStatusView()
           } else if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
@@ -197,7 +269,7 @@ struct Index {
           }
         } else {
           List({ space: 2 }) {
-            ForEach(this.visibleSongs(), (song: SongRecord) => {
+            LazyForEach(this.songSource, (song: SongRecord) => {
               ListItem() {
                 SongItem({
                   song: song,
@@ -214,8 +286,9 @@ struct Index {
                   }
                 }
               })
-            }, (song: SongRecord) => `${song.id}#${song.duration}`)
+            }, (song: SongRecord) => song.id)
           }
+          .cachedCount(6)
           .width('100%')
           .layoutWeight(1)
           .padding({ left: 12, right: 12, bottom: 8 })
@@ -242,15 +315,9 @@ struct Index {
     .navDestination(this.pageMap)
   }
 
-  /** 分类计数：在 Builder 内部读取状态以建立响应依赖（按值传参不刷新） */
+  /** 分类计数：在 Builder 内部读取 @Computed 状态以建立响应依赖（按值传参不刷新） */
   private chipCount(tab: LibraryTab): number {
-    if (tab === LibraryTab.ALL) {
-      return appStore.player.songs.length;
-    }
-    if (tab === LibraryTab.FAVORITES) {
-      return this.existingCount(appStore.userData.favoriteIds);
-    }
-    return this.existingCount(appStore.userData.recentIds);
+    return this.tabCounts.get(tab) ?? 0;
   }
 
   @Builder
@@ -570,9 +637,10 @@ struct Index {
     }
   }
 
-  /** 从设置页返回时重新拉取在线曲库（Base URL 可能刚配置/修改过） */
+  /** 从设置页返回时，仅在服务地址刚变更过才重拉在线曲库；
+   * 从播放页等页面返回不再盲目重拉，避免打断现有队列与列表状态 */
   onPageShow(): void {
-    if (this.sourceTab === SourceTab.ONLINE) {
+    if (this.sourceTab === SourceTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
       this.enterOnline(this.searchText.trim());
     }
   }
@@ -592,13 +660,13 @@ struct Index {
     }
   }
 
-  /** 在线搜索防抖：输入停顿 600ms 后触发服务端搜索 */
+  /** 在线搜索防抖：输入停顿后触发服务端搜索 */
   private scheduleOnlineSearch(): void {
     this.cancelPendingSearch();
     this.searchTimerId = setTimeout(() => {
       this.searchTimerId = -1;
       this.enterOnline(this.searchText.trim());
-    }, 600);
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   private cancelPendingSearch(): void {
@@ -608,18 +676,23 @@ struct Index {
     }
   }
 
-  /** 进入在线源：按关键词拉取曲目（空=曲库全量）并替换播放队列；失败时回退旧缓存并提示 */
+  /** 进入在线源：按关键词拉取曲目（空=曲库全量）并替换播放队列；失败时回退旧缓存并提示。
+   * latest-wins：在途请求期间的新查询立即发出，旧响应按代际号作废丢弃 */
   private async enterOnline(query: string): Promise<void> {
-    if (this.onlineLoading) {
-      return;
-    }
+    const reqId = ++this.onlineRequestId;
     this.onlineLoading = true;
     this.onlineError = '';
     try {
       const list = await appStore.onlineSource.fetchSongs(query);
+      if (reqId !== this.onlineRequestId) {
+        return; // 已有更新的查询在途，过期响应丢弃
+      }
       this.onlineSongs = list;
       appStore.player.setOnlineQueue(list);
     } catch (err) {
+      if (reqId !== this.onlineRequestId) {
+        return;
+      }
       this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
       if (this.onlineSongs.length > 0) {
         // 拉取失败但有旧缓存：继续用旧列表，不打断已有队列
@@ -627,7 +700,10 @@ struct Index {
         promptAction.showToast({ message: '在线列表拉取失败，正在展示上次结果' });
       }
     } finally {
-      this.onlineLoading = false;
+      // 仅最新请求有权收尾 loading，避免旧响应提前关闭新查询的加载态
+      if (reqId === this.onlineRequestId) {
+        this.onlineLoading = false;
+      }
     }
   }
 
@@ -658,10 +734,18 @@ struct Index {
 
   /** 载入 rawfile 内置演示曲目 */
   private async loadDemos(): Promise<void> {
-    const added = await appStore.library.importDemoTracks();
-    appStore.player.refreshSongs();
-    promptAction.showToast({
-      message: added > 0 ? `已载入 ${added} 首演示曲目` : '演示曲目已加载过'
-    });
+    if (this.scanning) {
+      return; // 与导入共用并发守卫，双击不产生重复记录
+    }
+    this.scanning = true;
+    try {
+      const added = await appStore.library.importDemoTracks();
+      appStore.player.refreshSongs();
+      promptAction.showToast({
+        message: added > 0 ? `已载入 ${added} 首演示曲目` : '演示曲目已加载过'
+      });
+    } finally {
+      this.scanning = false;
+    }
   }
 }

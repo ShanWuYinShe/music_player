@@ -24,6 +24,8 @@ export class AppStore {
   /** 主 Ability 上下文（页面取 window 设置系统栏样式用） */
   abilityContext: common.UIAbilityContext | null = null;
   private pref: preferences.Preferences | null = null;
+  /** 在线源地址已变更待生效（首页 onPageShow 消费后重拉在线列表） */
+  private onlineConfigDirty: boolean = false;
 
   constructor() {
     // 字段按声明顺序初始化，userData 先于 player 构造
@@ -39,13 +41,31 @@ export class AppStore {
     await this.player.init(context, this.pref);
   }
 
-  /** 保存在线源地址：存用户原始输入（trim），留空回落默认线上服务 */
+  /** 保存在线源地址：存用户原始输入（trim），留空回落默认线上服务；值未变化不落盘 */
   saveOnlineBaseUrl(url: string): void {
-    this.onlineSource.configuredUrl = url.trim();
-    if (this.pref) {
-      this.pref.putSync(KEY_ONLINE_BASE_URL, this.onlineSource.configuredUrl);
-      this.pref.flush();
+    const trimmed = url.trim();
+    if (trimmed === this.onlineSource.configuredUrl) {
+      return;
     }
+    this.onlineSource.configuredUrl = trimmed;
+    this.onlineConfigDirty = true;
+    if (this.pref) {
+      try {
+        this.pref.putSync(KEY_ONLINE_BASE_URL, trimmed);
+        this.pref.flush().catch((err: Object) => {
+          hilog.warn(DOMAIN, TAG, 'flush online base url failed: %{public}s', JSON.stringify(err));
+        });
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'save online base url failed: %{public}s', JSON.stringify(err));
+      }
+    }
+  }
+
+  /** 查询并清除「地址已变更」标志：返回 true 表示调用方应重拉在线列表 */
+  consumeOnlineConfigDirty(): boolean {
+    const dirty = this.onlineConfigDirty;
+    this.onlineConfigDirty = false;
+    return dirty;
   }
 
   /**

@@ -9,7 +9,9 @@ const TAG: string = 'EntryAbility';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'Ability onCreate');
-    appStore.init(this.context);
+    appStore.init(this.context).catch((err: Object) => {
+      hilog.error(DOMAIN, TAG, 'appStore init failed: %{public}s', JSON.stringify(err));
+    });
   }
 
   onDestroy(): void {

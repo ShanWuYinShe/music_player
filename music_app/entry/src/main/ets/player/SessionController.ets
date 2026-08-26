@@ -67,8 +67,9 @@ export class SessionController {
         position: {
           elapsedTime: positionMs,
           updateTime: new Date().getTime()
-        },
-        bufferedTime: positionMs
+        }
+        // 不上报 bufferedTime：平台拿不到真实缓冲位置，误报当前进度会
+        // 让锁屏缓冲显示失真
       };
       await this.session.setAVPlaybackState(state);
     } catch (err) {

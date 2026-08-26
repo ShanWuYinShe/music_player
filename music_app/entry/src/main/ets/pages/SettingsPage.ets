@@ -9,6 +9,13 @@ import { DEFAULT_ONLINE_BASE_URL } from '../source/OnlineApi';
 @ComponentV2
 export struct SettingsPage {
   @Param navPathStack: NavPathStack = new NavPathStack();
+  /** 地址输入的本地草稿：失焦/离开页面时统一持久化 */
+  @Local urlInput: string = appStore.onlineSource.configuredUrl;
+
+  aboutToDisappear(): void {
+    // 系统返回键不触发输入框失焦，离开页面兜底保存一次（值未变则内部早退）
+    appStore.saveOnlineBaseUrl(this.urlInput);
+  }
 
   build() {
     Stack() {
@@ -82,12 +89,16 @@ export struct SettingsPage {
         Text('music_server 服务地址（含 /api 前缀），留空使用默认服务。')
           .fontSize(12)
           .fontColor($r('app.color.ink_soft'))
-        TextInput({ text: appStore.onlineSource.configuredUrl, placeholder: DEFAULT_ONLINE_BASE_URL })
+        TextInput({ text: this.urlInput, placeholder: DEFAULT_ONLINE_BASE_URL })
           .width('100%')
           .fontSize(14)
           .backgroundColor($r('app.color.surface_alt'))
+          // 输入过程只更新内存，失焦/离开页面才持久化，避免每个按键写盘
           .onChange((value: string) => {
-            appStore.saveOnlineBaseUrl(value.trim());
+            this.urlInput = value;
+          })
+          .onBlur(() => {
+            appStore.saveOnlineBaseUrl(this.urlInput);
           })
         Text('地址会保存在本机，可随时修改。')
           .fontSize(11)
