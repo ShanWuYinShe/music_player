@@ -11,6 +11,13 @@ const LIBRARY_FILE = 'library.json';
 const SUPPORTED_EXTS = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'];
 /** 高频持久化变更的合并窗口（毫秒）：窗口内多次变更只落盘一次 */
 const SAVE_DEBOUNCE_MS = 500;
+
+/** 批量导入结果分类统计 */
+export interface ImportResult {
+  added: number;
+  dup: number;
+  failed: number;
+}
 const utf8Decoder = util.TextDecoder.create('utf-8');
 
 /**
@@ -51,25 +58,29 @@ export class MusicLibrary {
 
   /**
    * 从系统媒体库 URI 导入（AudioViewPicker 授权后的 file://media/... 链接）
-   * @returns 实际新增数量
+   * @returns 分类统计：added 新增 / dup 已在曲库 / failed 失败（IO/URI 异常）
    */
-  async importFromUris(uris: string[]): Promise<number> {
-    let added = 0;
+  async importFromUris(uris: string[]): Promise<ImportResult> {
+    const result: ImportResult = { added: 0, dup: 0, failed: 0 };
     for (const uri of uris) {
       try {
         const record = await this.importUri(uri);
         if (record) {
           this.songs.push(record);
-          added++;
+          result.added++;
+        } else {
+          result.dup++;
         }
       } catch (err) {
-        hilog.error(DOMAIN, TAG, 'import uri failed: %{public}s', JSON.stringify(err));
+        result.failed++;
+        hilog.error(DOMAIN, TAG, 'import uri failed: %{public}s uri=%{public}s',
+          JSON.stringify(err), uri);
       }
     }
-    if (added > 0) {
+    if (result.added > 0) {
       this.save();
     }
-    return added;
+    return result;
   }
 
   /**
@@ -193,31 +204,98 @@ export class MusicLibrary {
   }
 
   private async importUri(uri: string): Promise<SongRecord | null> {
-    const displayName = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
+    let displayName = uri.substring(uri.lastIndexOf('/') + 1);
+    try {
+      displayName = decodeURIComponent(displayName);
+    } catch (err) {
+      // 含 % 等非转义序列时 decode 抛错：保留原串
+    }
     const dot = displayName.lastIndexOf('.');
     const ext = dot >= 0 ? displayName.substring(dot + 1).toLowerCase() : '';
     const safeExt = SUPPORTED_EXTS.includes(ext) ? ext : 'mp3';
     const normalized = this.normalizedFileName(displayName, safeExt);
+    // picker 对 Download 等目录返回 percent-encoded URI，fs.statSync 能解码
+    // 而 fs.copyFile 按字面解析（实测 ENOENT，已踩坑）：两形态都试，
+    // 以 stat 成功者为准。
+    const candidates: string[] = [];
+    try {
+      const decoded = decodeURIComponent(uri);
+      if (decoded !== uri) {
+        candidates.push(decoded);
+      }
+    } catch (err) {
+      // 整串不可解码时只用原形态
+    }
+    candidates.push(uri);
+    let src = uri;
+    let size = 0;
+    for (const c of candidates) {
+      try {
+        size = fs.statSync(c).size;
+        src = c;
+        break;
+      } catch (err) {
+        // 尝试下一形态
+      }
+    }
     // 拷贝前按「规范化文件名_大小」查重：直接重复导入同一 URI 时 uniqueName
     // 会因同名冲突改出新文件名（id 随之不同），仅靠拷贝后比对 id 永远不命中。
-    let size = 0;
-    try {
-      size = fs.statSync(uri).size;
-    } catch (err) {
-      // 个别源 URI 不支持 stat：退回拷贝后判定
-    }
     if (size > 0 && this.songs.some((item) => item.id === `${normalized}_${size}`)) {
       return null;
     }
     // 保留原文件名便于用户识别；同名不同内容靠 id（名称+大小）去重
     const target = `${this.musicDir()}/${this.uniqueName(normalized)}`;
-    await fs.copyFile(uri, target);
+    let copied = false;
+    let lastErr: Error | null = null;
+    for (const c of [src].concat(candidates.filter((x) => x !== src))) {
+      try {
+        await this.copyUriTo(c, target);
+        copied = true;
+        break;
+      } catch (err) {
+        lastErr = err as Error;
+      }
+    }
+    if (!copied) {
+      hilog.error(DOMAIN, TAG, 'copy uri failed: %{public}s uri=%{public}s -> %{public}s',
+        JSON.stringify(lastErr), uri, target);
+      throw lastErr as Error;
+    }
     const record = await this.makeRecord(target);
     if (this.songs.some((item) => item.id === record.id)) {
       fs.unlinkSync(target); // stat 失败漏判的重复导入，丢弃新拷贝
       return null;
     }
     return record;
+  }
+
+  /**
+   * URI → 沙盒文件拷贝。fs.copyFile 对 file://docs/ 等来源 URI 不支持
+   * （实测 statSync 可读、copyFile ENOENT，已踩坑），回退 open+分块读写。
+   */
+  private async copyUriTo(srcUri: string, target: string): Promise<void> {
+    try {
+      await fs.copyFile(srcUri, target);
+      return;
+    } catch (err) {
+      // 继续走 open+read/write 回退
+    }
+    const srcFile = fs.openSync(srcUri, fs.OpenMode.READ_ONLY);
+    try {
+      const dst = fs.openSync(target, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      try {
+        const buf = new ArrayBuffer(512 * 1024);
+        let read = fs.readSync(srcFile.fd, buf);
+        while (read > 0) {
+          fs.writeSync(dst.fd, buf.slice(0, read));
+          read = fs.readSync(srcFile.fd, buf);
+        }
+      } finally {
+        fs.closeSync(dst);
+      }
+    } finally {
+      fs.closeSync(srcFile);
+    }
   }
 
   /** 规范化显示名为沙盒文件名基础形态（去非法字符，确保带扩展名） */

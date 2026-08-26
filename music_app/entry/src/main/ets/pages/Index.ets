@@ -775,11 +775,24 @@ struct Index {
       const selectOptions: picker.AudioSelectOptions = { maxSelectNumber: 100 };
       const uris: Array<string> = await audioPicker.select(selectOptions);
       if (uris.length > 0) {
-        const added = await appStore.library.importFromUris(uris);
+        const result = await appStore.library.importFromUris(uris);
         appStore.player.refreshSongs();
-        promptAction.showToast({
-          message: added > 0 ? `已导入 ${added} 首歌曲` : '所选歌曲已在曲库中'
-        });
+        // 分类提示：IO/URI 失败不得误报为"已在曲库"
+        let message = '';
+        if (result.added > 0 && result.failed === 0 && result.dup === 0) {
+          message = `已导入 ${result.added} 首歌曲`;
+        } else if (result.added > 0) {
+          message = `已导入 ${result.added} 首` +
+            (result.dup > 0 ? `，${result.dup} 首已在曲库` : '') +
+            (result.failed > 0 ? `，${result.failed} 首导入失败` : '');
+        } else if (result.dup > 0 && result.failed === 0) {
+          message = '所选歌曲已在曲库中';
+        } else if (result.dup > 0) {
+          message = `${result.dup} 首已在曲库，${result.failed} 首导入失败`;
+        } else {
+          message = '导入失败，请重试';
+        }
+        promptAction.showToast({ message: message });
       }
     } catch (err) {
       // 用户取消选择不提示
