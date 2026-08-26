@@ -242,9 +242,11 @@ void VizRenderFrame(double t, double seed, bool playing) {
     glUseProgram(gProgramScene);
     GLint uT = glGetUniformLocation(gProgramScene, "uT");
     GLint uSeed = glGetUniformLocation(gProgramScene, "uSeed");
+    GLint uRes = glGetUniformLocation(gProgramScene, "uRes");
     GLint uPrev = glGetUniformLocation(gProgramScene, "uPrev");
     glUniform1f(uT, static_cast<float>(t));
     glUniform1f(uSeed, static_cast<float>(seed));
+    glUniform2f(uRes, static_cast<float>(gRenderW), static_cast<float>(gRenderH));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
     glUniform1i(uPrev, 0);
