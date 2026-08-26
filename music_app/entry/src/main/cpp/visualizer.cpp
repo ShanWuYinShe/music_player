@@ -215,7 +215,7 @@ void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window) {
     }
 }
 
-void VizRenderFrame(double t, double seed, bool playing) {
+void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
         return;
     }
@@ -243,10 +243,16 @@ void VizRenderFrame(double t, double seed, bool playing) {
     GLint uT = glGetUniformLocation(gProgramScene, "uT");
     GLint uSeed = glGetUniformLocation(gProgramScene, "uSeed");
     GLint uRes = glGetUniformLocation(gProgramScene, "uRes");
+    GLint uBeat = glGetUniformLocation(gProgramScene, "uBeat");
+    GLint uBass = glGetUniformLocation(gProgramScene, "uBass");
+    GLint uTreble = glGetUniformLocation(gProgramScene, "uTreble");
     GLint uPrev = glGetUniformLocation(gProgramScene, "uPrev");
     glUniform1f(uT, static_cast<float>(t));
     glUniform1f(uSeed, static_cast<float>(seed));
     glUniform2f(uRes, static_cast<float>(gRenderW), static_cast<float>(gRenderH));
+    glUniform1f(uBeat, static_cast<float>(beat));
+    glUniform1f(uBass, static_cast<float>(bass));
+    glUniform1f(uTreble, static_cast<float>(treble));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
     glUniform1i(uPrev, 0);

@@ -34,6 +34,9 @@ out vec4 outColor;
 uniform float uT;
 uniform float uSeed;
 uniform vec2 uRes;
+uniform float uBeat;    // 节拍包络 [0.25,1]（合成，种子派生 BPM）
+uniform float uBass;    // 低频段能量 [0,1]
+uniform float uTreble;  // 高频段能量 [0,1]
 uniform sampler2D uPrev;
 
 float hash(float n) { return fract(sin(n) * 43758.5453123); }
@@ -146,12 +149,13 @@ void main() {
             float ca = cos(m * (rth + rot) / 4.0);
             float sa = sin(m * (rth + rot) / 4.0);
             float denom = pow(abs(ca), n2) + pow(abs(sa), n3);
-            float rSurf = 0.13 / pow(max(denom, 0.25), 1.0 / n1);
+            float rSurf = 0.13 / pow(max(denom, 0.25), 1.0 / n1)
+                * (0.92 + 0.13 * uBeat + 0.06 * uBass);   // 节拍呼吸(局部尺寸)
             float edge = exp(-abs(rank - rSurf) * 42.0);
             float core = exp(-rank * rank * 180.0);
             float hue = fract((t * 0.02 + seed * 0.001 + fi * 0.13)) * 360.0;
             vec3 c = hsl2rgb(hue, 0.85, 0.55);
-            col += c * (edge * 0.13 + core * 0.02);
+            col += c * (edge * (0.11 + 0.05 * uBeat) + core * 0.02);
         }
     } else if (preset == 1) {
         // ===== 晶体：raymarching 3D 旋转体 =====
@@ -164,7 +168,8 @@ void main() {
         float m2v = 2.0 + 3.5 * styleParam(63.0, t, 0.0, 1.0, seed);
         float n1b = 0.8 + 0.6 * styleParam(64.0, t, 0.0, 1.0, seed);
         float n2b = 0.5 + 1.2 * styleParam(65.0, t, 0.0, 1.0, seed);
-        float size = 0.52 * (0.94 + 0.06 * sin(t * 0.00031 + seed));
+        float size = 0.52 * (0.94 + 0.05 * sin(t * 0.00031 + seed)
+            + 0.04 * uBeat + 0.02 * uBass);
         mat2 ry = rot2(t * 0.00042);
         mat2 rx = rot2(t * 0.00027);
         float tt = 0.35 + 0.05 * hash2(gl_FragCoord.xy * 0.37);
@@ -206,8 +211,8 @@ void main() {
             float rim = pow(1.0 - abs(dot(n, -rd)), 2.2);
             float faceHue = mod(t * 0.014 + seed * 0.001 + n.y * 40.0 + n.x * 25.0, 360.0);
             vec3 base = hsl2rgb(faceHue, 0.78, 0.46);
-            vec3 lit = base * (0.16 + 0.84 * dif)
-                + hsl2rgb(mod(faceHue + 55.0, 360.0), 0.85, 0.6) * rim * 0.55;
+            vec3 lit = base * (0.16 + 0.84 * dif * (0.85 + 0.3 * uBass))
+                + hsl2rgb(mod(faceHue + 55.0, 360.0), 0.85, 0.6) * rim * (0.45 + 0.35 * uBeat);
             float fade = exp(-(max(tv - 1.9, 0.0)) * 0.85);
             col = mix(col, lit, clamp(0.80 * cover * (0.35 + 0.65 * fade), 0.0, 1.0));
         }
@@ -232,13 +237,14 @@ void main() {
         float glowLine = exp(-lineU * lineU * 90.0) + exp(-lineV * lineV * 26.0);
         float cellId = hash(gid.x * 13.7 + gid.y * 31.1 + seed);
         float blink = step(0.35, cellId) * (0.4 + 0.6 * cellId)
-            * (0.5 + 0.5 * sin(t * 0.002 + cellId * 40.0));
+            * (0.5 + 0.5 * sin(t * 0.002 + cellId * 40.0))
+            * (0.72 + 0.42 * uBeat);
         float depthFade = clamp(rad * 2.6, 0.0, 1.0);
         float hue = mod(t * 0.000014 + seed * 0.001 + gid.y * 11.0 + gid.x * 5.0, 360.0);
         col += hsl2rgb(hue, 0.82, 0.52) * glowLine * blink * depthFade * 0.34;
         // 中心深处辉光
         col += hsl2rgb(mod(hue + 43.0, 360.0), 0.7, 0.42)
-            * exp(-rad * rad * 26.0) * 0.10;
+            * exp(-rad * rad * 26.0) * (0.08 + 0.05 * uBass + 0.03 * uBeat);
     }
 
     outColor = vec4(col, 1.0);

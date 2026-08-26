@@ -67,18 +67,21 @@ napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
 }
 
 napi_value RenderFrame(napi_env env, napi_callback_info info) {
-    size_t argc = 3;
-    napi_value args[3] = {nullptr};
+    size_t argc = 6;
+    napi_value args[6] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 3) {
+    if (argc < 6) {
         return nullptr;
     }
-    double t = 0, seed = 0;
+    double t = 0, seed = 0, beat = 0, bass = 0, treble = 0;
     bool playing = false;
     napi_get_value_double(env, args[0], &t);
     napi_get_value_double(env, args[1], &seed);
     napi_get_value_bool(env, args[2], &playing);
-    VizRenderFrame(t, seed, playing);
+    napi_get_value_double(env, args[3], &beat);
+    napi_get_value_double(env, args[4], &bass);
+    napi_get_value_double(env, args[5], &treble);
+    VizRenderFrame(t, seed, playing, beat, bass, treble);
     return nullptr;
 }
 

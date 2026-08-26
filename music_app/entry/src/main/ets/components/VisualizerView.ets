@@ -170,7 +170,13 @@ export struct VisualizerView {
     // 运算量与像素数相关、与效果复杂度无关，参数驱动）。帧驱动沿用
     // displaySync 节流；暂停时不渲染即冻结帧。
     if (this.variant !== 'mini') {
-      entry.renderFrame(t, this.seed, playing);
+      // 音乐律动参数（平台无频谱 API，为种子+时间的确定性合成——与迷你条同源）：
+      // beat 节拍包络 / bass 低频段 / treble 高频段，仅驱动 shader 局部元素
+      const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
+      const spec = synthSpectrum(this.seed, t, 8);
+      const bass = (spec[0] + spec[1]) / 2;
+      const treble = (spec[6] + spec[7]) / 2;
+      entry.renderFrame(t, this.seed, playing, beat, bass, treble);
       if (!playing && now > this.fadeDeadline) {
         this.stopLoop();
       }

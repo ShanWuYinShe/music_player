@@ -11,6 +11,6 @@ struct OH_NativeXComponent;
 void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window);
 void VizOnSurfaceChanged(OH_NativeXComponent* component, void* window);
 void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window);
-void VizRenderFrame(double t, double seed, bool playing);
+void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble);
 
 #endif  // MUSICPLAYER_VISUALIZER_H
