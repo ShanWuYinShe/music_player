@@ -27,6 +27,9 @@ export struct PlayerPage {
   @Local dragValue: number = -1;
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
+  /** 全屏布局下前景内容自行避让：系统栏/导航指示区高度（vp） */
+  @Local sysBarTop: number = 0;
+  @Local sysBarBottom: number = 0;
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
@@ -38,10 +41,10 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态切换：进入时系统栏背景与 window 背景统一为不透明 #161310
-   * （可视化画面边缘经渐晕收敛到同色，三层同色即无缝，不依赖系统栏透明
-   * 或 canvas 延伸行为——透明色在部分真机导航栏不生效会露系统纯黑）；
-   * 字色切浅，离开时按深浅模式恢复 page_bg 色。
+   * 播放页沉浸态：进入时开启全屏布局（应用真正延伸到系统栏下，系统栏
+   * 透明后直接透出 canvas 画面，不再存在独立色层——不依赖系统栏自定义
+   * 色，浅色模式下自定义色不生效的坑已实测）+ window 深色兜底；前景
+   * 内容按避让区高度自行留白。离开时关闭全屏布局并按深浅恢复。
    */
   private applyImmersion(enter: boolean): void {
     const ctx = appStore.abilityContext;
@@ -50,12 +53,19 @@ export struct PlayerPage {
     }
     window.getLastWindow(ctx).then((win) => {
       const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
-      const bg = enter ? '#161310' : (dark ? '#16140F' : '#F6F3EC');
       const fg = enter || dark ? '#F3EFE4' : '#26221B';
+      const bg = enter ? '#161310' : (dark ? '#16140F' : '#F6F3EC');
+      if (enter) {
+        const sys = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+        const nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+        this.sysBarTop = this.getUIContext().px2vp(sys.topRect.height);
+        this.sysBarBottom = this.getUIContext().px2vp(nav.bottomRect.height);
+      }
+      win.setWindowLayoutFullScreen(enter);
       win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
-        statusBarColor: bg,
-        navigationBarColor: bg,
+        statusBarColor: enter ? '#00000000' : bg,
+        navigationBarColor: enter ? '#00000000' : bg,
         statusBarContentColor: fg,
         navigationBarContentColor: fg
       });
@@ -244,6 +254,8 @@ export struct PlayerPage {
       }
       .width('100%')
       .height('100%')
+      // 全屏布局下系统避让关闭，前景内容按避让区高度自行留白
+      .padding({ top: this.sysBarTop, bottom: this.sysBarBottom })
     }
     .width('100%')
     .height('100%')
