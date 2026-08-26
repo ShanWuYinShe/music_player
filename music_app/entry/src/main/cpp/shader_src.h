@@ -157,9 +157,12 @@ void main() {
         // ===== 流动星野：相机匀速前行（方向缓旋），花域在世界空间平铺掠过 =====
         vec2 center = vec2(0.5, 0.47);
         vec2 sp = (p - center) * vec2(aspect, 1.0);
-        float drift = t * 0.052;                       // 行进距离(世界单位)
-        vec2 dir = vec2(cos(t * 0.00003), sin(t * 0.00003));
-        vec2 wp = sp + dir * drift;                    // 世界坐标
+        // 向内深入：周期 zoom 涌出（每轮换世界原点，回绕即进入新星空区域）
+        float rndS = floor(t / 40000.0);
+        float zfS = exp(fract(t / 40000.0) * 3.4);
+        vec2 woff = vec2(hash(rndS * 7.7 + seed), hash(rndS * 13.1 + seed)) * 29.0;
+        vec2 drift2 = vec2(cos(t * 0.0002), sin(t * 0.00016)) * 0.05;
+        vec2 wp = sp * zfS + woff + drift2;            // 世界坐标
         // 氛围光（屏幕空间，恒居中）
         {
             float g = smoothstep(0.95, 0.0, length(sp));
@@ -277,12 +280,13 @@ void main() {
     } else if (preset == 2) {
         // ===== Julia 之海：c 沿指数螺线漫游(形态无穷变形) + 缓慢变焦漂移 =====
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
-        float theta = t * 0.00009 + seed * 0.017;
+        float theta = t * 0.00009 + floor(t / 20000.0) * 0.37 + seed * 0.017;
         float radius = 0.7885 * (0.97 + 0.05 * sin(t * 0.00013 + seed));
         vec2 cJulia = vec2(cos(theta), sin(theta)) * radius;
-        vec2 pan = vec2(sin(t * 0.00007), cos(t * 0.00005)) * 0.30;
-        float zoomBase = 1.35 + 0.55 * sin(t * 0.00006 + seed);
-        vec2 zj = q * zoomBase + pan;
+        // 向内深入：周期深潜（每轮 c 相位步进，回绕即进入新形态层）
+        float rndJ = floor(t / 20000.0);
+        float zfJ = exp(fract(t / 20000.0) * 2.6);
+        vec2 zj = q * zfJ * 0.30;
         float esc = 0.0;
         float mIter = 0.0;
         for (int ij = 0; ij < 48; ij++) {
@@ -343,10 +347,11 @@ void main() {
         poi[1] = vec2(0.286931868895045, 0.014286693904085);
         poi[2] = vec2(-0.16, 1.0405);
         vec2 poiSel = poi[int(mod(seed, 3.0))];
-        // 放大深度: 指数深潜到 1.6e4 倍(精度安全)后缓出重置
-        float dive = t * 0.00035;
-        float zoomM = 0.32 * pow(1.00013, mod(dive, 88.0)) * (1.0 + 0.1 * sin(t * 0.0002));
-        vec2 z0 = poiSel + q * zoomM;
+        // 向内深入：周期深潜（每轮兴趣点向边界邻域微移，层层进入新结构）
+        float rndM = floor(t / 16000.0);
+        float zfM = 0.34 * exp(fract(t / 16000.0) * 4.1);
+        vec2 poiOff = vec2(hash(rndM * 5.3 + seed), hash(rndM * 9.7 + seed)) - 0.5;
+        vec2 z0 = poiSel + poiOff * 0.004 + q * zfM;
         float mIt = 0.0;
         float esc = 0.0;
         vec2 zm = vec2(0.0, 0.0);
@@ -368,24 +373,32 @@ void main() {
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
         for (int la = 0; la < 3; la++) {
             float fl = float(la);
-            float depth = 1.0 + fl * 0.75;                 // 层深度(视差)
-            float xw = q.x * (2.2 + fl * 0.7) + t * (0.00009 + fl * 0.00005) + seed * 0.01;
-            float ridge = 0.34 + 0.16 * fl
+            // 向内深入：层相位连续推进——帘幕道道向后掠过(每道参数随轮次更替,生入死出)
+            float phA = t * 0.00019 + fl * 1.9 + seed * 0.01;
+            float la_ = floor(phA);
+            float frA = fract(phA);
+            float hA = hash(la_ * 7.1 + fl * 13.3 + seed);
+            float envA = smoothstep(0.0, 0.2, frA) * smoothstep(1.0, 0.8, frA);
+            float depth = 1.0 + fl * 0.75;
+            float xw = q.x * (2.2 + fl * 0.7) + hA * 43.0 + t * 0.00012;
+            float ridge = 0.34 + 0.16 * fl + hA * 0.12
                 + 0.06 * sin(xw * 2.1 + t * 0.0003)
                 + 0.04 * sin(xw * 4.7 - t * 0.00021);
             float drape = exp(-abs(q.y - ridge) * (9.0 - fl * 2.0)) * (1.0 - q.y * 0.45);
             float flick = 0.7 + 0.3 * sin(xw * 9.0 + t * 0.0011 + fl * 2.0);
-            float hueA = 120.0 + 55.0 * fl + 18.0 * sin(t * 0.00016 + fl);
-            col += hsl2rgb(hueA, 0.85, 0.42 + 0.10 * uBass) * drape * flick * (0.30 - fl * 0.06)
-                * (0.85 + 0.3 * uBeat);
+            float hueA = 120.0 + 55.0 * fl + hA * 30.0 + 18.0 * sin(t * 0.00016 + fl);
+            col += hsl2rgb(hueA, 0.85, 0.42 + 0.10 * uBass) * drape * flick * envA
+                * (0.34 - fl * 0.06) * (0.85 + 0.3 * uBeat);
         }
-        // 星空底
+        // 星空底：星点随周期 zoom 向外涌出（=向屏幕内部深入）
         {
-            vec2 sc = floor(q * 26.0);
+            float zfA = exp(fract(t / 12000.0) * 2.2);
+            vec2 qa = q * zfA;
+            vec2 sc = floor(qa * 26.0);
             float sid = hash2(sc + seed);
             if (sid > 0.93) {
                 vec2 spos = (sc + 0.5) / 26.0;
-                col += vec3(0.7, 0.75, 0.8) * exp(-dot(q - spos, q - spos) * 4200.0)
+                col += vec3(0.7, 0.75, 0.8) * exp(-dot(qa - spos, qa - spos) * 4200.0)
                     * (0.4 + 0.6 * sin(t * 0.003 + sid * 50.0)) * 0.30;
             }
         }
@@ -394,7 +407,9 @@ void main() {
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
         float KSEG = 7.0;
         float angK = atan(q.y, q.x) + t * 0.00014;
-        float ring = length(q) * (1.1 + 0.12 * sin(t * 0.0004));
+        // 向内深入：径向 log 空间平移 = 图案向中心无限涌(e 倍自相似周期,无缝循环)
+        float lr = log(max(length(q), 0.02)) + t * 0.00030;
+        float ring = exp(fract(lr));
         float seg = mod(angK, 6.2831853 / KSEG);
         seg = abs(seg - 3.1415927 / KSEG);            // 镜像折叠
         vec2 fq = vec2(cos(seg), sin(seg)) * ring;
@@ -406,16 +421,17 @@ void main() {
         float ca = cos(mm * seg / 4.0);
         float sa = sin(mm * seg / 4.0);
         float denom = pow(abs(ca), n2k) + pow(abs(sa), n3k);
-        float rSurf = (0.20 + 0.10 * sin(t * 0.0005 + seed)) / pow(max(denom, 0.25), 1.0 / n1k)
+        float rSurf = (1.25 + 0.55 * (0.5 + 0.5 * sin(t * 0.0005 + seed)))
+            * pow(max(denom, 0.25), -1.0 / n1k) * 0.45
             * (0.92 + 0.13 * uBeat);
-        float edge = exp(-abs(ring - rSurf) * 34.0);
+        float edge = exp(-abs(ring - rSurf) * 9.0);
         float hueW = fract(t * 0.016 + seed * 0.001 + ring * 0.8) * 360.0;
         col += hsl2rgb(hueW, 0.85, 0.55) * edge * (0.14 + 0.06 * uBeat);
-        // 花心辉光 + 外圈珠链
+        // 每周期近心端辉光环 + 径向珠链（随深入涌动）
         col += hsl2rgb(mod(hueW + 40.0, 360.0), 0.8, 0.45)
-            * exp(-ring * ring * 26.0) * (0.10 + 0.08 * uBass);
-        float beads = exp(-pow(sin(ring * 34.0 - t * 0.0012) , 2.0) * 12.0)
-            * exp(-abs(ring - 0.62) * 9.0);
+            * exp(-abs(ring - 1.0) * 4.0) * (0.10 + 0.08 * uBass);
+        float beads = exp(-pow(sin(lr * 44.0) , 2.0) * 12.0)
+            * smoothstep(1.0, 1.15, ring) * smoothstep(2.72, 2.5, ring);
         col += hsl2rgb(mod(hueW + 180.0, 360.0), 0.8, 0.5) * beads * (0.10 + 0.08 * uTreble);
     } else {
         // ===== 干涉波纹：四波源漂移干涉，径向外推行进 =====
@@ -423,11 +439,16 @@ void main() {
         float acc = 0.0;
         for (int wi = 0; wi < 4; wi++) {
             float fw = float(wi);
-            vec2 src = vec2(
-                sin(t * (0.00011 + fw * 0.00007) + fw * 2.4 + seed) * 0.45,
-                cos(t * (0.00009 + fw * 0.00006) + fw * 1.7 + seed) * 0.38);
+            // 向内深入：波源自中心深处诞生→向外漂移→消散,新源持续涌现
+            float phW = t * 0.00021 + fw * 0.25 + hash(fw * 3.3 + seed);
+            float gen = floor(phW);
+            float life = fract(phW);
+            vec2 src = vec2(hash(gen * 11.3 + fw * 7.7 + seed) - 0.5,
+                hash(gen * 17.9 + fw * 3.1 + seed) - 0.5) * 0.16
+                + vec2(cos(life * 3.1 + gen), sin(life * 2.7 + gen)) * life * 0.55;
             float dist = length(q - src);
-            acc += sin(dist * (34.0 - fw * 4.0) - t * (0.0016 + fw * 0.0004));
+            float envW = smoothstep(0.0, 0.18, life) * smoothstep(1.0, 0.75, life);
+            acc += sin(dist * (34.0 - fw * 4.0) - t * 0.0019) * envW;
         }
         float ringI = (acc * 0.25 + 1.0) * 0.5;             // 0..1
         float v = pow(ringI, 3.0);
