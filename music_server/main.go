@@ -113,6 +113,9 @@ func main() {
 		Addr:              config.Addr(),
 		Handler:           server.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// 空闲 keep-alive 连接限期回收;不设 WriteTimeout——长音频流式响应
+		// 会被整体超时掐断。
+		IdleTimeout: 120 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

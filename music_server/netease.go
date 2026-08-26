@@ -58,9 +58,10 @@ type neteaseClient struct {
 	fileValue    string
 	hasFileValue bool
 
-	discoverMu    sync.Mutex
-	discoverCache []Song
-	discoverAt    time.Time
+	discoverMu     sync.Mutex
+	discoverCache  []Song
+	discoverAt     time.Time
+	discoverFailAt time.Time
 }
 
 // cookieReloadInterval 是 cookie 文件的重读检查间隔。
@@ -189,18 +190,26 @@ type topSongResp struct {
 
 // discover 返回网易「新歌速递」推荐曲目(匿名可用),供空曲库时回填在线
 // 列表,让"在线"开箱即有歌。结果缓存 60s(与曲库扫描 TTL 一致),上游
-// 失败降级为空(不影响请求成功)。
+// 失败降级为空(不影响请求成功)并进入同长度的失败冷却期,避免上游故障时
+// 每个空列表请求都反复打上游。
 func (c *neteaseClient) discover(ctx context.Context) []Song {
 	c.discoverMu.Lock()
 	if time.Since(c.discoverAt) < scanTTL && c.discoverCache != nil {
 		defer c.discoverMu.Unlock()
 		return c.discoverCache
 	}
+	failCooling := time.Since(c.discoverFailAt) < scanTTL
 	c.discoverMu.Unlock()
+	if failCooling {
+		return nil
+	}
 
 	var resp topSongResp
 	if err := c.getJSON(ctx, "/top/song", &resp); err != nil {
 		log.Printf("netease discover: %v", err)
+		c.discoverMu.Lock()
+		c.discoverFailAt = time.Now()
+		c.discoverMu.Unlock()
 		return nil
 	}
 	songs := make([]Song, 0, len(resp.Data))

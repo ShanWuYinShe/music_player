@@ -334,3 +334,44 @@ func TestNeteaseDiscoverBackfill(t *testing.T) {
 		t.Fatalf("degraded discover must still 200, got %d", rec.Code)
 	}
 }
+
+// discover 失败冷却:上游 /top/song 故障时,冷却期内的重复请求不再打上游。
+func TestNeteaseDiscoverFailCooldown(t *testing.T) {
+	var upstreamHits atomic.Int64
+	f := newFakeNetease(t)
+	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/top/song" {
+			upstreamHits.Add(1)
+			http.Error(w, "upstream broken", http.StatusInternalServerError)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	server := newTestServerWithNetease(t, f.api.URL)
+	server.library = nil
+	server.byID = map[string]songFile{}
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("degraded discover must still 200, got %d", rec.Code)
+		}
+	}
+	if n := upstreamHits.Load(); n != 1 {
+		t.Fatalf("expect 1 upstream hit within cooldown window, got %d", n)
+	}
+
+	// 冷却期过后恢复重试。
+	server.netease.mu.Lock()
+	server.netease.discoverFailAt = time.Now().Add(-scanTTL - time.Second)
+	server.netease.mu.Unlock()
+	rec := httptest.NewRecorder()
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post-cooldown discover must still 200, got %d", rec.Code)
+	}
+	if n := upstreamHits.Load(); n != 2 {
+		t.Fatalf("expect retry after cooldown, got %d hits", n)
+	}
+}
