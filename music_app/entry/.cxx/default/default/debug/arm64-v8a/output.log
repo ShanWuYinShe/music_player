@@ -1,6 +1,0 @@
-ninja: Entering directory `/Users/liyou/work/music_player/.worktrees/fix-immersion/music_app/entry/.cxx/default/default/debug/arm64-v8a'
-[1/3] Building CXX object CMakeFiles/entry.dir/visualizer.cpp.o
-clang++: warning: argument unused during compilation: '--gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm' [-Wunused-command-line-argument]
-[2/3] Building CXX object CMakeFiles/entry.dir/napi_init.cpp.o
-clang++: warning: argument unused during compilation: '--gcc-toolchain=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native/llvm' [-Wunused-command-line-argument]
-[3/3] Linking CXX shared library /Users/liyou/work/music_player/.worktrees/fix-immersion/music_app/entry/build/default/intermediates/cmake/default/obj/arm64-v8a/libentry.so
