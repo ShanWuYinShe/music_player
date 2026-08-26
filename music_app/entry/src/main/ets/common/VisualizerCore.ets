@@ -26,7 +26,8 @@ export function seedFromId(id: string): number {
   return h;
 }
 
-function hash01(n: number): number {
+/** 整数 → [0,1) 的确定性小数（异或折叠后取高位）；可视化组件也用于球团参数散列 */
+export function hash01(n: number): number {
   // 整数 → [0,1) 的确定性小数（异或折叠后取高位）
   let h = Math.imul(n ^ (n >>> 16), 0x45d9f3b) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;

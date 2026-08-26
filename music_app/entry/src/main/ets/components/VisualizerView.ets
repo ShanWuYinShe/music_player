@@ -3,17 +3,18 @@
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
  * 渲染采用双离屏画布 ping-pong 反馈：每帧把上一帧 ImageBitmap 以节拍脉冲
- * 驱动的缩放/微旋转重绘为基底，再叠加当前帧图形（'lighter' 叠加发光），
- * 形成向外流动的拖尾——MilkDrop 的标志性观感。
+ * 驱动的缩放/微旋转 + 正弦切片偏移重绘为基底（拖尾如液体波动流淌），
+ * 再叠加液态光团（metaball）与氛围底光（'lighter' 叠加发光融合），
+ * 呈水滴般圆润变幻的流动画面。
  *
- * 变体：full = 播放页全屏沉浸背景；mini = 迷你条底部光带（仅波形 preset）。
- * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛动画即停。
+ * 变体：full = 播放页全屏沉浸背景；mini = 迷你条底部单色金光带。
+ * 帧驱动 displaySync 限 24fps，暂停后跑约 0.9s 收敛动画即停。
  */
 
 import displaySync from '@ohos.graphics.displaySync';
 import { PlayerController } from '../player/PlayerController';
 import {
-  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, presetAt, hslToRgb, rgbStyle
+  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, rgbStyle
 } from '../common/VisualizerCore';
 
 /** 离屏画布最长边上限：全屏模式下降采样，反馈拖尾本身柔和，拉伸显示无损观感 */
@@ -52,10 +53,8 @@ export struct VisualizerView {
   private playClock = 0;
   private lastNow = 0;
   private fadeDeadline = 0;
-  /** 反馈层累积旋转角（每个 preset 一个慢速方向） */
+  /** 反馈层累积旋转角（恒定慢速） */
   private feedbackSpin = 0;
-  private curPreset = -1;
-  private switchFade = 0;
 
   aboutToAppear(): void {
     this.ds = displaySync.create();
@@ -93,7 +92,6 @@ export struct VisualizerView {
       this.beatPhase = (this.seed % 997) / 997;
       this.playClock = 0;
       this.lastNow = Date.now();
-      this.curPreset = -1;
     }
     if (id === '') {
       this.stopLoop();
@@ -149,15 +147,8 @@ export struct VisualizerView {
     }
     const t = this.playClock;
     const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
-    const span = presetAt(t, this.seed);
     const mini = this.variant === 'mini';
-    // mini 变体只保留波形带，小空间内径向/星爆不可辨
-    const preset = mini ? 0 : span.index;
-    if (preset !== this.curPreset) {
-      this.curPreset = preset;
-      this.switchFade = 4;
-    }
-    this.feedbackSpin += (preset - 1) * 0.0000318 * dt;
+    this.feedbackSpin += 0.0000126 * dt;
 
     const bars = synthSpectrum(this.seed, t, mini ? 24 : 48);
     const active = this.flip ? this.offA : this.offB;
@@ -173,29 +164,36 @@ export struct VisualizerView {
       active.fillStyle = UNIFY_BG;
       active.fillRect(0, 0, W, H);
     }
-    // 反馈层：上一帧放大重绘，旧画面向外流动并渐隐；较长尾让光流弥漫全屏
+    // 反馈层：上一帧重绘成流动拖尾。mini 整幅缩放即可；full 按水平条带
+    // 切片、各带附加正弦横向偏移——拖尾如液体般波动流淌而非刚性放大
     if (this.prevBitmap !== null) {
-      active.save();
       let a = playing ? 0.972 : 0.90;
-      if (this.switchFade > 0) {
-        a *= 0.55;
-        this.switchFade--;
-      }
+      active.save();
       active.globalAlpha = a;
       active.translate(W / 2, H / 2);
       const zoom = 1 + (0.018 + 0.024 * beat) * (mini ? 0.5 : 1);
       active.scale(zoom, zoom);
       active.rotate(this.feedbackSpin);
       active.translate(-W / 2, -H / 2);
-      active.drawImage(this.prevBitmap, 0, 0, W, H);
+      if (mini) {
+        active.drawImage(this.prevBitmap, 0, 0, W, H);
+      } else {
+        const SLICES = 24;
+        const sliceH = H / SLICES;
+        for (let s = 0; s < SLICES; s++) {
+          const y0 = s * sliceH;
+          const off = Math.sin(t * 0.0016 + s * 0.55) * W * 0.012 * (0.6 + 0.6 * beat);
+          // 条带各多取 1px 源高，避免切片间露缝
+          active.drawImage(this.prevBitmap, 0, y0, W, sliceH + 1, off, y0, W, sliceH + 1);
+        }
+      }
       active.restore();
     }
 
     active.globalCompositeOperation = mini ? 'source-over' : 'lighter';
     active.globalAlpha = 1;
     if (!mini) {
-      // 全屏氛围底光：中心彩色呼吸、向外衰减到完全透明（lighter 叠加），
-      // 光只留在画面中域，边缘回归兜底色
+      // 全屏氛围底光：中心彩色呼吸、向外衰减到完全透明（lighter 叠加）
       const hue = this.hueBase(t);
       const glowR = Math.max(W, H) * (0.66 + 0.30 * beat);
       const c0 = hslToRgb(hue, 0.75, 0.16 + 0.10 * beat);
@@ -206,29 +204,11 @@ export struct VisualizerView {
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       active.fillStyle = grad;
       active.fillRect(0, 0, W, H);
-    }
-    if (preset === 1) {
-      this.drawRadial(active, t, beat, bars, W, H);
-    } else if (preset === 2) {
-      this.drawBurst(active, t, beat, bars, W, H);
+      this.drawLiquid(active, t, beat, bars, W, H);
     } else {
       this.drawWaves(active, t, beat, bars, W, H);
     }
     active.globalCompositeOperation = 'source-over';
-    if (!mini) {
-      // 渐晕收边：四周向画面中心渐透的反向径向渐变，把边缘强制收敛回
-      // 兜底色，与系统栏区域（window 背景）完全同色，消除顶底割裂
-      const cx = W / 2;
-      const cy = H * 0.46;
-      const inner = Math.max(W, H) * 0.40;
-      const outer = Math.sqrt(W * W + H * H) / 2;
-      const vg = active.createRadialGradient(cx, cy, inner, cx, cy, outer);
-      vg.addColorStop(0, 'rgba(22,19,16,0)');
-      vg.addColorStop(0.55, 'rgba(22,19,16,0.55)');
-      vg.addColorStop(1, 'rgb(22,19,16)');
-      active.fillStyle = vg;
-      active.fillRect(0, 0, W, H);
-    }
 
     const bmp = active.transferToImageBitmap();
     this.displayCtx.clearRect(0, 0, this.displayCtx.width, this.displayCtx.height);
@@ -256,19 +236,46 @@ export struct VisualizerView {
     return (t * 0.02) % 360 + (this.seed % 360);
   }
 
-  /** preset 0：多条波形带竖向分区摆动铺满全屏（MilkDrop 经典画面）；
-   *  mini 变体为单色金光带：横向渐变两端渐隐，融入卡片 */
+  /**
+   * 液态光团（metaball）：多个径向渐变光球按 Lissajous 曲线永不重复地漂移，
+   * 半径随频谱段能量与节拍呼吸；lighter 叠加下光球相遇自然融合分离，
+   * 呈水滴/极光般的圆润变幻，配合波动切片拖尾整体如流体涌动。
+   */
+  private drawLiquid(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
+    bars: number[], W: number, H: number): void {
+    const N = 8;
+    const m = Math.min(W, H);
+    for (let i = 0; i < N; i++) {
+      // 互质近似频率的 Lissajous 轨迹：路径永不重复，变幻莫测
+      const fx = 0.00022 + hash01(this.seed + i * 7 + 1) * 0.00062;
+      const fy = 0.00019 + hash01(this.seed + i * 13 + 5) * 0.00055;
+      const phx = hash01(this.seed + i * 29 + 11) * 6.2831853;
+      const phy = hash01(this.seed + i * 41 + 17) * 6.2831853;
+      const x = W / 2 + W * 0.31 * Math.sin(t * fx + phx);
+      const y = H * 0.47 + H * 0.27 * Math.sin(t * fy + phy);
+      const bi = Math.min(bars.length - 1, Math.floor(i * bars.length / N));
+      const r = m * (0.085 + 0.10 * bars[bi]) * (0.82 + 0.28 * beat);
+      const hue = this.hueBase(t) + i * 38;
+      const l = 0.30 + 0.13 * beat + 0.08 * bars[bi];
+      const c = hslToRgb(hue, 0.85, l);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},0.66)`);
+      g.addColorStop(0.55, `rgba(${c[0]},${c[1]},${c[2]},0.26)`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 6.2831853);
+      ctx.fill();
+    }
+  }
+
+  /** mini 变体：单色金光带，横向渐变两端渐隐，融入卡片 */
   private drawWaves(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
     bars: number[], W: number, H: number): void {
-    const mini = this.variant === 'mini';
-    const lanes = mini ? 2 : 3;
+    const lanes = 2;
     const step = Math.max(4, Math.floor(W / 90));
     for (let k = 0; k < lanes; k++) {
-      // mini 振幅用满条高；full 三条带中心分布在上/中/下三个区，整屏摆动
-      const cy = mini ? H / 2 : H * (0.26 + 0.24 * k);
-      const amp = mini
-        ? H * (0.36 + 0.10 * k) * (0.6 + 0.4 * beat)
-        : H * 0.15 * (0.55 + 0.45 * beat);
+      const amp = H * (0.36 + 0.10 * k) * (0.6 + 0.4 * beat);
       const phase = this.beatPhase * 6.28 + k * 2.1;
       const dir = k % 2 === 0 ? 1 : -1;
       ctx.beginPath();
@@ -278,94 +285,32 @@ export struct VisualizerView {
         const env = Math.sin(Math.PI * p);
         const yOff = bars[bi] * amp * env *
           Math.sin(p * 6.28 * (1 + k * 0.4) + phase + t * 0.0024 * (k + 1));
-        const y = cy + yOff * dir;
+        const y = H / 2 + yOff * dir;
         if (x === 0) {
           ctx.moveTo(x, y);
         } else {
           ctx.lineTo(x, y);
         }
       }
-      if (mini) {
-        // accent 金色调（hue≈42），亮度分层；横向两端渐隐融入卡片
-        const gold = hslToRgb(42, 0.72, k === 0 ? 0.56 : 0.44);
-        const grad = ctx.createLinearGradient(0, 0, W, 0);
-        grad.addColorStop(0, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
-        grad.addColorStop(0.18, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
-        grad.addColorStop(0.82, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
-        grad.addColorStop(1, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 2.2 + 1.4 * beat;
-        ctx.stroke();
-        ctx.globalAlpha = 0.22;
-        ctx.lineWidth = 8;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        continue;
-      }
-      const hue = this.hueBase(t) + k * 26;
-      ctx.strokeStyle = rgbStyle(hslToRgb(hue, 0.92, 0.58 + 0.1 * beat));
-      ctx.lineWidth = 2.2 + 2.0 * beat;
+      // accent 金色调（hue≈42），亮度分层；横向两端渐隐融入卡片
+      const gold = hslToRgb(42, 0.72, k === 0 ? 0.56 : 0.44);
+      const grad = ctx.createLinearGradient(0, 0, W, 0);
+      grad.addColorStop(0, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
+      grad.addColorStop(0.18, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
+      grad.addColorStop(0.82, `rgba(${gold[0]},${gold[1]},${gold[2]},0.85)`);
+      grad.addColorStop(1, `rgba(${gold[0]},${gold[1]},${gold[2]},0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2.2 + 1.4 * beat;
       ctx.stroke();
-      // 宽描边低透明度一遍，形成光晕
-      ctx.globalAlpha = 0.32;
-      ctx.lineWidth = 14;
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = 8;
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
   }
 
-  /** preset 1：径向频谱花环，中心近屏中、触须伸至屏幕边缘，整体缓慢旋转 */
-  private drawRadial(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
-    bars: number[], W: number, H: number): void {
-    const cx = W / 2;
-    const cy = H * 0.47;
-    const m = Math.min(W, H);
-    const r0 = m * 0.28 * (1 + 0.20 * beat);
-    const rot = t * 0.00025;
-    const n = bars.length;
-    ctx.lineWidth = 1.5 + 1.5 * beat;
-    for (let i = 0; i < n; i++) {
-      const angle = rot + i * 6.2831853 / n;
-      const inner = r0 + m * 0.02 * Math.sin(angle * 3 + t * 0.001);
-      const outer = inner + bars[i] * m * (0.22 + 0.38 * beat);
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
-      ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-      ctx.strokeStyle = rgbStyle(hslToRgb(this.hueBase(t) + i * 360 / n * 1.5, 0.9, 0.58 + 0.1 * beat));
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.arc(cx, cy, r0, 0, 6.2831853);
-    ctx.strokeStyle = rgbStyle(hslToRgb(this.hueBase(t) + 120, 0.85, 0.55));
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  /** preset 2：放射星爆，长线伸至屏幕边缘，色相快速漂移 */
-  private drawBurst(ctx: OffscreenCanvasRenderingContext2D, t: number, beat: number,
-    bars: number[], W: number, H: number): void {
-    const cx = W / 2;
-    const cy = H * 0.47;
-    const m = Math.min(W, H);
-    const maxR = m * (0.55 + 0.35 * beat);
-    const n = bars.length;
-    const rot = -t * 0.00018;
-    for (let i = 0; i < n; i++) {
-      const angle = rot + i * 6.2831853 / n;
-      const r = maxR * (0.25 + 0.75 * bars[i]);
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(angle) * m * 0.02, cy + Math.sin(angle) * m * 0.02);
-      ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
-      ctx.strokeStyle = rgbStyle(hslToRgb(this.hueBase(t) + i * 360 / n + t * 0.02, 0.95, 0.6));
-      ctx.lineWidth = 0.8 + 2.2 * beat * bars[i];
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.arc(cx, cy, m * 0.018 * (1 + beat), 0, 6.2831853);
-    ctx.fillStyle = rgbStyle(hslToRgb(this.hueBase(t) + 60, 0.9, 0.7));
-    ctx.fill();
-  }
-
+  
+  
   /** Canvas onReady 公共初始化：按内部分辨率建双离屏画布 */
   private initOffscreens(): void {
     const wPx = this.displayCtx.width;
