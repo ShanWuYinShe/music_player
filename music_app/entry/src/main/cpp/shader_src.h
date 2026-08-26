@@ -149,20 +149,16 @@ void main() {
 
     float hue0 = fract(t * 0.000018 + hash(seed) * 3.0) * 360.0;
 
-    // ---- 风格轮换：26s each，seed 决定起点；uPresetSel>=0 时锁定（点击切换） ----
-    float cyc = mod(t / 26000.0 + hash(seed) * 11.0, 8.0);
-    int preset = uPresetSel >= 0.0 ? int(uPresetSel) : int(floor(cyc));
+    // ---- 风格仅由 uPresetSel 决定（点击切换，无自动轮换） ----
+    int preset = int(uPresetSel);
 
     if (preset == 0) {
         // ===== 流动星野：相机匀速前行（方向缓旋），花域在世界空间平铺掠过 =====
         vec2 center = vec2(0.5, 0.47);
         vec2 sp = (p - center) * vec2(aspect, 1.0);
-        // 向内深入：周期 zoom 涌出（每轮换世界原点，回绕即进入新星空区域）
-        float rndS = floor(t / 40000.0);
-        float zfS = exp(fract(t / 40000.0) * 3.4);
-        vec2 woff = vec2(hash(rndS * 7.7 + seed), hash(rndS * 13.1 + seed)) * 29.0;
-        vec2 drift2 = vec2(cos(t * 0.0002), sin(t * 0.00016)) * 0.05;
-        vec2 wp = sp * zfS + woff + drift2;            // 世界坐标
+        // 真穿越：匀速平移（内容因世界平铺无限更新，非缩放）
+        vec2 dir2 = vec2(cos(t * 0.00003), sin(t * 0.00003));
+        vec2 wp = sp + dir2 * t * 0.05;                // 世界坐标
         // 氛围光（屏幕空间，恒居中）
         {
             float g = smoothstep(0.95, 0.0, length(sp));
@@ -208,6 +204,22 @@ void main() {
                 float hue = fract(t * 0.02 + seed * 0.001 + hid * 0.61) * 360.0;
                 vec3 c = hsl2rgb(hue, 0.85, 0.55);
                 col += c * (edge * (0.11 + 0.05 * uBeat) + core * 0.02);
+            }
+        }
+        // 3D 深度星流：每颗星有真实 z 深度,相机前进时沿双曲线轨迹向外飞出
+        {
+            for (int s3 = 0; s3 < 20; s3++) {
+                float fid = hash(float(s3) * 7.31 + seed);
+                float zw = fract(fid * 7.7 - t * 0.00030);     // 1(远)→0(近) 递减
+                float z3 = 0.06 + zw * 2.6;
+                vec2 sxy = (vec2(hash(float(s3) * 3.1 + seed),
+                    hash(float(s3) * 5.7 + seed)) - 0.5) * 3.0;
+                vec2 proj = sxy / z3;                            // 投影:近大远小
+                float d3 = length(sp - proj);
+                float near1 = (1.0 - zw) * (1.0 - zw);           // 越近越亮
+                float hued = fract(fid * 5.0 + t * 0.000012) * 360.0;
+                col += hsl2rgb(hued, 0.8, 0.6)
+                    * exp(-d3 * d3 * (2600.0 / z3)) * near1 * 0.22;
             }
         }
         // 螺旋流带（世界角度推进）
@@ -278,15 +290,20 @@ void main() {
         col += hsl2rgb(fract(t * 0.00002 + hash(seed + 91.0)) * 360.0, 0.7, 0.10)
             * exp(-dot(q, q) * 7.0) * 0.16;
     } else if (preset == 2) {
-        // ===== Julia 之海：c 沿指数螺线漫游(形态无穷变形) + 缓慢变焦漂移 =====
+        // ===== Julia 之海：边界点集逐层真深潜（每层全新形态，非缩放循环）=====
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
-        float theta = t * 0.00009 + floor(t / 20000.0) * 0.37 + seed * 0.017;
-        float radius = 0.7885 * (0.97 + 0.05 * sin(t * 0.00013 + seed));
-        vec2 cJulia = vec2(cos(theta), sin(theta)) * radius;
-        // 向内深入：周期深潜（每轮 c 相位步进，回绕即进入新形态层）
-        float rndJ = floor(t / 20000.0);
-        float zfJ = exp(fract(t / 20000.0) * 2.6);
-        vec2 zj = q * zfJ * 0.30;
+        // 经典集边界 c（dendrite/螺旋/枝晶——边界处 Julia 有无限细节）
+        vec2 cSet[4];
+        cSet[0] = vec2(-0.7269, 0.1889);
+        cSet[1] = vec2(0.285, 0.01);
+        cSet[2] = vec2(-0.8, 0.156);
+        cSet[3] = vec2(-0.4, 0.6);
+        float rndJ = floor(t / 18000.0);
+        int cIdx = int(mod(rndJ + floor(hash(seed) * 4.0), 4.0));
+        vec2 cJulia = cSet[cIdx];
+        // 深潜：每层从全景潜入 e^6≈400 倍，期间结构持续演化；层末回绕=进入新形态
+        float zfJ = exp(fract(t / 18000.0) * 6.0);
+        vec2 zj = q * (0.55 / zfJ) + cJulia * 0.9;
         float esc = 0.0;
         float mIter = 0.0;
         for (int ij = 0; ij < 48; ij++) {
@@ -298,15 +315,17 @@ void main() {
                 break;
             }
         }
+        float layerFade = smoothstep(0.0, 0.08, fract(t / 18000.0))
+            * smoothstep(1.0, 0.94, fract(t / 18000.0));
         if (esc > 0.5) {
             float nu = mIter - log2(log2(max(dot(zj, zj), 1.0001))) + 4.0;
             float hueJ = fract(nu * 0.045 + t * 0.00001 + hash(seed + 0.3)) * 360.0;
             float glowJ = exp(-mIter * 0.045);
             col += hsl2rgb(hueJ, 0.85, 0.42 + 0.18 * uBeat)
-                * (0.05 + nu * 0.0024 + glowJ * 0.5) * (0.8 + 0.4 * uBass);
+                * (0.05 + nu * 0.0024 + glowJ * 0.5) * (0.8 + 0.4 * uBass) * layerFade;
         } else {
             col += hsl2rgb(fract(t * 0.00002 + 0.55) * 360.0, 0.6, 0.16)
-                * (0.10 + 0.08 * uBass);
+                * (0.10 + 0.08 * uBass) * layerFade;
         }
     } else if (preset == 3) {
         // ===== 涡旋隧道：伪 3D 深度管道（弯道 + 提速）=====
@@ -347,11 +366,13 @@ void main() {
         poi[1] = vec2(0.286931868895045, 0.014286693904085);
         poi[2] = vec2(-0.16, 1.0405);
         vec2 poiSel = poi[int(mod(seed, 3.0))];
-        // 向内深入：周期深潜（每轮兴趣点向边界邻域微移，层层进入新结构）
-        float rndM = floor(t / 16000.0);
-        float zfM = 0.34 * exp(fract(t / 16000.0) * 4.1);
-        vec2 poiOff = vec2(hash(rndM * 5.3 + seed), hash(rndM * 9.7 + seed)) - 0.5;
-        vec2 z0 = poiSel + poiOff * 0.004 + q * zfM;
+        // 真深潜：每层从全景潜入 e^8.5≈5000 倍(结构丰富区间),层末换全新兴趣点
+        float rndM = floor(t / 18000.0);
+        float zfM = 0.55 * exp(-fract(t / 18000.0) * 8.5);      // 步长从大到小=匀速深入
+        // 每层按轮次换兴趣点(在兴趣点集内轮换+hash 抖动到邻近不同结构)
+        vec2 poiM = poiSel + (vec2(hash(rndM * 5.3 + seed), hash(rndM * 9.7 + seed)) - 0.5)
+            * (0.06 + 0.30 * hash(rndM * 3.7 + seed));
+        vec2 z0 = poiM + q * zfM;
         float mIt = 0.0;
         float esc = 0.0;
         vec2 zm = vec2(0.0, 0.0);
@@ -361,12 +382,15 @@ void main() {
             mIt += 1.0;
             if (dm > 16.0) { esc = 1.0; break; }
         }
+        float layerFadeM = smoothstep(0.0, 0.06, fract(t / 18000.0))
+            * smoothstep(1.0, 0.95, fract(t / 18000.0));
         if (esc > 0.5) {
             float nu = mIt - log2(log2(max(dot(zm, zm), 1.0001))) + 4.0;
             float hueM = fract(nu * 0.03 + t * 0.000008 + hash(seed + 0.7)) * 360.0;
-            col += hsl2rgb(hueM, 0.85, 0.42 + 0.15 * uBeat) * (0.04 + nu * 0.0022) * (0.8 + 0.4 * uBass);
+            col += hsl2rgb(hueM, 0.85, 0.42 + 0.15 * uBeat) * (0.04 + nu * 0.0022)
+                * (0.8 + 0.4 * uBass) * layerFadeM;
         } else {
-            col += hsl2rgb(fract(t * 0.00003) * 360.0, 0.7, 0.10) * 0.20;
+            col += hsl2rgb(fract(t * 0.00003) * 360.0, 0.7, 0.10) * 0.20 * layerFadeM;
         }
     } else if (preset == 5) {
         // ===== 极光幕：三层视差帘幕漂移 + 星空底 =====
@@ -414,10 +438,15 @@ void main() {
         seg = abs(seg - 3.1415927 / KSEG);            // 镜像折叠
         vec2 fq = vec2(cos(seg), sin(seg)) * ring;
         // 折叠坐标里画一朵 Superformula 花 + 双层光斑
-        float mm = 2.0 + 5.0 * styleParam(80.0, t, 0.0, 1.0, seed);
-        float n1k = 0.7 + 0.6 * styleParam(81.0, t, 0.0, 1.0, seed);
-        float n2k = 0.3 + 1.7 * styleParam(82.0, t, 0.0, 1.0, seed);
-        float n3k = 0.3 + 1.7 * styleParam(83.0, t, 0.0, 1.0, seed);
+        // 花形按径向层号 hash 变化——涌出的每一层都是新花(非周期重复)
+        float layK = floor(lr + t * 0.00030);
+        float hK1 = hash(layK * 7.7 + seed);
+        float hK2 = hash(layK * 9.1 + seed);
+        float hK3 = hash(layK * 11.3 + seed);
+        float mm = 2.0 + 5.0 * hK1;
+        float n1k = 0.7 + 0.6 * hK2;
+        float n2k = 0.3 + 1.7 * hK3;
+        float n3k = 0.3 + 1.7 * hash(layK * 13.7 + seed);
         float ca = cos(mm * seg / 4.0);
         float sa = sin(mm * seg / 4.0);
         float denom = pow(abs(ca), n2k) + pow(abs(sa), n3k);

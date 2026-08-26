@@ -20,17 +20,8 @@ import {
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
-/** 可视化风格总数（与 shader_src.h 的轮换模数保持一致） */
+/** 可视化风格总数（与 shader_src.h 保持一致）；风格仅由点击切换，无自动轮换 */
 const PRESET_COUNT = 8;
-/** 风格自动轮换周期（毫秒） */
-const PRESET_PERIOD = 26000;
-
-/** 与 shader 内 hash() 同式（保证自动轮换相位判断一致） */
-function shaderHash(n: number): number {
-  return (Math.sin(n) * 43758.5453123) % 1 < 0
-    ? (Math.sin(n) * 43758.5453123) % 1 + 1
-    : (Math.sin(n) * 43758.5453123) % 1;
-}
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {
@@ -77,8 +68,8 @@ export struct VisualizerView {
 
   private lastSongId = '';
   private seed = 0;
-  /** 风格锁定号：-1 自动轮换；>=0 锁定指定风格（点击可视化区域循环切换） */
-  private presetLock: number = -1;
+  /** 当前风格号（仅点击可视化区域切换，无自动轮换） */
+  private presetLock: number = 0;
   private beatPhase = 0;
   /** 有效播放时钟：暂停期间不走，保证画面冻结在暂停时刻 */
   private playClock = 0;
@@ -160,23 +151,9 @@ export struct VisualizerView {
     }
   }
 
-  /** 点击可视化区域：循环切换到下一个风格（-1 自动 → 0..N-1 锁定 → 回自动） */
+  /** 点击可视化区域：循环切换到下一个风格 */
   private cyclePreset(): void {
-    const current = this.currentPreset();
-    if (this.presetLock < 0) {
-      this.presetLock = (current + 1) % PRESET_COUNT;  // 从自动的当前风格切到下一个
-    } else if (this.presetLock >= PRESET_COUNT - 1) {
-      this.presetLock = -1;  // 末尾回到自动轮换
-    } else {
-      this.presetLock += 1;
-    }
-  }
-
-  /** 当前生效风格号（自动模式下按 shader 同式相位计算） */
-  private currentPreset(): number {
-    const t = this.playClock;
-    const cyc = ((t / PRESET_PERIOD) + shaderHash(this.seed) * 11.0) % PRESET_COUNT;
-    return Math.floor(cyc);
+    this.presetLock = (this.presetLock + 1) % PRESET_COUNT;
   }
 
   private frame(): void {
