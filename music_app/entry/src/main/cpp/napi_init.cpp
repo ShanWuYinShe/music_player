@@ -50,10 +50,10 @@ void TryRegisterWith(OH_NativeXComponent* component) {
 }
 
 napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value args[1] = {nullptr};
+    size_t argc = 2;
+    napi_value args[2] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 1) {
+    if (argc < 2) {
         return nullptr;
     }
     OH_NativeXComponent* component = nullptr;
@@ -73,7 +73,7 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     if (argc < 7) {
         return nullptr;
     }
-    double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1;
+    double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1, transition = 1;
     bool playing = false;
     napi_get_value_double(env, args[0], &t);
     napi_get_value_double(env, args[1], &seed);
@@ -82,7 +82,8 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     napi_get_value_double(env, args[4], &bass);
     napi_get_value_double(env, args[5], &treble);
     napi_get_value_double(env, args[6], &presetLock);
-    VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock);
+    napi_get_value_double(env, args[7], &transition);
+    VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition);
     return nullptr;
 }
 

@@ -43,6 +43,7 @@ uniform float uBeat;
 uniform float uBass;
 uniform float uTreble;
 uniform float uPresetSel;
+uniform float uTransition;   // 风格过渡进度 0→1（新场景渐入，旧画面靠反馈余晖消散）
 uniform sampler2D uPrev;
 
 float hash(float n) { return fract(sin(n) * 43758.5453123); }
@@ -82,12 +83,21 @@ void main(){
     vec3 prev=texture(uPrev, p-persWarp).rgb;
     vec3 col=prev*0.78; // 明显拖尾速度线，但底色纯黑不染
     // 音乐驱动仅局部元素（禁止全屏闪烁）：chaos 仅用于选形，beat/bass/treble 仅调局部尺寸/亮度，不碰速度/全局色
-    float chaosA = hash(floor(t*0.0009 + seed*0.011));
-    float chaosB = hash(floor(t*0.00055 + seed*0.017)*1.7);
+    // 混沌参数平滑演化: 相邻 hash 值 smoothstep 插值——不可预测但无跳变(闪烁源已除)
+    float caR = t*0.0009 + seed*0.011;
+    float cbR = t*0.00055 + seed*0.017;
+    float caf = fract(caR); caf = caf*caf*(3.0-2.0*caf);
+    float cbf = fract(cbR); cbf = cbf*cbf*(3.0-2.0*cbf);
+    float chaosA = mix(hash(floor(caR)), hash(floor(caR)+1.0), caf);
+    float chaosB = mix(hash(floor(cbR)*1.7), hash((floor(cbR)+1.0)*1.7), cbf);
     float beatPow = pow(uBeat, 1.6);
     float bassPow = pow(uBass, 1.3);
     float treblePow = pow(uTreble, 1.15);
 
+    // 平滑切换: 场景增量按过渡系数渐入——切换后旧画面仍在反馈层存活并按帧衰减,
+    // 新场景从 0 权重平滑升至 1, 形成基于上一画布的 crossfade(不清空、无硬切)
+    vec3 colF = col;
+    float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
     int preset=int(uPresetSel+0.5);
 
     if(preset==0){
@@ -193,7 +203,9 @@ void main(){
         float hueIter=fract(iter*0.045+t*0.00002+chaosA*0.7+treblePow*0.3)*360.0;
         if(esc>0.5){
             float contour=fract(iter*(0.5+0.2*chaosB));
-            float line=exp(-pow(contour-0.5,2.0)*(120.0+80.0*beatPow))*0.9 + step(0.98-bassPow*0.08, fract(iter*(0.25+0.15*chaosA)))*0.6;
+            float line=exp(-pow(contour-0.5,2.0)*(120.0+80.0*beatPow))*0.9
+                + smoothstep(0.92, 0.995, fract(iter*(0.25+0.15*chaosA)))
+                    *smoothstep(0.86,0.96,bassPow)*0.6;
             col+=hsl2rgb(hueIter,0.95,0.58)*line*0.95;
             col+=hsl2rgb(mod(hueIter+40.0,360.0),0.9,0.55)*exp(-iter*0.055)*0.18;
         } else {
@@ -349,6 +361,7 @@ void main(){
     // 无全屏闪烁：音乐仅驱动局部几何（尺寸/边缘亮度），速度类恒定
     col=pow(col, vec3(0.92));
     col=clamp(col,0.0,1.0);
+    col = colF + (col - colF) * transA;
     outColor=vec4(col,1.0);
 }
 )";

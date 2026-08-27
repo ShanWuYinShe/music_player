@@ -55,6 +55,8 @@ export struct VisualizerView {
   @Param variant: string = 'full';
   /** 当前风格号（父页面持有，切换按钮与背景点击共用同一数据源） */
   @Param presetIndex: number = 0;
+  /** 风格过渡进度 0→1（切换后 1.5s 内新场景渐入，旧画面靠反馈余晖消散） */
+  private presetTrans: number = 1;
   /** 请求切换风格（背景点击触发；父页面更新 presetIndex 后经 @Param 回流） */
   @Event onPresetChange: (next: number) => void = (): void => {};
 
@@ -162,7 +164,11 @@ export struct VisualizerView {
   /** 外部 presetIndex 变化时同步到渲染用的 presetLock */
   @Monitor('presetIndex')
   onPresetIndexChange(): void {
-    this.presetLock = ((this.presetIndex % PRESET_COUNT) + PRESET_COUNT) % PRESET_COUNT;
+    const next = ((this.presetIndex % PRESET_COUNT) + PRESET_COUNT) % PRESET_COUNT;
+    if (next !== this.presetLock) {
+      this.presetTrans = 0;   // 风格变化：启动渐入过渡（不清空反馈画布）
+    }
+    this.presetLock = next;
   }
 
   /** 点击可视化区域：循环切换到下一个风格（本地即时生效 + 通知父页面同步状态） */
@@ -202,7 +208,10 @@ export struct VisualizerView {
       const spec = synthSpectrum(this.seed, t, 8);
       const bass = (spec[0] + spec[1]) / 2;
       const treble = (spec[6] + spec[7]) / 2;
-      entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock);
+      if (this.presetTrans < 1) {
+        this.presetTrans = Math.min(1, this.presetTrans + dt / 1500);
+      }
+      entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock, this.presetTrans);
       if (!playing && now > this.fadeDeadline) {
         this.stopLoop();
       }
