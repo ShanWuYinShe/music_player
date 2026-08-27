@@ -18,8 +18,14 @@ import {
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
-/** 可视化风格总数（与 shader_src.h 保持一致）；风格仅由点击切换，无自动轮换 */
-const PRESET_COUNT = 10;
+/** 可视化风格总数（与 shader_src.h 保持一致）；风格仅由点击/按钮切换，无自动轮换 */
+export const PRESET_COUNT = 10;
+
+/** 风格显示名（与 shader_src.h 各 preset 段一一对应） */
+export const VIZ_PRESET_NAMES: string[] = [
+  '霓虹跑道', '水晶洞窟', '分形地形等高线', '赛博隧道', '传送门',
+  '激光幕墙', '镜屋', '冲击波竞技场', '星门环廊', '云海空战'
+];
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {
@@ -47,6 +53,10 @@ export struct VisualizerView {
   @Param @Require player: PlayerController;
   /** 'full' 播放页全屏；'mini' 迷你条内嵌 */
   @Param variant: string = 'full';
+  /** 当前风格号（父页面持有，切换按钮与背景点击共用同一数据源） */
+  @Param presetIndex: number = 0;
+  /** 请求切换风格（背景点击触发；父页面更新 presetIndex 后经 @Param 回流） */
+  @Event onPresetChange: (next: number) => void = (): void => {};
 
   private displayCtx: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
@@ -149,9 +159,17 @@ export struct VisualizerView {
     }
   }
 
-  /** 点击可视化区域：循环切换到下一个风格 */
+  /** 外部 presetIndex 变化时同步到渲染用的 presetLock */
+  @Monitor('presetIndex')
+  onPresetIndexChange(): void {
+    this.presetLock = ((this.presetIndex % PRESET_COUNT) + PRESET_COUNT) % PRESET_COUNT;
+  }
+
+  /** 点击可视化区域：循环切换到下一个风格（本地即时生效 + 通知父页面同步状态） */
   private cyclePreset(): void {
-    this.presetLock = (this.presetLock + 1) % PRESET_COUNT;
+    const next = (this.presetLock + 1) % PRESET_COUNT;
+    this.presetLock = next;
+    this.onPresetChange(next);
   }
 
   private frame(): void {

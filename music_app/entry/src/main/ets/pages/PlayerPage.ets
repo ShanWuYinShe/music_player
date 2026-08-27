@@ -6,7 +6,7 @@ import { SongRecord } from '../model/Song';
 import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
-import { VisualizerView } from '../components/VisualizerView';
+import { VisualizerView, VIZ_PRESET_NAMES, PRESET_COUNT } from '../components/VisualizerView';
 
 /** 队列表项 */
 interface QueueEntry {
@@ -27,6 +27,8 @@ export struct PlayerPage {
   @Local dragValue: number = -1;
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
+  /** 当前可视化风格号（顶栏按钮与背景点击共用） */
+  @Local vizPreset: number = 0;
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
@@ -65,10 +67,29 @@ export struct PlayerPage {
     });
   }
 
+  /** 切换到下一个可视化风格并提示风格名 */
+  private switchPreset(): void {
+    this.vizPreset = (this.vizPreset + 1) % PRESET_COUNT;
+    this.toastPreset(this.vizPreset);
+  }
+
+  private toastPreset(index: number): void {
+    const name = VIZ_PRESET_NAMES[index] ?? `风格 ${index + 1}`;
+    promptAction.showToast({ message: `${index + 1}/${PRESET_COUNT} · ${name}` });
+  }
+
   build() {
     Stack({ alignContent: Alignment.Top }) {
       // 全屏可视化底景：MilkDrop 风格频谱流动层，延伸至系统栏下自然融合
-      VisualizerView({ player: this.player, variant: 'full' })
+      VisualizerView({
+        player: this.player,
+        variant: 'full',
+        presetIndex: this.vizPreset,
+        onPresetChange: (next: number): void => {
+          this.vizPreset = next;
+          this.toastPreset(next);
+        }
+      })
         .width('100%')
         .height('100%')
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
@@ -82,6 +103,11 @@ export struct PlayerPage {
             .padding(12)
             .onClick(() => this.navPathStack.pop())
           Blank()
+          SymbolGlyph($r('sys.symbol.wand_and_stars'))
+            .fontSize(22)
+            .fontColor([$r('app.color.viz_fg')])
+            .padding(12)
+            .onClick(() => this.switchPreset())
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
