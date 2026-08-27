@@ -188,7 +188,7 @@ void main() {
     vec2 domainW = 0.0017 * vec2(sin(p.y * 23.0 + t * 0.0011 + seed), cos(p.x * 21.0 - t * 0.0009 + seed * 0.7));
     vec2 warped = p - persWarp + domainW;
     vec3 col = texture(uPrev, warped).rgb;
-    col = col * 0.86 + vec3(0.05, 0.047, 0.043) * 0.14;
+    col = col * 0.82 + vec3(0.06, 0.055, 0.05) * 0.18;
 
     float hue0 = fract(t * 0.000018 + hash(seed) * 3.0) * 360.0;
     int preset = int(uPresetSel + 0.5);
@@ -201,7 +201,7 @@ void main() {
         vec2 wp = sp + dir2 * t * 0.05;
         {
             float g = smoothstep(0.95, 0.0, length(sp));
-            col += hsl2rgb(hue0, 0.75, 0.10) * g * g * 0.22;
+            col += hsl2rgb(hue0, 0.85, 0.22) * g * g * 0.45;
         }
         vec2 cellSz = vec2(1.05, 0.72);
         vec2 base = floor(wp / cellSz);
@@ -217,7 +217,7 @@ void main() {
                 float sflare = 0.5 + 0.5 * sin(t * 0.002 + hid * 40.0);
                 float shue = fract(t * 0.000012 + hid * 5.0) * 360.0;
                 float fogS = exp(-depthStar * 0.45);
-                col += hsl2rgb(shue, 0.8, 0.55) * exp(-ds * 1400.0) * sflare * (0.05 + 0.04 * uTreble) * fogS;
+                col += hsl2rgb(shue, 0.95, 0.65) * exp(-ds * 1400.0) * sflare * (0.14 + 0.12 * uTreble) * fogS;
                 if (hid < 0.30) continue;
                 float depth = 0.55 + 2.6 * fract(hid * 3.1 - t * 0.00016);
                 vec2 gpos = (gidx + 0.5);
@@ -240,7 +240,7 @@ void main() {
                 float core = exp(-rank * rank * (140.0 + 40.0 / depth));
                 float hue = fract(t * 0.02 + seed * 0.001 + hid * 0.61) * 360.0;
                 vec3 c = hsl2rgb(hue, 0.85, 0.55);
-                col += c * (edge * (0.10 + 0.05 * uBeat) + core * 0.02) * fog;
+                col += c * (edge * (0.28 + 0.14 * uBeat) + core * 0.07) * fog;
             }
         }
         // 3D 深度星流：每颗星透视投影双曲线（深度回收循环）
@@ -254,7 +254,7 @@ void main() {
                 float d3 = length(sp - proj);
                 float near1 = (1.0 - zw) * (1.0 - zw);
                 float hued = fract(fid * 5.0 + t * 0.000012) * 360.0;
-                col += hsl2rgb(hued, 0.8, 0.6) * exp(-d3 * d3 * (2600.0 / z3)) * near1 * 0.22;
+                col += hsl2rgb(hued, 0.95, 0.68) * exp(-d3 * d3 * (2600.0 / z3)) * near1 * 0.45;
             }
         }
         {
@@ -266,7 +266,7 @@ void main() {
                 float d = abs(fract(ph / 6.2832) - 0.5) * 6.2832;
                 float band = exp(-d * d * 3.5) * exp(-(wrr - 0.26) * (wrr - 0.26) * 6.0);
                 float hueb = fract(t * 0.000016 + seed * 0.001 + fs * 0.36) * 360.0;
-                col += hsl2rgb(hueb, 0.85, 0.55) * band * 0.10;
+                col += hsl2rgb(hueb, 0.95, 0.62) * band * 0.26;
             }
         }
     } else if (preset == 1) {
@@ -312,12 +312,12 @@ void main() {
             float dif = clamp(dot(n, ld), 0.0, 1.0);
             float rim = pow(1.0 - abs(dot(n, -rd)), 2.2);
             float faceHue = mod(t * 0.014 + seed * 0.001 + n.y * 40.0 + n.x * 25.0, 360.0);
-            vec3 base = hsl2rgb(faceHue, 0.78, 0.46);
-            vec3 lit = base * (0.16 + 0.84 * dif * (0.85 + 0.3 * uBass)) + hsl2rgb(mod(faceHue + 55.0, 360.0), 0.85, 0.6) * rim * (0.45 + 0.35 * uBeat);
+            vec3 base = hsl2rgb(faceHue, 0.92, 0.58);
+            vec3 lit = base * (0.32 + 0.88 * dif * (0.90 + 0.35 * uBass)) + hsl2rgb(mod(faceHue + 55.0, 360.0), 0.95, 0.68) * rim * (0.85 + 0.55 * uBeat);
             float fade = exp(-(max(tv - 1.9, 0.0)) * 0.85);
-            col = mix(col, lit, clamp(0.80 * cover * (0.35 + 0.65 * fade), 0.0, 1.0));
+            col = mix(col, lit, clamp(0.92 * cover * (0.45 + 0.65 * fade), 0.0, 1.0));
         }
-        col += hsl2rgb(fract(t * 0.00002 + hash(seed + 91.0)) * 360.0, 0.7, 0.10) * exp(-dot(q, q) * 7.0) * 0.16;
+        col += hsl2rgb(fract(t * 0.00002 + hash(seed + 91.0)) * 360.0, 0.85, 0.22) * exp(-dot(q, q) * 7.0) * 0.38;
     } else if (preset == 2) {
         // ===== 2 Julia 之海·俯冲透视：掠射平面 + 地平线汇聚 =====
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
@@ -361,14 +361,14 @@ void main() {
         float skyMask = step(0.0, tPlane);
         if (skyMask < 0.5) {
             float sky = exp(-length(q - vec2(0.0, 0.62)) * 2.2);
-            col += hsl2rgb(fract(t * 0.00002 + hash(seed + 21.0)) * 360.0, 0.55, 0.14) * sky * 0.22 * layerFade;
+            col += hsl2rgb(fract(t * 0.00002 + hash(seed + 21.0)) * 360.0, 0.75, 0.32) * sky * 0.55 * layerFade;
         } else if (esc > 0.5) {
             float nu = mIter - log2(log2(max(dot(zj, zj), 1.0001))) + 4.0;
             float hueJ = fract(nu * 0.045 + t * 0.00001 + hash(seed + 0.3)) * 360.0;
             float glowJ = exp(-mIter * 0.045);
-            col += hsl2rgb(hueJ, 0.85, 0.42 + 0.18 * uBeat) * (0.05 + nu * 0.0024 + glowJ * 0.5) * (0.8 + 0.4 * uBass) * layerFade * (0.55 + 0.45 * horizonFog);
+            col += hsl2rgb(hueJ, 0.95, 0.55 + 0.15 * uBeat) * (0.12 + nu * 0.005 + glowJ * 0.85) * (1.0 + 0.5 * uBass) * layerFade * (0.65 + 0.45 * horizonFog);
         } else {
-            col += hsl2rgb(fract(t * 0.00002 + 0.55) * 360.0, 0.6, 0.16) * (0.10 + 0.08 * uBass) * layerFade * (0.55 + 0.45 * horizonFog);
+            col += hsl2rgb(fract(t * 0.00002 + 0.55) * 360.0, 0.75, 0.35) * (0.24 + 0.18 * uBass) * layerFade * (0.65 + 0.45 * horizonFog);
         }
         // 透视辅助：远处轻雾线
         col = mix(col, col * 0.55 + vec3(0.06, 0.07, 0.09), clamp(depthJ * 0.12, 0.0, 0.35) * layerFade);
@@ -404,10 +404,10 @@ void main() {
         float depthFade = clamp(rad * 2.6, 0.0, 1.0);
         float persFade = exp(-depth * 0.055);
         float hue = mod(t * 0.000014 + seed * 0.001 + gid.y * 11.0 + gid.x * 5.0, 360.0);
-        col += hsl2rgb(hue, 0.82, 0.52) * glowLine * blink * depthFade * persFade * 0.38;
-        col += hsl2rgb(mod(hue + 43.0, 360.0), 0.7, 0.42) * exp(-rad * rad * 26.0) * (0.08 + 0.05 * uBass + 0.03 * uBeat);
+        col += hsl2rgb(hue, 0.92, 0.62) * glowLine * blink * depthFade * persFade * 0.78;
+        col += hsl2rgb(mod(hue + 43.0, 360.0), 0.85, 0.58) * exp(-rad * rad * 26.0) * (0.18 + 0.12 * uBass + 0.08 * uBeat);
         // 远端透视光锥
-        col += hsl2rgb(mod(hue + 20.0, 360.0), 0.75, 0.45) * exp(-depth * 0.18) * 0.06;
+        col += hsl2rgb(mod(hue + 20.0, 360.0), 0.90, 0.58) * exp(-depth * 0.18) * 0.14;
     } else if (preset == 4) {
         // ===== 4 Mandelbrot·推轨变焦（dolly + FOV 窄化透视）=====
         vec2 q = (p - vec2(0.5, 0.47)) * vec2(aspect, 1.0);
@@ -449,9 +449,9 @@ void main() {
         if (esc > 0.5) {
             float nu = mIt - log2(log2(max(dot(zm, zm), 1.0001))) + 4.0;
             float hueM = fract(nu * 0.03 + t * 0.000008 + hash(seed + 0.7)) * 360.0;
-            col += hsl2rgb(hueM, 0.85, 0.42 + 0.15 * uBeat) * (0.04 + nu * 0.0022) * (0.8 + 0.4 * uBass) * layerFadeM * (0.5 + 0.5 * depthFog);
+            col += hsl2rgb(hueM, 0.95, 0.55 + 0.15 * uBeat) * (0.10 + nu * 0.0055) * (1.0 + 0.5 * uBass) * layerFadeM * (0.65 + 0.45 * depthFog);
         } else {
-            col += hsl2rgb(fract(t * 0.00003) * 360.0, 0.7, 0.10) * 0.20 * layerFadeM * (0.5 + 0.5 * depthFog);
+            col += hsl2rgb(fract(t * 0.00003) * 360.0, 0.85, 0.35) * 0.45 * layerFadeM * (0.65 + 0.45 * depthFog);
         }
         col = mix(col, col * 0.6 + vec3(0.05, 0.06, 0.08), clamp(depthM * 0.14, 0.0, 0.35) * layerFadeM);
     } else if (preset == 5) {
@@ -483,7 +483,7 @@ void main() {
             float flick = 0.7 + 0.3 * sin(xw * 9.0 + t * 0.0011 + fl * 2.0);
             float hueA = 120.0 + 55.0 * fl + hA * 30.0 + 18.0 * sin(t * 0.00016 + fl);
             float fogA = exp(-depthA * 0.42);
-            col += hsl2rgb(hueA, 0.85, 0.42 + 0.10 * uBass) * drape * flick * envA * (0.36 - fl * 0.06) * (0.85 + 0.3 * uBeat) * fogA;
+            col += hsl2rgb(hueA, 0.95, 0.55 + 0.10 * uBass) * drape * flick * envA * (0.68 - fl * 0.10) * (1.0 + 0.45 * uBeat) * fogA;
         }
         {
             float zfA = exp(fract(t / 12000.0) * 2.2);
@@ -527,8 +527,8 @@ void main() {
             float edge = exp(-abs(ring - rSurf) * (9.0 + 4.0 * persK));
             float hueW = fract(t * 0.016 + seed * 0.001 + ring * 0.8 + fk * 0.15) * 360.0;
             float fogK = exp(-depthK * 0.52);
-            col += hsl2rgb(hueW, 0.85, 0.55) * edge * (0.09 + 0.04 * uBeat) * fogK * (1.15 - fk * 0.22);
-            col += hsl2rgb(mod(hueW + 40.0, 360.0), 0.8, 0.45) * exp(-abs(ring - 1.0) * (4.0 + 2.0 * persK)) * (0.07 + 0.05 * uBass) * fogK * (1.0 - fk * 0.18);
+            col += hsl2rgb(hueW, 0.95, 0.65) * edge * (0.22 + 0.12 * uBeat) * fogK * (1.25 - fk * 0.22);
+            col += hsl2rgb(mod(hueW + 40.0, 360.0), 0.92, 0.58) * exp(-abs(ring - 1.0) * (4.0 + 2.0 * persK)) * (0.18 + 0.12 * uBass) * fogK * (1.15 - fk * 0.18);
             if (fk == 1.0) {
                 float beads = exp(-pow(sin(lr * 44.0), 2.0) * 12.0) * smoothstep(1.0, 1.15, ring) * smoothstep(2.72, 2.5, ring);
                 col += hsl2rgb(mod(hueW + 180.0, 360.0), 0.8, 0.5) * beads * (0.08 + 0.06 * uTreble) * fogK;
@@ -576,7 +576,7 @@ void main() {
             float v = pow(clamp(ringI, 0.0, 1.0), 3.0);
             float hueI = fract(t * 0.00002 + seed * 0.001 + v * 0.25) * 360.0;
             float fogW = exp(-depthW * 0.52);
-            col += hsl2rgb(hueI, 0.85, 0.5) * v * (0.16 + 0.10 * uBeat) * fogW;
+            col += hsl2rgb(hueI, 0.95, 0.62) * v * (0.38 + 0.22 * uBeat) * fogW;
             col += hsl2rgb(mod(hueI + 60.0, 360.0), 0.75, 0.4) * exp(-dot(waterPos, waterPos) * 0.45) * (0.06 + 0.05 * uBass) * fogW;
             // 远处压缩的菲涅尔
             col = mix(col, col * 0.72 + vec3(0.04, 0.06, 0.09), clamp(depthW * 0.18, 0.0, 0.45));
@@ -648,8 +648,8 @@ void main() {
             float difR = clamp(dot(n, ldR), 0.0, 1.0);
             float rimR = pow(1.0 - abs(dot(n, -rdR)), 2.4);
             float hueR = mod(t * 0.013 + seed * 0.001 + hitHash * 80.0, 360.0);
-            vec3 baseR = hsl2rgb(hueR, 0.78, 0.46);
-            vec3 litR = baseR * (0.18 + 0.82 * difR * (0.85 + 0.25 * uBass)) + hsl2rgb(mod(hueR + 55.0, 360.0),0.85,0.6) * rimR * (0.42 + 0.33 * uBeat);
+            vec3 baseR = hsl2rgb(hueR, 0.92, 0.58);
+            vec3 litR = baseR * (0.35 + 0.90 * difR * (0.92 + 0.35 * uBass)) + hsl2rgb(mod(hueR + 55.0, 360.0),0.95,0.68) * rimR * (0.85 + 0.60 * uBeat);
             float fogR = exp(-hitR * 0.38);
             col = mix(col, litR, clamp(0.88 * fogR, 0.0, 1.0));
         } else {
