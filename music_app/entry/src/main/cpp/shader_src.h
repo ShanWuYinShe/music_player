@@ -73,6 +73,22 @@ float vn(vec2 p){
     return mix(mix(hash2(i), hash2(i+vec2(1,0)), u.x), mix(hash2(i+vec2(0,1)), hash2(i+vec2(1,1)), u.x), u.y);
 }
 
+/** 圣殿场景 SDF：主晶(旋转八面体)+两侧小晶域+走廊空腔 */
+float crystalSdf(vec3 w, vec3 anchor, float spin, float breathe, float seed){
+    vec3 mp=w-anchor;
+    mp.xz=rot2(spin)*mp.xz;
+    mp.yz=rot2(spin*0.6)*mp.yz;
+    float dMain=(abs(mp.x)+abs(mp.y)*0.62+abs(mp.z))/1.35/breathe-0.60;
+    vec3 cell=floor(w/2.3+0.5); float h=hash2(cell.xz+seed*0.01);
+    vec3 cpos=w-cell*2.3;
+    float side=cell.x>0.5?1.0:-1.0;
+    cpos.xy-=vec2(side*(0.95+0.35*h),(h-0.5)*1.3);
+    cpos.xz=rot2(h*3.14)*cpos.xz;
+    float dSmall=(abs(cpos.x)+abs(cpos.y)+abs(cpos.z))/(0.30+0.18*h)-1.0;
+    dSmall=max(dSmall, length(w.xy)-0.75);
+    return min(dMain, dSmall);
+}
+
 void main(){
     float t=uT; float seed=uSeed;
     vec2 p=vUV; float aspect=uRes.x/max(uRes.y,1.0);
@@ -142,55 +158,68 @@ void main(){
             col+=vec3(0.05,0.12,0.25)*sky*0.5;
         }
     } else if(preset==1){
-        // 1 水晶洞窟：SDF 尖晶 + 硬边高光
+        // 1 水晶圣殿：中央稳定主晶体(形状可辨) + 同色系小晶掠过 + 雾气迷离
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
-        float fov=radians(62.0+6.0*uBass);
-        float focal=1.0/tan(fov*0.5);
-        vec3 ro=vec3(sin(t*0.00014)*0.22, cos(t*0.00011)*0.14, t*0.00052*2.2);
-        float yaw=sin(t*0.00012)*0.14;
+        float focal=1.0/tan(radians(31.0));            // 固定视场,不随音频抽搐
+        vec3 ro=vec3(sin(t*0.00013)*0.18, cos(t*0.00010)*0.12, t*0.00048*2.0);
+        float yaw=sin(t*0.00011)*0.12;
         vec3 rd0=normalize(vec3(q.x*focal*0.92, q.y*focal*0.92, 1.45));
         rd0.xz=rot2(yaw)*rd0.xz;
         vec3 rd=normalize(rd0);
-        // 简化 KIFS 用 box + 扭曲代替，保证硬边
+        // 主色系: 缓慢单向演化(~3 分钟一圈), 青蓝-紫科幻区间
+        float hue1=mod(t*0.0019+seed*0.13, 360.0);
+        // 主晶体: 悬浮于相机前方固定距离(跟随前进, 缓慢横移+自转+呼吸)
+        vec3 anchor=vec3(sin(t*0.00009)*0.24, cos(t*0.00007)*0.15+0.06, ro.z+3.2);
+        float spin=t*0.00026+seed*0.1;
+        float breathe=0.92+0.08*sin(t*0.0006)+0.03*uBeat;
         float tt=0.12; float hit=-1.0; vec3 hitP=vec3(0);
-        for(int i=0;i<38;i++){
+        for(int i=0;i<40;i++){
             vec3 pos=ro+rd*tt;
-            // 重复晶格
-            vec3 cell=floor(pos/1.9+0.5); float h=hash2(cell.xz+seed*0.01);
-            vec3 cpos=pos-cell*1.9;
-            cpos.xz=rot2(h*3.14)*cpos.xz;
-            float d=sdBox(cpos, vec3(0.32+0.10*h, 0.55+0.20*h, 0.32+0.10*h));
-            // 走廊
-            float corridor=length(pos.xy)-0.58;
-            d=max(d, corridor);
-            if(d<0.006){ hit=tt; hitP=pos; break; }
-            tt+=max(d*0.45,0.014);
-            if(tt>6.0) break;
+            float d=crystalSdf(pos, anchor, spin, breathe, seed);
+            if(d<0.007){ hit=tt; hitP=pos; break; }
+            tt+=max(d*0.5, 0.016);
+            if(tt>7.0) break;
         }
         if(hit>0.0){
-            // 硬法线（数值）
-            float e=0.006;
+            float e=max(hit*0.004, 0.006);
             vec3 n=normalize(vec3(
-                sdBox(hitP+vec3(e,0,0)-floor((hitP+vec3(e,0,0))/1.9+0.5)*1.9, vec3(0.3))-sdBox(hitP-vec3(e,0,0)-floor((hitP-vec3(e,0,0))/1.9+0.5)*1.9, vec3(0.3)),
-                sdBox(hitP+vec3(0,e,0)-floor((hitP+vec3(0,e,0))/1.9+0.5)*1.9, vec3(0.3))-sdBox(hitP-vec3(0,e,0)-floor((hitP-vec3(0,e,0))/1.9+0.5)*1.9, vec3(0.3)),
-                sdBox(hitP+vec3(0,0,e)-floor((hitP+vec3(0,0,e))/1.9+0.5)*1.9, vec3(0.3))-sdBox(hitP-vec3(0,0,e)-floor((hitP-vec3(0,0,e))/1.9+0.5)*1.9, vec3(0.3))
+                crystalSdf(hitP+vec3(e,0,0),anchor,spin,breathe,seed)
+                    -crystalSdf(hitP-vec3(e,0,0),anchor,spin,breathe,seed),
+                crystalSdf(hitP+vec3(0,e,0),anchor,spin,breathe,seed)
+                    -crystalSdf(hitP-vec3(0,e,0),anchor,spin,breathe,seed),
+                crystalSdf(hitP+vec3(0,0,e),anchor,spin,breathe,seed)
+                    -crystalSdf(hitP-vec3(0,0,e),anchor,spin,breathe,seed)
             ));
-            // 用 hash 上色强对比
-            float h2=hash2(floor(hitP.xz)+seed*0.02);
-            vec3 c=hsl2rgb(mod(h2*320.0+t*0.015+chaosB*120.0+treblePow*60.0,360.0),0.98,0.62+beatPow*0.10);
-            vec3 ld=normalize(vec3(0.6,0.8,-0.5));
+            vec3 ld=normalize(vec3(0.55,0.75,-0.5));
             float dif=clamp(dot(n,ld),0.0,1.0);
-            float rim=pow(1.0-abs(dot(n,-rd)), 2.0);
-            vec3 lit=c*(0.35+dif*0.85)+vec3(1)*rim*0.55;
-            float fog=exp(-hit*0.32);
-            col=mix(col, lit, 0.95*fog);
-            // 激光扫描线
-            float scan=fract(hitP.z*1.2 - t*0.003);
-            if(scan<0.04+0.02*beatPow) col+=vec3(0.2,1.0,1.0)*(0.5+0.6*treblePow)*fog;
+            float rim=pow(1.0-abs(dot(n,-rd)),2.0);
+            float fog=exp(-hit*0.26);
+            // 命中距主晶锚点近 => 主晶表面(中央主体); 远 => 小晶(低饱和不抢戏)
+            float nearMain=exp(-length(hitP-anchor)*1.4);
+            float h2=hash2(floor(hitP.xz)+seed*0.02);
+            float hueM=mod(hue1+n.y*18.0+(1.0-nearMain)*(30.0+h2*40.0), 360.0);
+            float satM=mix(0.55, 0.74, nearMain);
+            vec3 lit=hsl2rgb(hueM,satM,0.55)*(0.30+dif*0.75)
+                +hsl2rgb(mod(hueM+25.0,360.0),0.8,0.72)*rim*(0.5+0.15*uBeat);
+            col=mix(col, lit, (0.85+0.11*nearMain)*fog);
+            // 主晶晶轴内芯亮线
+            vec3 mp=hitP-anchor;
+            float axis=exp(-length(vec2(mp.x,mp.z))*2.4)*nearMain;
+            col+=hsl2rgb(mod(hueM+40.0,360.0),0.85,0.75)*axis*0.22*fog;
         } else {
-            col+=vec3(0.02,0.06,0.12)*exp(-dot(q,q)*6.0)*0.5;
+            // 远景: 深邃渐变 + 漂浮晶尘(低频缓闪, 不抢戏)
+            float vg=exp(-dot(q,q)*1.8);
+            col+=hsl2rgb(mod(hue1+50.0,360.0),0.6,0.10)*vg*0.6;
+            for(int d2=0;d2<10;d2++){
+                float fd=hash(float(d2)*7.7+seed);
+                vec2 dp2=vec2(sin(t*(0.00008+fd*0.0001)+fd*40.0),
+                    cos(t*(0.00006+fd*0.00008)+fd*70.0))*0.42;
+                float dd=length(q-dp2);
+                col+=hsl2rgb(mod(hue1+30.0,360.0),0.7,0.6)*exp(-dd*dd*2600.0)
+                    *(0.25+0.25*sin(t*0.0012+fd*50.0))*0.25;
+            }
         }
-    } else if(preset==2){
+    } else if(preset==2){    } else if(preset==2){
         // 2 分形地形等高线：Julia 地形线框
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
         vec2 cSet[4]; cSet[0]=vec2(-0.7269,0.1889); cSet[1]=vec2(0.285,0.01); cSet[2]=vec2(-0.8,0.156); cSet[3]=vec2(-0.4,0.6);
