@@ -119,7 +119,7 @@ void main(){
     if(preset==0){
         // 0 霓虹跑道：棋盘地板 + 方块障碍
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
-        float fov=radians(72.0+6.0*uBass);
+        float fov=radians(72.0);
         float focal=1.0/tan(fov*0.5);
         vec3 ro=vec3(0.0, 0.85, t*0.00095*1.8);
         float pitch=radians(-18.0);
@@ -148,7 +148,7 @@ void main(){
             float dbox=sdBox(boxP, vec3(0.45, bh*0.5, 0.45));
             float edge=exp(-abs(dbox)*18.0);
             float face=step(dbox,0.0);
-            vec3 cbox=hsl2rgb(mod(zc*37.0+t*0.02+chaosA*120.0+treblePow*60.0,360.0),0.98,0.62+bassPow*0.1);
+            vec3 cbox=hsl2rgb(mod(zc*37.0+t*0.0022+chaosA*120.0,360.0),0.85,0.60+bassPow*0.1);
             col += cbox * face*(0.95+0.55*beatPow)*pers + cbox*edge*(0.65+0.55*beatPow)*0.9;
             // 速度线（远处汇聚）
             col += vec3(0.2,0.9,1.0)*exp(-abs(hit.x)*1.2)*exp(-depth*0.45)*0.18;
@@ -247,7 +247,7 @@ void main(){
     } else if(preset==3){
         // 3 赛博隧道：六边形蜂窝
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
-        float fov=radians(70.0+6.0*uBass); float focal=1.0/tan(fov*0.5);
+        float fov=radians(70.0); float focal=1.0/tan(fov*0.5);
         float yaw=0.16*sin(t*0.00022);
         vec3 ro=vec3(0,0,t*0.0009*2.6);
         vec3 rd=normalize(vec3(q.x*focal, q.y*focal,1.0));
@@ -259,7 +259,7 @@ void main(){
         vec2 hexF=fract(hex*hexS);
         float hexLine= min(min(hexF.x, 1.0-hexF.x), min(hexF.y,1.0-hexF.y));
         float glow=exp(-hexLine*55.0)*0.9;
-        vec3 hc=hsl2rgb(mod(hex.y*18.0+t*0.015+chaosB*110.0+treblePow*60.0,360.0),0.98,0.62);
+        vec3 hc=hsl2rgb(mod(hex.y*18.0+t*0.002+chaosB*110.0,360.0),0.85,0.60);
         float depthFade=clamp(1.0-depth*0.045,0.0,1.0);
         col+=hc*glow*depthFade*(0.90+0.60*beatPow);
         // 速度线
@@ -275,7 +275,7 @@ void main(){
         float ring=exp(-abs(r-0.42)*22.0)*0.9 + exp(-abs(r-0.62)*18.0)*0.6 + exp(-abs(r-0.82)*14.0)*0.35;
         float seg= mod(a*3.0 + t*0.0005, 6.283);
         float segLine=exp(-pow(fract(seg/1.047)-0.5,2.0)*60.0);
-        vec3 c=hsl2rgb(mod(t*0.018+chaosA*200.0+treblePow*80.0,360.0),0.98,0.62);
+        vec3 c=hsl2rgb(mod(t*0.002+chaosA*200.0,360.0),0.85,0.60);
         col+=c*ring*segLine*(0.90+0.70*beatPow);
         col+=c*pulse*0.25*exp(-r*1.2);
         // 中心黑洞
@@ -292,7 +292,7 @@ void main(){
             float beam=exp(-abs(q.x - xpos)* (85.0/(0.02+abs(q.y))))*0.85;
             float scan= fract((q.y+1.2)/0.35 + tL + fi*0.22);
             float scanLine=exp(-pow(scan-0.5,2.0)*80.0)*0.5;
-            vec3 lc=hsl2rgb(mod(fi*72.0 + t*0.012,360.0),0.98,0.60);
+            vec3 lc=hsl2rgb(mod(fi*72.0 + t*0.0018,360.0),0.88,0.58);
             col+=lc*beam*(0.7+0.5*sin(t*(0.003+0.002*treblePow)+fi)+0.4*beatPow)*0.9;
             col+=lc*beam*scanLine*0.4;
         }
@@ -302,13 +302,13 @@ void main(){
     } else if(preset==6){
         // 6 镜屋：硬边反射
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
-        float K= mix(5.0,8.0, step(0.5, chaosA)) + 0.8*bassPow; float ang=atan(q.y,q.x)+t*0.00018+chaosB*0.7;
+        float K= mix(5.0,8.0, smoothstep(0.35,0.65,chaosA)) + 0.8*bassPow; float ang=atan(q.y,q.x)+t*0.00018+chaosB*0.7;
         float seg=mod(ang, 6.283/K); seg=abs(seg-3.14159/K);
         float r=length(q);
         float lr=log(max(r,0.02))+t*0.00032;
         float ring=exp(fract(lr*1.8))*0.7;
         float edge=exp(-abs(ring-1.0)*14.0)*0.85 + exp(-abs(seg-0.26)*22.0)*0.5;
-        float hueF=fract(t*0.015+ring*0.3)*360.0;
+        float hueF=fract(t*0.002+ring*0.3)*360.0;
         col+=hsl2rgb(hueF,0.98,0.60)*edge*0.95;
         // 次级反射
         float edge2=exp(-abs(fract(lr*1.8+0.5)-0.5)*12.0)*0.25;
@@ -327,13 +327,13 @@ void main(){
             float hit=exp(-pow(fract(t*0.0012+fi*0.7)-0.5,2.0)*40.0);
             acc+=ring*(0.6+0.4*hit);
         }
-        float hueW=fract(t*0.018+seed*0.001+chaosB*0.5+treblePow*0.2)*360.0;
+        float hueW=fract(t*0.002+seed*0.001+chaosB*0.5)*360.0;
         col+=hsl2rgb(hueW,0.98,0.60)*acc*0.95;
         col+=hsl2rgb(mod(hueW+30.0,360.0),0.9,0.58)*exp(-dot(q,q)*2.8)*0.22;
     } else if(preset==8){
         // 8 星门环廊：发光门
         vec2 q=(p-vec2(0.5,0.47))*vec2(aspect,1.0);
-        float fov=radians(68.0+6.0*uBass); float focal=1.0/tan(fov*0.5);
+        float fov=radians(68.0); float focal=1.0/tan(fov*0.5);
         vec3 ro=vec3(0,0,t*0.00062*2.2);
         vec3 rd=normalize(vec3(q.x*focal, q.y*focal,1.0));
         float rep=1.45+0.3*chaosA; float tt=0.08+0.03*bassPow;
@@ -350,7 +350,7 @@ void main(){
         }
         if(hit>0.0){
             float fog=exp(-hit*0.28);
-            vec3 c=hsl2rgb(mod(hhash*310.0+t*0.02+chaosA*120.0+treblePow*70.0,360.0),0.98,0.62);
+            vec3 c=hsl2rgb(mod(hhash*310.0+t*0.0022+chaosA*120.0,360.0),0.85,0.60);
             col=mix(col, c*1.2, 0.92*fog);
             col+=c*pow(max(0.0,1.0-hit*0.12),2.0)*0.45;
             // 门框高光
@@ -381,7 +381,7 @@ void main(){
             float jetF=fract(t*(0.00045+0.00022*bassPow));
             vec2 jetPos=vec2((jetF-0.5)*3.2, 0.35);
             float jetD=length(q-jetPos);
-            float jet=exp(-jetD*28.0)*step(jetF,0.95)*0.85;
+            float jet=exp(-jetD*28.0)*smoothstep(0.95,0.80,jetF)*0.85;
             col+=vec3(0.05,0.05,0.07)*jet* -0.9 + vec3(1.0,0.3,0.2)*jet*0.4;
         } else {
             col+=vec3(0.04,0.10,0.22)*exp(-length(q-vec2(0,0.5))*1.4)*0.4;
