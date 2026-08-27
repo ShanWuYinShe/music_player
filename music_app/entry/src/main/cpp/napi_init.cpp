@@ -67,10 +67,10 @@ napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
 }
 
 napi_value RenderFrame(napi_env env, napi_callback_info info) {
-    size_t argc = 7;
-    napi_value args[7] = {nullptr};
+    size_t argc = 8;
+    napi_value args[8] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 7) {
+    if (argc < 8) {
         return nullptr;
     }
     double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1, transition = 1;
