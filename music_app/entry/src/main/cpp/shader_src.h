@@ -81,14 +81,12 @@ void main(){
     vec2 persWarp=toP*(0.010*rvp+0.003);
     vec3 prev=texture(uPrev, p-persWarp).rgb;
     vec3 col=prev*0.78; // 明显拖尾速度线，但底色纯黑不染
-    // 全局音乐不可预测：每 1.1-1.8s hash 突变 + 节拍强闪
+    // 音乐驱动仅局部元素（禁止全屏闪烁）：chaos 仅用于选形，beat/bass/treble 仅调局部尺寸/亮度，不碰速度/全局色
     float chaosA = hash(floor(t*0.0009 + seed*0.011));
     float chaosB = hash(floor(t*0.00055 + seed*0.017)*1.7);
-    float beatPow = pow(uBeat, 1.8);
-    float bassPow = pow(uBass, 1.4);
-    float treblePow = pow(uTreble, 1.2);
-    float flash = beatPow*0.42; // 全屏节拍闪
-    float bassBreath = bassPow*0.35;
+    float beatPow = pow(uBeat, 1.6);
+    float bassPow = pow(uBass, 1.3);
+    float treblePow = pow(uTreble, 1.15);
 
     int preset=int(uPresetSel+0.5);
 
@@ -119,13 +117,13 @@ void main(){
             float zc=floor(hit.z/2.2+0.5); float zr=hit.z-zc*2.2;
             vec2 xz=hit.xz - vec2(0, zc*2.2);
             vec2 cell= floor((xz+vec2(1.1,1.1))/2.2);
-            float bh=hash(zc*7.3+seed+chaosB*5.0)*0.55+0.25+0.85*beatPow+0.25*treblePow;
+            float bh=hash(zc*7.3+seed+chaosB*5.0)*0.50+0.20+0.90*beatPow+0.20*treblePow;
             vec3 boxP=vec3(hit.x, hit.y - bh*0.5, zr);
             float dbox=sdBox(boxP, vec3(0.45, bh*0.5, 0.45));
             float edge=exp(-abs(dbox)*18.0);
             float face=step(dbox,0.0);
             vec3 cbox=hsl2rgb(mod(zc*37.0+t*0.02+chaosA*120.0+treblePow*60.0,360.0),0.98,0.62+bassPow*0.1);
-            col += cbox * face*(0.85+0.35*beatPow)*pers + cbox*edge*(0.45+0.35*treblePow);
+            col += cbox * face*(0.95+0.55*beatPow)*pers + cbox*edge*(0.65+0.55*beatPow)*0.9;
             // 速度线（远处汇聚）
             col += vec3(0.2,0.9,1.0)*exp(-abs(hit.x)*1.2)*exp(-depth*0.45)*0.18;
         } else {
@@ -169,7 +167,7 @@ void main(){
             ));
             // 用 hash 上色强对比
             float h2=hash2(floor(hitP.xz)+seed*0.02);
-            vec3 c=hsl2rgb(mod(h2*320.0+t*0.015+chaosB*180.0+treblePow*90.0,360.0),0.98,0.62+beatPow*0.08);
+            vec3 c=hsl2rgb(mod(h2*320.0+t*0.015+chaosB*120.0+treblePow*60.0,360.0),0.98,0.62+beatPow*0.10);
             vec3 ld=normalize(vec3(0.6,0.8,-0.5));
             float dif=clamp(dot(n,ld),0.0,1.0);
             float rim=pow(1.0-abs(dot(n,-rd)), 2.0);
@@ -222,7 +220,7 @@ void main(){
         float glow=exp(-hexLine*55.0)*0.9;
         vec3 hc=hsl2rgb(mod(hex.y*18.0+t*0.015+chaosB*110.0+treblePow*60.0,360.0),0.98,0.62);
         float depthFade=clamp(1.0-depth*0.045,0.0,1.0);
-        col+=hc*glow*depthFade*(0.85+0.35*beatPow);
+        col+=hc*glow*depthFade*(0.90+0.60*beatPow);
         // 速度线
         float speed= fract(depth*0.5 - t*0.004);
         col+=hc*exp(-pow(speed-0.5,2.0)*120.0)*0.25*depthFade;
@@ -237,7 +235,7 @@ void main(){
         float seg= mod(a*3.0 + t*0.0005, 6.283);
         float segLine=exp(-pow(fract(seg/1.047)-0.5,2.0)*60.0);
         vec3 c=hsl2rgb(mod(t*0.018+chaosA*200.0+treblePow*80.0,360.0),0.98,0.62);
-        col+=c*ring*segLine*(0.85+0.35*beatPow);
+        col+=c*ring*segLine*(0.90+0.70*beatPow);
         col+=c*pulse*0.25*exp(-r*1.2);
         // 中心黑洞
         col=mix(col, vec3(0), step(r,0.18)*0.9);
@@ -348,12 +346,7 @@ void main(){
             col+=vec3(0.04,0.10,0.22)*exp(-length(q-vec2(0,0.5))*1.4)*0.4;
         }
     }
-    // 全局音乐不可预测闪烁：节拍强闪 + 低频色温偏移 + 高频粒子抖动
-    col += vec3(0.9,0.75,0.45)*flash*0.18;
-    col = mix(col, col*vec3(1.15,0.95,1.25), bassPow*0.18);
-    col += (hash2(p*vec2(1.7,0.9)+t*0.001)-0.5)*treblePow*0.07;
-    // 混沌色偏每段突变
-    col = mix(col, hsl2rgb(fract(chaosA+0.33)*360.0,0.5,0.5), step(0.92, chaosB)*0.12);
+    // 无全屏闪烁：音乐仅驱动局部几何（尺寸/边缘亮度），速度类恒定
     col=pow(col, vec3(0.92));
     col=clamp(col,0.0,1.0);
     outColor=vec4(col,1.0);
