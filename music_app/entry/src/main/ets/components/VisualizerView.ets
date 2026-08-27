@@ -2,14 +2,12 @@
  * VisualizerView：MilkDrop 风格音乐可视化（@ComponentV2）。
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
- * full：双离屏画布 ping-pong 反馈——上一帧整帧无变换 alpha 叠加（衰减
- * 0.958，颜色融合拖尾；无分块/旋转/缩放，故无接缝与矩形边界——用户
- * 明确要求画面"自然生长在屏幕中"），叠加 Superformula 超级公式花域
- * （光滑有机曲线，参数 m/n 由 styleParam 在参数空间慢速漂移演化——
- * 不预设形态，几个基元函数产生无穷变换；两层自相似缩放呈分形层次，
- * 色相经域扭曲流动），上屏整帧 blur(1.2px) 柔化放大硬边，无多边形锐边。
- * mini：全宽金色频谱柱，垫于迷你条卡片底层。
- * 帧驱动 displaySync 限 24fps，暂停后跑约 0.9s 收敛动画即停。
+ * full：XComponent(SURFACE)+GLES3 真透视 shader 管线（10 风格，点击循环 0..9）——
+ *   全部以真实透视相机建模（FOV 呼吸 + yaw/pitch/roll + dolly 位移，ray 由透视投影生成，
+ *   深度层按 1/depth 视差缩放/位移/雾化，非等比缩放），反馈拖尾亦为径向透视流动（距消失点越远拖尾越长，
+ *   近快远慢）；运算量只与像素数相关、半分辨率渲染线性上屏。
+ * mini：全宽金色频谱柱，垫于迷你条卡片底层（2D Canvas 双离屏 ping-pong）。
+ * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛即停。
  */
 
 import displaySync from '@ohos.graphics.displaySync';
@@ -21,7 +19,7 @@ import {
 import entry from 'libentry.so';
 
 /** 可视化风格总数（与 shader_src.h 保持一致）；风格仅由点击切换，无自动轮换 */
-const PRESET_COUNT = 8;
+const PRESET_COUNT = 10;
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {

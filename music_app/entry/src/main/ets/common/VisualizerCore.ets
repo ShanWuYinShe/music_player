@@ -9,8 +9,8 @@
 /** preset 轮换周期：每个图形风格展示时长 */
 export const PRESET_SPAN_MS = 18000;
 
-/** 可视化 preset 数量（水平波形带 / 径向花环 / 放射线爆） */
-export const PRESET_COUNT = 3;
+/** 可视化 preset 数量（播放页全屏 10 风格，与 shader_src.h 同步） */
+export const PRESET_COUNT = 10;
 
 export interface PresetSpan {
   index: number;
