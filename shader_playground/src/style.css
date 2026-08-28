@@ -1,0 +1,464 @@
+/* Shader Playground · 深色工作台主题 */
+
+:root {
+	--bg: #0e1116;
+	--bg-1: #131820;
+	--bg-2: #1a212c;
+	--line: #232c39;
+	--fg: #dde5f0;
+	--fg-2: #8b97a8;
+	--fg-3: #5b6676;
+	--accent: #4da3ff;
+	--ok: #4fd88a;
+	--warn: #ffb454;
+	--err: #ff6b6b;
+	--mono: "SF Mono", ui-monospace, Menlo, Consolas, "JetBrains Mono", monospace;
+	--sans: -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font-family: var(--sans);
+	font-size: 13px;
+	overflow: hidden;
+}
+
+/* ---------- 拖拽遮罩 ---------- */
+
+#drop-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 60;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	background: rgba(10, 14, 20, 0.72);
+	backdrop-filter: blur(2px);
+	pointer-events: none;
+}
+#drop-overlay.visible {
+	display: flex;
+}
+
+.drop-card {
+	padding: 28px 44px;
+	border: 2px dashed var(--accent);
+	border-radius: 14px;
+	background: var(--bg-2);
+	color: var(--fg);
+	font-size: 16px;
+	letter-spacing: 0.05em;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	align-items: center;
+}
+.drop-card span {
+	font-size: 12px;
+	color: var(--fg-2);
+}
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+	height: 48px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 14px;
+	background: var(--bg-1);
+	border-bottom: 1px solid var(--line);
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.logo {
+	color: var(--accent);
+	font-size: 17px;
+}
+.title {
+	font-weight: 650;
+	font-size: 14px;
+}
+.sub {
+	color: var(--fg-3);
+	font-size: 12px;
+}
+
+.topbar-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.auto-reload {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	color: var(--fg-2);
+	font-size: 12px;
+	user-select: none;
+}
+
+.btn {
+	border: 1px solid var(--line);
+	background: var(--bg-2);
+	color: var(--fg);
+	border-radius: 7px;
+	padding: 5px 11px;
+	font-size: 12px;
+	cursor: pointer;
+}
+.btn:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+.btn.ghost {
+	background: transparent;
+	color: var(--fg-2);
+}
+.btn.ghost:hover {
+	color: var(--fg);
+	border-color: var(--fg-3);
+}
+.btn.small {
+	padding: 4px 9px;
+}
+
+.status {
+	min-width: 76px;
+	text-align: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: var(--bg-2);
+	color: var(--fg-2);
+	font-size: 12px;
+	border: 1px solid var(--line);
+}
+.status.ok {
+	color: var(--ok);
+	border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.status.err {
+	color: var(--err);
+	border-color: color-mix(in srgb, var(--err) 45%, transparent);
+}
+
+/* ---------- 三栏布局 ---------- */
+
+.layout {
+	height: calc(100% - 48px);
+	display: grid;
+	grid-template-columns: 272px minmax(340px, 5fr) minmax(380px, 6fr);
+	/* 单一有界行：防止 CodeMirror 内容高度把行撑出视口 */
+	grid-template-rows: 100%;
+}
+.layout > * {
+	min-height: 0;
+}
+
+/* 侧栏 */
+
+.sidebar {
+	border-right: 1px solid var(--line);
+	background: var(--bg-1);
+	overflow-y: auto;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.section-title {
+	font-size: 11px;
+	color: var(--fg-3);
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	margin-bottom: 8px;
+}
+
+/* 通用提示文字（编辑器脏标记等）；先于 .file-list .hint 定义避免降序特异性 */
+.hint {
+	font-size: 11px;
+	color: var(--fg-3);
+}
+
+.file-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.file-list li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 9px;
+	border-radius: 8px;
+	cursor: pointer;
+	color: var(--fg-2);
+}
+.file-list li:hover {
+	background: var(--bg-2);
+	color: var(--fg);
+}
+.file-list li.active {
+	background: var(--bg-2);
+	color: var(--fg);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.file-list .dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--c);
+	flex: none;
+}
+.file-list .name {
+	font-family: var(--mono);
+	font-size: 12px;
+}
+.file-list .hint {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--fg-3);
+}
+
+.row {
+	display: grid;
+	grid-template-columns: 68px 1fr 52px;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 7px;
+}
+.row-label {
+	color: var(--fg-2);
+	font-size: 12px;
+}
+.row-value {
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--fg-2);
+	text-align: right;
+	white-space: nowrap;
+}
+.row.buttons {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
+}
+.row.buttons .btn {
+	flex: 1;
+}
+
+input[type="range"] {
+	width: 100%;
+	accent-color: var(--accent);
+}
+input[type="checkbox"] {
+	accent-color: var(--accent);
+}
+
+.tips p {
+	margin: 0;
+	color: var(--fg-3);
+	font-size: 12px;
+	line-height: 1.6;
+}
+.tips code {
+	font-family: var(--mono);
+	background: var(--bg-2);
+	border-radius: 4px;
+	padding: 1px 4px;
+	font-size: 11px;
+}
+
+/* 编辑器栏 */
+
+.editor-pane {
+	display: flex;
+	flex-direction: column;
+	border-right: 1px solid var(--line);
+	min-width: 0;
+}
+
+.editor-header {
+	height: 34px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--line);
+	background: var(--bg-1);
+}
+.filename {
+	font-family: var(--mono);
+	font-size: 12px;
+	color: var(--accent);
+}
+
+.editor-wrap {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+.cm-editor {
+	font-family: var(--mono);
+	font-size: 12px;
+	background: var(--bg);
+}
+.cm-editor.cm-focused {
+	outline: none;
+}
+.cm-scroller {
+	overflow: auto;
+}
+.cm-gutters {
+	background: var(--bg);
+	border-right: 1px solid var(--line);
+	color: var(--fg-3);
+}
+
+#editor,
+#editor .cm-editor {
+	height: 100%;
+}
+
+/* 编译错误浮层 */
+
+.compile-overlay {
+	position: absolute;
+	inset: 12px;
+	z-index: 30;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(10, 13, 18, 0.55);
+}
+.compile-overlay.hidden {
+	display: none;
+}
+
+.overlay-card {
+	width: min(640px, 92%);
+	max-height: 86%;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 14px;
+	border: 1px solid color-mix(in srgb, var(--err) 45%, var(--line));
+	border-radius: 12px;
+	background: var(--bg-1);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.overlay-title {
+	color: var(--err);
+	font-weight: 650;
+	font-size: 13px;
+}
+.overlay-log {
+	margin: 0;
+	overflow: auto;
+	font-family: var(--mono);
+	font-size: 12px;
+	line-height: 1.55;
+	color: var(--fg);
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+.overlay-card .btn {
+	align-self: flex-end;
+}
+
+/* 预览栏 */
+
+.canvas-pane {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	background: var(--bg-1);
+}
+
+.canvas-header {
+	height: 34px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--line);
+}
+.h-title {
+	font-size: 12px;
+	color: var(--fg-2);
+}
+.h-meta {
+	display: flex;
+	gap: 7px;
+	align-items: center;
+	font-family: var(--mono);
+	font-size: 11px;
+	color: var(--fg-3);
+}
+.h-meta .sep {
+	color: var(--fg-3);
+	opacity: 0.5;
+}
+
+.canvas-wrap {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 12px;
+}
+#gl {
+	max-width: 100%;
+	max-height: 100%;
+	width: auto;
+	height: auto;
+	aspect-ratio: 1 / 1;
+	border-radius: 10px;
+	background: #000;
+	box-shadow: 0 0 0 1px var(--line);
+	cursor: pointer;
+}
+
+.canvas-footer {
+	display: flex;
+	gap: 14px;
+	padding: 7px 12px;
+	border-top: 1px solid var(--line);
+	color: var(--fg-3);
+	font-size: 11px;
+	flex-wrap: wrap;
+}
+
+/* 滚动条（WebKit） */
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--bg-2);
+	border-radius: 5px;
+	border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--fg-3);
+}

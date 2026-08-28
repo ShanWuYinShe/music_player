@@ -4,9 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shader Playground · music_player</title>
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='24' font-size='24'%3E%E2%AC%A2%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
+  <div id="drop-overlay" aria-hidden="true">
+    <div class="drop-card">释放以载入着色器文件<span>.frag 填入场景槽 · .vert 替换顶点源</span></div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="logo">⬢</span>
@@ -18,8 +23,8 @@
         <input id="auto-reload" type="checkbox" checked />
         <span>保存即重编</span>
       </label>
-      <button id="btn-reload" class="btn">↻ 重载选中</button>
-      <button id="btn-reset" class="btn ghost">⤺ 还原磁盘</button>
+      <button id="btn-reload" class="btn" title="从磁盘重新读取当前文件并编译">↻ 重读磁盘</button>
+      <button id="btn-reset" class="btn ghost" title="丢弃编辑器改动，回到本次页面加载时的磁盘版本">⤺ 还原磁盘</button>
       <button id="btn-screenshot" class="btn ghost">📷 截图</button>
       <span class="status" id="status">就绪</span>
     </div>
@@ -29,35 +34,14 @@
     <aside class="sidebar">
       <div class="section">
         <div class="section-title">着色器文件</div>
-        <ul class="file-list" id="file-list">
-          <li data-preset="0" class="active">
-            <span class="dot" style="--c:#ff7a59"></span>
-            <span class="name">fractal.frag</span>
-            <span class="hint">分形漩涡</span>
-          </li>
-          <li data-preset="1">
-            <span class="dot" style="--c:#5db7ff"></span>
-            <span class="name">pan.frag</span>
-            <span class="hint">炒锅水珠</span>
-          </li>
-          <li data-preset="2">
-            <span class="dot" style="--c:#7af0a4"></span>
-            <span class="name">aurora.frag</span>
-            <span class="hint">极光</span>
-          </li>
-          <li data-preset="3">
-            <span class="dot" style="--c:#c39bff"></span>
-            <span class="name">mirror.frag</span>
-            <span class="hint">镜屋</span>
-          </li>
-        </ul>
+        <ul class="file-list" id="file-list"></ul>
       </div>
 
       <div class="section">
         <div class="section-title">音乐律动参数</div>
         <div class="row">
           <label class="row-label" for="ctl-seed">seed</label>
-          <input id="ctl-seed" type="range" min="0" max="0xffffffff" step="1" value="12345678" />
+          <input id="ctl-seed" type="range" min="0" max="4294967295" step="1" value="12345678" />
           <span class="row-value" id="val-seed">12345678</span>
         </div>
         <div class="row">
@@ -109,6 +93,12 @@
           <span class="row-value" id="val-pause">运行中</span>
         </div>
       </div>
+
+      <div class="section tips">
+        <div class="section-title">提示</div>
+        <p>把 <code>.frag</code> / <code>.vert</code> 文件拖进窗口即可试跑；
+           编辑只影响预览，不会写回磁盘。</p>
+      </div>
     </aside>
 
     <section class="editor-pane">
@@ -117,19 +107,12 @@
         <span class="hint" id="dirty-flag"></span>
       </div>
       <div class="editor-wrap">
-        <pre id="line-numbers" class="line-numbers"></pre>
-        <textarea
-          id="editor"
-          spellcheck="false"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-        ></textarea>
+        <div id="editor"></div>
         <div id="compile-overlay" class="compile-overlay hidden">
           <div class="overlay-card">
             <div class="overlay-title" id="overlay-title">编译错误</div>
             <pre id="overlay-log" class="overlay-log"></pre>
-            <button id="btn-close-overlay" class="btn small">关闭</button>
+            <button id="btn-close-overlay" class="btn small">关闭（Esc）</button>
           </div>
         </div>
       </div>
@@ -150,13 +133,15 @@
         <canvas id="gl" width="800" height="800"></canvas>
       </div>
       <div class="canvas-footer">
-        <span class="legend">点击预览区：循环切换 preset</span>
-        <span class="legend">空格：暂停 / 渲染</span>
+        <span class="legend">点击预览：切换 preset</span>
+        <span class="legend">1-4：直达</span>
+        <span class="legend">空格：暂停</span>
         <span class="legend">S：截图</span>
+        <span class="legend">⌘S：编译</span>
       </div>
     </section>
   </main>
 
-  <script src="./app.js" type="module"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
