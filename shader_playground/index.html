@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shader Playground · music_player</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⬢</span>
+      <span class="title">Shader Playground</span>
+      <span class="sub">music_player · 本地 shader 调试器</span>
+    </div>
+    <div class="topbar-actions">
+      <label class="auto-reload">
+        <input id="auto-reload" type="checkbox" checked />
+        <span>保存即重编</span>
+      </label>
+      <button id="btn-reload" class="btn">↻ 重载选中</button>
+      <button id="btn-reset" class="btn ghost">⤺ 还原磁盘</button>
+      <button id="btn-screenshot" class="btn ghost">📷 截图</button>
+      <span class="status" id="status">就绪</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="section">
+        <div class="section-title">着色器文件</div>
+        <ul class="file-list" id="file-list">
+          <li data-preset="0" class="active">
+            <span class="dot" style="--c:#ff7a59"></span>
+            <span class="name">fractal.frag</span>
+            <span class="hint">分形漩涡</span>
+          </li>
+          <li data-preset="1">
+            <span class="dot" style="--c:#5db7ff"></span>
+            <span class="name">pan.frag</span>
+            <span class="hint">炒锅水珠</span>
+          </li>
+          <li data-preset="2">
+            <span class="dot" style="--c:#7af0a4"></span>
+            <span class="name">aurora.frag</span>
+            <span class="hint">极光</span>
+          </li>
+          <li data-preset="3">
+            <span class="dot" style="--c:#c39bff"></span>
+            <span class="name">mirror.frag</span>
+            <span class="hint">镜屋</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <div class="section-title">音乐律动参数</div>
+        <div class="row">
+          <label class="row-label" for="ctl-seed">seed</label>
+          <input id="ctl-seed" type="range" min="0" max="0xffffffff" step="1" value="12345678" />
+          <span class="row-value" id="val-seed">12345678</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-bpm">bpm</label>
+          <input id="ctl-bpm" type="range" min="60" max="180" step="1" value="120" />
+          <span class="row-value" id="val-bpm">120</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-beat">beat 强度</label>
+          <input id="ctl-beat" type="range" min="0" max="100" step="1" value="60" />
+          <span class="row-value" id="val-beat">0.60</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-bass">bass</label>
+          <input id="ctl-bass" type="range" min="0" max="100" step="1" value="55" />
+          <span class="row-value" id="val-bass">0.55</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-treble">treble</label>
+          <input id="ctl-treble" type="range" min="0" max="100" step="1" value="50" />
+          <span class="row-value" id="val-treble">0.50</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-trans">transition</label>
+          <input id="ctl-trans" type="range" min="0" max="100" step="1" value="100" />
+          <span class="row-value" id="val-trans">1.00</span>
+        </div>
+        <div class="row buttons">
+          <button id="btn-tap-beat" class="btn small">🥁 触发节拍</button>
+          <button id="btn-random-seed" class="btn small ghost">🎲 随机 seed</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">渲染</div>
+        <div class="row">
+          <label class="row-label" for="ctl-scale">内部分辨率</label>
+          <input id="ctl-scale" type="range" min="30" max="100" step="5" value="67" />
+          <span class="row-value" id="val-scale">0.67×</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-fps">目标帧率</label>
+          <input id="ctl-fps" type="range" min="15" max="60" step="1" value="30" />
+          <span class="row-value" id="val-fps">30</span>
+        </div>
+        <div class="row">
+          <label class="row-label" for="ctl-pause">暂停渲染</label>
+          <input id="ctl-pause" type="checkbox" />
+          <span class="row-value" id="val-pause">运行中</span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="editor-pane">
+      <div class="editor-header">
+        <span class="filename" id="editor-filename">fractal.frag</span>
+        <span class="hint" id="dirty-flag"></span>
+      </div>
+      <div class="editor-wrap">
+        <pre id="line-numbers" class="line-numbers"></pre>
+        <textarea
+          id="editor"
+          spellcheck="false"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+        ></textarea>
+        <div id="compile-overlay" class="compile-overlay hidden">
+          <div class="overlay-card">
+            <div class="overlay-title" id="overlay-title">编译错误</div>
+            <pre id="overlay-log" class="overlay-log"></pre>
+            <button id="btn-close-overlay" class="btn small">关闭</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="canvas-pane">
+      <div class="canvas-header">
+        <span class="h-title">预览</span>
+        <span class="h-meta">
+          <span id="meta-fps">— fps</span>
+          <span class="sep">·</span>
+          <span id="meta-size">— × —</span>
+          <span class="sep">·</span>
+          <span id="meta-time">t=0.000 s</span>
+        </span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="gl" width="800" height="800"></canvas>
+      </div>
+      <div class="canvas-footer">
+        <span class="legend">点击预览区：循环切换 preset</span>
+        <span class="legend">空格：暂停 / 渲染</span>
+        <span class="legend">S：截图</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>
