@@ -10,11 +10,17 @@
 export const PRESET_SPAN_MS = 18000;
 
 /**
- * 可视化 preset 数量。手机端目前只打包一个场景（全屏极光 aurora.frag，
- * 由 CMake 的 SHADER_SCENES 决定），其余场景只在 shader_playground 里调试。
- * 需要与 cpp/CMakeLists.txt 的 SHADER_SCENES 条数同步。
+ * 手机端 shader preset 清单。顺序必须与 cpp/CMakeLists.txt 的 SHADER_SCENES
+ * 以及 shader_playground/src/presets.ts 一致。
  */
-export const PRESET_COUNT = 1;
+export const VIZ_PRESET_NAMES: string[] = [
+  '无限分形',
+  '热锅水珠',
+  '全屏极光',
+  '无尽万花筒'
+];
+
+export const PRESET_COUNT = VIZ_PRESET_NAMES.length;
 
 export interface PresetSpan {
   index: number;

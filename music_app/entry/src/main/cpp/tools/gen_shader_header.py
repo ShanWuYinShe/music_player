@@ -65,9 +65,8 @@ BLIT_HEADER = (
     "out vec4 fragColor;\n"
 )
 
-# 默认场景槽顺序必须与 shader_playground/src/presets.ts 的 PRESETS 一致。
-# 手机端目前只打包极光（--scenes aurora.frag）：其余场景留在 playground 里调，
-# 不进 so，省编译体积与 shader 编译耗时。
+# 默认场景槽顺序必须与 CMake SHADER_SCENES、VisualizerCore.ets 和
+# shader_playground/src/presets.ts 的 PRESETS 一致。
 DEFAULT_SCENE_FILES = ["fractal.frag", "pan.frag", "aurora.frag", "kaleido.frag"]
 
 # 场景共享公共库：注入到每个场景"头之后、场景源之前"（presets.ts COMMON_FILE）
@@ -163,7 +162,6 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shader-dir", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
-    # 手机端目前只打包极光：--scenes aurora.frag（playground 里仍是 4 个）
     ap.add_argument("--scenes", default=",".join(DEFAULT_SCENE_FILES))
     args = ap.parse_args()
 

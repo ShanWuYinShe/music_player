@@ -9,14 +9,14 @@ set(CMAKE_CXX_STANDARD 17)
 # 源文件目录 cpp/shaders/ 与 shader_playground 预览同源（同一份磁盘文件），
 # 转换规则与 shader_playground/src/glslPatch.ts 一一对应（注入头行数一致，
 # 因此手机端编译报错的行号减去头行数 = 源文件行号）。
-# 手机端目前只打包极光一个场景（--scenes aurora.frag）；其余场景留在
-# playground 里调，不进 so。要加场景就改 SHADER_SCENES 并同步 ArkTS 的
-# PRESET_COUNT / VIZ_PRESET_NAMES。
+# 手机端与 playground 打包同一组场景，顺序决定 preset 索引。修改时同步
+# shader_playground/src/presets.ts 与 ArkTS VisualizerCore.ets；
+# shader_playground 的 pipelineConsistency.test.ts 会检查三端配置一致。
 # ---------------------------------------------------------------------------
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(SHADER_GEN_HEADER ${SHADER_GEN_DIR}/shader_src.h)
-set(SHADER_SCENES "aurora.frag")
+set(SHADER_SCENES "fractal.frag,pan.frag,aurora.frag,kaleido.frag")
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(NOT Python3_Interpreter_FOUND)

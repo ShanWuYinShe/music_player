@@ -65,11 +65,10 @@ pnpm run preview   # 预览构建产物，http://localhost:8792/
 
 ## 与移动端的一致性
 
-> **注意**：工具里 4 个 preset 槽（fractal / pan / aurora / kaleido）都是可调试场景，
-> 但**手机端只打包 `music_app/entry/src/main/cpp/CMakeLists.txt` 里 `SHADER_SCENES`
-> 列出的场景**（当前仅 `aurora.frag`）——其余三个只在本地跑，不进 so。
-> 要让某个场景上端，改 `SHADER_SCENES` 并同步 ArkTS 的 `PRESET_COUNT` /
-> `VIZ_PRESET_NAMES`（`VisualizerCore.ets` 与 `VisualizerView.ets` 各一处）。
+> 工具与手机端都启用 4 个 preset 槽（fractal / pan / aurora / kaleido），
+> 顺序由 `src/presets.ts`、`music_app/entry/src/main/cpp/CMakeLists.txt` 的
+> `SHADER_SCENES` 和 `VisualizerCore.ets` 的名称清单共同定义。
+> `tests/pipelineConsistency.test.ts` 会校验三端顺序、名称和源文件是否一致。
 
 工具内 WebGL2 渲染管线与 `cpp/visualizer.cpp` 完全一致：
 
@@ -79,8 +78,8 @@ pnpm run preview   # 预览构建产物，http://localhost:8792/
   - 注入 `#version 300 es` 头（精度 / uniform / varying / out 声明）
   - **strip 一律"整行置空"而非删行**，编译器报错行号减去头行数即源文件行号
   - `texture2D` → `texture`、`attribute` → `in`、`gl_FragColor` → `fragColor`
-- 反馈 FBO ping-pong + 内部分辨率（默认 0.67×）+ GL_LINEAR 上屏，
-  与 `visualizer.cpp` 的 `kRenderScale` / SwapFbo / blit pass 一一对应
+- 反馈 FBO ping-pong + GL_LINEAR 上屏与端侧一致；playground 内部分辨率为 0.67×，
+  手机端为固定 0.5×（移动 GPU 性能预算不同，画面逻辑与采样方式不变）
 - 音乐律动参数来自与 `VisualizerCore.ets` 完全等价的 JS 实现
   （FNV-1a 种子 / `synthSpectrum` / `beatEnvelope` / `bpmFromSeed`）
 

@@ -2,11 +2,9 @@
  * VisualizerView：MilkDrop 风格音乐可视化（@ComponentV2）。
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
- * full：XComponent(SURFACE)+GLES3 shader 管线（当前打包单一场景「全屏极光」）——
- *   5 层 fbm 帘幕沿整个画面高度铺开（底层帘从画面下缘升起、光柱贯穿全屏），
- *   颜色随高度翠绿→青→蓝→紫粉渐变 + 缓慢面相漂移，配银河斜带、双层闪烁星空
- *   与地平线山脊剪影；柔和色调映射出梦幻感。
- *   运算量只与像素数相关、半分辨率（1/2）渲染线性上屏；反馈拖尾轻度参与柔化。
+ * full：XComponent(SURFACE)+GLES3 shader 管线，打包无限分形、热锅水珠、
+ *   全屏极光、无尽万花筒四个场景；运算量只与像素数相关，半分辨率（1/2）
+ *   渲染后线性上屏，反馈纹理仅供需要拖尾的场景采样。
  * mini：全宽金色频谱柱，垫于迷你条卡片底层（2D Canvas 双离屏 ping-pong）。
  * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛即停。
  */
@@ -15,15 +13,9 @@ import displaySync from '@ohos.graphics.displaySync';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PlayerController } from '../player/PlayerController';
 import {
-  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb
+  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, PRESET_COUNT
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
-
-/** 可视化风格总数（与 CMakeLists.txt 的 SHADER_SCENES 条数一致）；当前只有极光一个场景 */
-export const PRESET_COUNT = 1;
-
-/** 风格显示名（与 cpp/shaders/ 下打包进 so 的场景一一对应） */
-export const VIZ_PRESET_NAMES: string[] = ['全屏极光'];
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {

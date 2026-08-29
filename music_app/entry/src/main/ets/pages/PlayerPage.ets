@@ -6,7 +6,8 @@ import { SongRecord } from '../model/Song';
 import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
-import { VisualizerView, VIZ_PRESET_NAMES, PRESET_COUNT } from '../components/VisualizerView';
+import { VisualizerView } from '../components/VisualizerView';
+import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
 /** 队列表项 */
 interface QueueEntry {

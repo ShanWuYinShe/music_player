@@ -1,9 +1,9 @@
 /**
  * napi_init: 模块入口 entry，导出可视化渲染接口。
  *
- * registerXComponent({ id, handle, width, height }):
- *   绑定 XComponent 的 OH_NativeXComponent 句柄并注册表面生命周期回调。
- * renderFrame(t, seed, playing):
+ * registerXComponent(nativeObject):
+ *   解包 XComponent 的 OH_NativeXComponent 句柄并注册表面生命周期回调。
+ * renderFrame(t, seed, playing, beat, bass, treble, presetLock, transition):
  *   同步渲染一帧（由 ArkTS displaySync 回调驱动）。
  * destroy():
  *   释放渲染资源（组件销毁时）。
@@ -49,21 +49,29 @@ void TryRegisterWith(OH_NativeXComponent* component) {
     OH_LOG_INFO(LOG_APP, "[%s] RegisterCallback ret=%{public}d", LOG_TAG, ret);
 }
 
+napi_value Undefined(napi_env env) {
+    napi_value value = nullptr;
+    napi_get_undefined(env, &value);
+    return value;
+}
+
 napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value args[2] = {nullptr};
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 2) {
-        return nullptr;
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_status status = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (status != napi_ok || argc < 1 || args[0] == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "[%s] registerXComponent missing native object", LOG_TAG);
+        return Undefined(env);
     }
     OH_NativeXComponent* component = nullptr;
-    napi_status status = napi_unwrap(env, args[0], reinterpret_cast<void**>(&component));
-    OH_LOG_INFO(LOG_APP, "[%s] registerXComponent ok", LOG_TAG);
-    if (component == nullptr) {
-        return nullptr;
+    status = napi_unwrap(env, args[0], reinterpret_cast<void**>(&component));
+    if (status != napi_ok || component == nullptr) {
+        OH_LOG_ERROR(LOG_APP, "[%s] registerXComponent unwrap failed status=%{public}d", LOG_TAG, status);
+        return Undefined(env);
     }
+    OH_LOG_INFO(LOG_APP, "[%s] registerXComponent fallback register", LOG_TAG);
     TryRegisterWith(component);
-    return nullptr;
+    return Undefined(env);
 }
 
 napi_value RenderFrame(napi_env env, napi_callback_info info) {
