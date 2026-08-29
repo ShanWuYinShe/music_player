@@ -51,6 +51,30 @@ float fbm(vec2 p) {
     return v;
 }
 
+// ---- 时域随机游走（混沌驱动，无周期）----------------------------------------
+// 整数时间格 hash + smoothstep 插值：一条数学上无周期的平滑轨迹。
+// 正弦驱动再不可通约也是准周期——观众几分钟后就会察觉"在循环"；wander
+// 永不回头，每一刻的参数组合都是历史首次出现。
+// t 秒；scale 一格的秒数（越小变化越快）；seed 区分通道。
+float wander(float t, float scale, float seed) {
+    float x = t / scale + seed;
+    float e = floor(x);
+    float u = fract(x);
+    u = u * u * (3.0 - 2.0 * u);
+    return mix(hash11(e * 0.717 + seed), hash11((e + 1.0) * 0.717 + seed), u);
+}
+
+// 双尺度叠加：中长波定走向 + 快波添细节，轨迹更"活"
+float wander2(float t, float scale, float seed) {
+    return wander(t, scale, seed) * 0.65
+        + wander(t, scale * 0.271, seed + 11.7) * 0.35;
+}
+
+// 以 0 为中心的有界双向游走（输出 −1..1）：给旋转/偏移类参数用
+float wanderBi(float t, float scale, float seed) {
+    return wander2(t, scale, seed) * 2.0 - 1.0;
+}
+
 // ---- 小工具 -------------------------------------------------------------
 mat2 rot(float a) {
     float c = cos(a), s = sin(a);

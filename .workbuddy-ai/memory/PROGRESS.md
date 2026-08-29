@@ -4,77 +4,61 @@
 > 流水账写同目录 `YYYY-MM-DD.md`，长期技术约定写 `MEMORY.md`。
 > 换会话开工前先读本文件 + 最近几天的日志。
 
-最后更新：2026-08-29 21:40
+最后更新：2026-08-29 23:59
 
 ---
 
 ## 一、已完成
 
-### 基线（已提交至 main @ 626c7e8）
+### 检查点（已提交 main @ 5956836）
 
-- **shader 源文件单一来源**：新建 `music_app/entry/src/main/cpp/shaders/`，
-  playground 预览与端侧构建读同一份磁盘文件（GLSL ES 1.00 书写）。
-- **四个场景落地**：`fractal`（对数极坐标 + 周期 Julia 逃逸时间，严格自相似深潜）、
-  `pan`（莱顿弗罗斯特水滴，元球场融合）、`aurora`（5 层 fbm 帘幕 + 银河星空 + 山脊）、
-  `mirror`（uPrev 反馈万花筒）。
-- **端侧构建期生成**：`cpp/tools/gen_shader_header.py` 在 CMake 期把 GLSL ES 1.00
-  转成 GLES3 头 `shader_src.h`；与 `shader_playground/src/glslPatch.ts` 规则等价
-  （注入头 12/4/5 行、置空保行号、texture2D→texture、varying→in/out、
-  gl_FragColor→fragColor）。手写的 `cpp/shader_src.h` 已删（会遮蔽生成物）。
-- **端侧只打包极光**：`SHADER_SCENES = aurora.frag`；ArkTS `PRESET_COUNT` 10→1
-  （`VisualizerCore.ets` + `VisualizerView.ets`）、`VIZ_PRESET_NAMES=['全屏极光']`。
-- **验证闭环**：shader 编译成功（SwiftShader 29fps）；`pnpm test` 26/26、build、lint 全绿；
-  端侧生成头 + `/tmp/cpp_stub` 桩 `g++ -fsyntax-only` 通过（曾抓出
-  `glBindVertexArray(nullptr)` 真 bug，GLES3 要传 0）。
-- **客观画质判据脚本**（在 `~/.workbuddy-ai/binaries/node/workspace/`，需 dev server 8791/8792）：
-  `shader_verify.mjs`（编译+截图）、`shader_stats.mjs`（lum/sat/明暗占比）、
-  `shader_stability.mjs`（时间起伏）、`shader_flow.mjs`（对数极坐标位移匹配 →
-  径向流速八度/秒 + 闪烁）。目标带：lum 0.10~0.25、bright 10~30%、sat 0.4~0.7、
-  起伏 <1.8×。fractal 实测：闪烁 0.010/0.139、光流 0.60 oct/s、起伏 1.65×。
-- **清理**：三个 worktree 与对应分支全部删除，只剩主仓 main。
-- 该闭环已沉淀为技能 `~/.workbuddy-ai/skills/shader-pipeline-verify/`。
+- **common.glsl 公共库 + kaleido 工具链落地**：playground(glslPatch.ts) 与端侧
+  (gen_shader_header.py) 逐字节一致注入「注入头之后、场景源之前」，行号可映射回
+  common.glsl；mirror.frag 被 kaleido.frag 取代；playground 迁移 bun→pnpm（vitest）。
+- **验证**：vitest 35/35、build、biome lint 全绿；无头 Chrome 4 preset 编译成功 29~30fps。
 
-## 二、当前状态（**未提交，在改**）
+### fractal / pan / aurora 重做（已提交 c00995f / ff743b0 / 2c667f0）
 
-工作区有大量未提交改动（`git status --short` 可见 17 个文件，+1090/−527），
-主题是「**公共库抽取 + mirror → kaleido 换场景**」：
+- fractal：对数极坐标八度流 + KIFS×Julia 双形态；pan：拉丝不锈钢+不规则水珠；
+  aurora：直绘结构化帘幕取代反馈雾。各自验证闭环通过后提交。
 
-| 改动 | 内容 |
-|---|---|
-| `shaders/common.glsl`（新，110 行） | 场景共享函数库 |
-| `shaders/kaleido.frag`（新，201 行） | 新增「无尽万花筒」 |
-| `shaders/mirror.frag`（**已删**） | 被 kaleido 取代 |
-| `aurora.frag` / `fractal.frag` / `pan.frag` | 大量改写（各 250~310 行 diff），应是在改为复用 common.glsl |
-| `tools/gen_shader_header.py`（+47） | 支持注入 common.glsl，与 playground 保持一致 |
-| `CMakeLists.txt` | `file(GLOB ...)` 增加 `*.glsl`，把公共库纳入依赖与生成 |
-| `shader_playground/src/glslPatch.ts`（+82） | 新增 `countLines` / `fragInjectedLines` / `mapFragErrorLine`：公共库插在注入头之后、场景源之前，行号换算支持定位到 common.glsl |
-| `presets.ts` | preset 3 改 `kaleido.frag`「无尽万花筒」；导出 `COMMON_FILE='common.glsl'` |
-| `vite.config.ts` | `SHADER_FILES` 加 `common.glsl`、去掉 `mirror.frag`；MIME 加 `.glsl` |
-| `renderer.ts`（+79）、`main.ts`、`errors.ts` | 读盘/注入/common 传递链路 |
-| `tests/glslPatch.test.ts`（+53） | 覆盖行号映射 |
-| `PlayerPage.ets` | 可视化菜单 bindMenu（**与 shader 需求无关**，此前遗留） |
+### kaleido 对数极坐标重写 + wander 混沌驱动（本轮，待提交）
 
-**状态判定：改到一半，尚未验证。** 未跑过 test / build / lint，也没跑过
-shader 编译与像素统计，kaleido 的画质完全未知。行号映射是新引入的复杂度，
-最易出错的地方（注入头 + common 行数必须两端逐字节一致）。
+- **新需求（chaoset 2026-08-29 23:24）**：pan/aurora → 照片级质感；
+  fractal/kaleido → 混沌非重复（永不重复、单调非线性变化）。
+- **wander 入库 common.glsl**：整数时间格 hash11 + smoothstep 插值的时域随机游走
+  （wander/wander2/wanderBi），数学无周期，取代 sin 驱动；注入头 highp 精度无忧。
+- **kaleido 架构推翻重来**（chaoset 拍板）：旧反馈深潜的双线性重采样必糊镜像结构
+  （bright 87~96% + 粉绿雾）。新版 = fractal 同款对数极坐标八度流直绘：
+  每八度环独立身份（环号 hash：重数 3~11/旋向/纹样密度/色相/增益），
+  D_n↔C_n 模式 morph，五纹样 winner-take-most，环旋转有界随机游走（过零换向），
+  镜片缝线+环缘亮边，拖尾仅 0.30 对齐流速。
+- **验证**：lum 0.15~0.20 / sat 0.52~0.69 / bright 11~23% 全带内；稳定性 1.76× ✓；
+  闪烁中位 0.033 最大 0.063 ✓；光流 0.50 oct/s ✓；vitest 35/35、build、lint、
+  4 preset 编译 29fps、C++ 桩编译全绿。
+
+## 二、当前状态（进行中）
+
+执行顺序（任务表）：~~kaleido 收尾~~ → kaleido 混沌化（已并入重写）→
+fractal 混沌化 → pan 照片级 → aurora 照片级 → 复测提交 → UI 双主题 → 端侧同步。
+
+- kaleido 重写已完成待提交（提交后即检查点）。
+- 下一步：fractal 混沌化（Julia c 有界游走、KIFS 参数 wander、
+  Julia↔燃烧船↔Tricorn 连续 morph、重数对 wander；八度周期结构保留）。
+- 待做判据脚本：`shader_novelty.mjs`（60s 长采样帧间距离矩阵，
+  混沌驱动应无周期性相似度回升）。
 
 ## 三、待办
 
-1. **跑通验证闭环**（`shader-pipeline-verify` 技能）：
-   `pnpm test && pnpm run build && pnpm run lint`（**注意摘掉 shim 环境变量**：
-   `env -u NODE_OPTIONS -u CODEBUDDY_BROKERED_FS_HOOK_ENABLED`，且不要放后台跑）。
-2. 无头 Chrome 跑 4 个 preset：`shader_verify` 看编译是否全过，
-   `shader_stats` 看 kaleido / 改写后的 aurora·fractal·pan 是否落在目标带。
-3. `shader_stability` + `shader_flow` 复测 fractal（换 common 抽取后是否退化）。
-4. 端侧：重新生成 `shader_src.h` + `/tmp/cpp_stub` 桩 `g++ -fsyntax-only`，
-   确认 common 注入后 C++ 侧仍能编。
-5. **决定端侧打包哪些场景**：目前仍只有 `aurora.frag`，若 kaleido 达标
-   需同步 `SHADER_SCENES` + 两处 ArkTS `PRESET_COUNT` + `VIZ_PRESET_NAMES`。
-6. 更新 `music_app/AGENTS.md` / `shader_playground/README.md`：改述 common.glsl
-   注入机制与「mirror → kaleido」。
-7. 处理未提交改动：先确认 `PlayerPage.ets` 是否与 shader 工作一起提交
-   （chaoset 此前说它与本次需求无关）；index.lock 若再卡住需先排查。
-8. 未验证项：**真机编译**（需 DevEco + 设备，`hvigorw` 要 `JAVA_HOME=DevEco jbr`）。
+1. **fractal 混沌化**（见上）。约束：八度周期结构不动（无缝深潜根基）。
+2. **pan 照片级**：球冠折射(放大倒像+RGB色差)、方向性接触影(光左上→影右下)、
+   焦散亮弧随滴形、各向异性拉丝高光、胶片颗粒+bloom+暗角。
+3. **aurora 照片级**：1D切向光柱+垂直剪切、氮蓝紫下缘常驻、地面反射极光(泛绿)、
+   星色温差异、ISO色噪+轻bloom。
+4. **UI PowerAMP 化**（深浅双主题）：色彩系统、首页、播放页、迷你条、
+   SongItem、菜单/队列。
+5. **端侧同步**：4 场景打包决策落地、C++ 桩编译、AGENTS.md/README 更新。
+6. 未验证项：**真机编译**（需 DevEco + 设备，`hvigorw` 要 `JAVA_HOME=DevEco jbr`）。
 
 ## 四、接手须知（详见 `MEMORY.md`）
 
@@ -82,3 +66,10 @@ shader 编译与像素统计，kaleido 的画质完全未知。行号映射是�
 - `hue2rgb(h)=0.5+0.5cos(TAU*(h+vec3(0,.33,.67)))`：0=红 / .17=紫 / .33=蓝 /
   .5=青 / .67=绿 / .83=黄（不是 HSL）。
 - 改 shader 后必须走完整验证清单，不允许「看着差不多」就交付。
+- playground 命令：`pnpm --dir /Users/liyou/work/music_player/shader_playground test|build|lint`，
+  先摘 shim 环境变量（`env -u NODE_OPTIONS -u CODEBUDDY_BROKERED_FS_HOOK_ENABLED`），
+  pnpm 用绝对路径 `/Users/liyou/.nvm/versions/node/v26.2.0/bin/pnpm`。
+- 验证脚本：`NODE_PATH=~/.workbuddy-ai/binaries/node/workspace/node_modules \
+  ~/.workbuddy-ai/binaries/node/versions/22.22.2/bin/node \
+  ~/.workbuddy-ai/binaries/node/workspace/shader_{verify,stats,stability,flow}.mjs`
+  （需 dev server 8791/8792 在跑）。

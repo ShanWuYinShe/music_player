@@ -10,8 +10,19 @@
   注入到「头之后、场景源之前」；行号换算
   `报错 − 头(12) − common 行数 = 场景行号`，两端注入内容必须逐字节一致。
   `mirror.frag` 已被 `kaleido.frag`（无尽万花筒）取代。
-  （2026-08-29 21:40 注：这轮改动**在工作区未提交、尚未验证**，
-  最新现状一律看 `PROGRESS.md`。）
+- **wander 时域随机游走（common.glsl）**：`wander(t,scale,seed)` /
+  `wander2` / `wanderBi`——整数时间格 hash11 + smoothstep 插值，数学无周期。
+  **一切"永不重复"的参数演化用它，不要再用 sin 叠加**（再不可通约也是准周期）。
+  注入头是 highp，时间格/seed 到大数仍安全。
+- **万花筒/镜像类结构必须直绘**：反馈深潜（uPrev 逐帧缩放+旋转）每帧双线性
+  重采样，纹样流向边缘必糊成雾——aurora（帘幕）与 kaleido（万花筒）都验证过。
+  kaleido 现为对数极坐标八度流直绘（fractal 同款）：每整数八度环一份独立身份
+  （环号 hash：重数 3~11/旋向/纹样/色相），反馈只留 0.30 对齐流速的拖尾。
+- **逐环/逐滴抽签类参数必须压缩亮度方差**（否则全屏亮度随深潜/时间起伏超 1.8×）：
+  ① 余弦色轮相位固有亮度差 ~2× → 色度归一**只压不抬**（lum>REF 压回 REF）；
+  ② 纹样按平均覆盖率归一化增益 + pow(I,0.75)；③ 每环增益区间压窄（0.82+0.18）；
+  ④ 基底微光兜暗相位。**别用 uPrev 抽头做自动曝光伺服**：结构尺度≥抽头间距时
+  平均亮度估计噪声大 → 逐帧增益抖动 = 闪烁（实测 max 0.24 超阈值）。
 - **端侧只打包 `cpp/CMakeLists.txt` 的 `SHADER_SCENES`**（当前仅 `aurora.frag`）。
   增删场景要同步四处：`SHADER_SCENES`、`VisualizerCore.ets` 的 `PRESET_COUNT`、
   `VisualizerView.ets` 的 `PRESET_COUNT`、`VIZ_PRESET_NAMES`。

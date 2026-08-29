@@ -1,203 +1,227 @@
-// kaleido.frag：反馈深潜 · 无尽万花筒（原名 mirror.frag，"镜渊"名不副实）。
+// kaleido.frag：无尽万花筒（对数极坐标八度深潜 × 每环独立对称群 × 混沌演化）。
 //
-// 每一帧以上一帧为画布：围绕一个缓缓游走的焦点做「缩放 + 旋转 +
-// 桶形畸变 + 卷曲扰动」再采样——画面内容被不断拉向观者，焦点本身
-// 又在移动（摄像机跟随视线），于是一路向屏幕深处行进、永无止境。
+// 架构（fractal 已验证的同款，别回退到反馈深潜）：
+//   lr = −log2(ρ) + D，D = ts × 恒定速度（严格单调，beat 永不进速度）；
+//   每个整数八度环带 = 一圈独立的"万花筒环"，图案直绘——
+//   反馈深潜（旧版）每帧双线性重采样，纹样流向边缘的路上必然糊成雾，
+//   万花筒的镜像结构必须锐利，所以结构全部直绘，反馈只留对齐流速的
+//   轻拖尾（运动模糊）。
 //
-// 风格多变来自两条（全部是连续慢漂，不用跳变）：
-//   1. 焦点处注入的程序化内容在**三种形态间慢速轮换**：万花筒曼陀罗
-//      （瓣数在 5/7/9 间 morph）、对数螺旋臂、绕焦点的彗星（被反馈
-//      拉成光环星轨）；脉冲光环与核心辉光常驻。三种权重速率不可通约，
-//      合成形态极长周期才重复。
-//   2. 反馈变换本身在演化：俯冲速度、螺旋强度、桶形畸变、色散量
-//      都随播放时钟慢漂，色族相位也大范围游走。
-// RGB 三通道以微差异采样率分离出色散，节拍会加快俯冲速度。
+// 多样性从哪来：
+//   1. 每环独立身份（环号 hash）：对称重数 3~11、旋转方向/速率、
+//      纹样缩放、色相基准、环亮度——相邻环天然"内花外齿轮"；
+//   2. 一切时间演化由 wander 时域随机游走驱动（无周期，见 common.glsl）：
+//      环旋转是有界随机游走（平滑过零换向）、纹样五形态权重
+//      winner-take-most 轮换、镜像 D_n ↔ 锯齿 C_n 模式 morph、
+//      双调色板 crossfade、全局色相漂移——永不重复；
+//   3. 镜片缝线（扇区界细亮线 + 环缘玻璃亮边）——真万花筒的切玻璃感。
 //
-// 注意：本场景不做整体交叉淡化（applyTransition）——反馈流上叠交叉淡化
-// 会把上一风格的内容当拖尾残留；切换靠注入内容随 uTransition 渐入，
-// 旧内容被反馈流自然卷走。
-//
-// 公共函数（hash/vn/rot/palIQ/satBoost/toneExp）由工具链从 common.glsl
-// 注入，不要在本文件重复定义。
+// 公共函数（hash/vn/wander/rot/palIQ/satBoost/toneExp/dither/…）由工具链
+// 从 common.glsl 注入，不要在本文件重复定义。
 
-// ---- 游走焦点 -------------------------------------------------------------
-const vec2 FOCUS_WANDER_1 = vec2(0.113, 0.097); // 主游走角速度（x/y 不同步）
-const vec2 FOCUS_WANDER_2 = vec2(0.031, 0.043); // 次级游走角速度
-const float FOCUS_AMP_1 = 0.16;
-const float FOCUS_AMP_2 = 0.05;
+// ---- 深潜几何 -----------------------------------------------------------
+const float LNS = 0.6931472;        // log(2)
+const float DIVE_SPEED = 0.45;      // 深潜速度（八度/秒，恒定！）
+const float CENTER_FADE = 0.045;    // 中心消失点淡出（消锯齿）
+const float CORE_GLOW = 700.0;      // 核心辉光收紧程度
 
-// ---- 反馈变换（参数随时间慢漂 → 行为演化）----------------------------------
-const float ZOOM_BASE = 0.9865;      // 每帧向焦点俯冲的缩放率基准
-const float ZOOM_DRIFT = 0.0040;     // 俯冲速度慢漂（0.983~0.991，保持向内）
-const float ZOOM_BEAT = 0.007;       // beat 加速俯冲
-const float ZOOM_BASS = 0.003;       // bass 加速俯冲
-const float SWIRL_BASE = 0.010;      // 基础螺旋角速度
-const float SWIRL_EVOLVE = 0.55;     // 螺旋强度演化幅度（×0.45~1.55）
-const float SWIRL_CORE = 0.16;       // 焦点附近的额外旋拧（径向衰减）
-const float SWIRL_CORE_BASS = 0.20;
-const float SWIRL_CORE_FALLOFF = 2.6;
-const float SWIRL_TREBLE = 0.02;     // treble 微抖
-const float BARREL = 0.06;           // 桶形畸变基准（径向平方项）
-const float BARREL_EVOLVE = 0.045;   // 畸变演化幅度
-const float CURL_AMP = 0.0016;       // 卷曲扰动幅度
-const float DECAY = 0.950;           // 反馈衰减：给注入留位（0.958 会启动爆发）
-const float EDGE_FADE_LO = 0.80;     // 边缘压暗区间（防采样夹取的边框拖痕）
-const float EDGE_FADE_HI = 1.30;
-const float EDGE_DARKEN = 0.90;
+// ---- 环带身份 -----------------------------------------------------------
+const float ROT_SPAN = 1.25;        // 环旋转游走幅度（弧度，双向）
+const float ROT_SCALE = 43.0;       // 环旋转游走时间尺度（秒/格）
+const float BARREL_SWAY = 0.28;     // 整体转筒慢摆幅度（弧度）
+const float FOLD_MIN = 3.0;         // 对称重数下限（3 + hash×8.999 → 3~11）
 
-// ---- 色散 -----------------------------------------------------------------
-const float CHROMA_IN = 0.9965;      // R 通道稍慢 → 向内色散
-const float CHROMA_OUT = 1.0035;     // B 通道稍快 → 向外色散
-const float CHROMA_EVOLVE = 0.0012;  // 色散量慢漂
+// ---- 纹样 ---------------------------------------------------------------
+// 权重时间尺度互相错开（秒/格）
+const float W_SCALE_1 = 29.0;
+const float W_SCALE_2 = 37.0;
+const float W_SCALE_3 = 23.0;
+const float W_SCALE_4 = 31.0;
+const float W_SHARP = 2.2;          // 权重锐化：winner-take-most（均等混合
+                                    //   = 四种纹样常年叠成平均灰）
+const float MODE_SCALE = 53.0;      // 镜像 ↔ 锯齿 morph 时间尺度
+const float EDGE_LINE_SHARP = 36.0; // 扇区缝线锐度
+const float EDGE_LINE_GAIN = 0.35;
+const float RIM_SHARP = 50.0;       // 环缘玻璃亮边锐度
 
-// ---- 焦点注入：三种形态慢速轮换 ---------------------------------------------
-const float MANDALA_SCROLL = 0.05;   // 曼陀罗旋转速度
-const float MANDALA_DETAIL = 2.5;    // 瓣内细纹频率
-const float MANDALA_FALLOFF = 5.0;   // 曼陀罗径向衰减
-const float SYM_MORPH_RATE = 0.011;  // 瓣数 morph 速率（5↔7↔9 连续轮换）
-const float SPIRAL_ARMS = 3.0;       // 螺旋臂条数
-const float SPIRAL_TWIST = 5.5;      // 对数螺旋的拧紧度
-const float SPIRAL_SHARP = 2.4;      // 臂的锐利度
-const float SPIRAL_FALLOFF = 2.6;
-const float SPIRAL_SCROLL = 0.35;    // 螺旋旋转速度
-const int COMET_COUNT = 3;           // 彗星数（被反馈拉成星轨）
-const float COMET_GLOW = 900.0;      // 彗星亮点收紧
-const float COMET_FALLOFF = 0.55;    // 彗星贡献随焦点距离衰减
-const float RING_FREQ = 3.2;         // 脉冲光环空间频率
-const float RING_SCROLL = 0.16;      // 光环外扩速度
-const float RING_SHARP = 26.0;       // 光环锐度
-const float RING_FALLOFF = 1.6;
-const float CORE_GLOW = 260.0;       // 核心辉光收紧程度
-const float SPARK_DENSITY = 0.9982;  // 星火粒子闪现阈值（越小越稀）
-const float SPARK_FALLOFF = 2.4;
-const float INJECT_GAIN = 0.85;      // 注入整体强度
-// 注入色亮度归一：余弦色轮各相位固有亮度差 ~2 倍（黄 ~0.8 / 青 ~0.6 / 紫 ~0.4），
-// 而反馈平衡亮度 ∝ 注入亮度 → 画面随色相周期过曝/过暗（实测黄相位
-// bright 占比 69%，紫相位 23%）。把注入色亮度统一压到 REF（= 最暗紫相位
-// 的固有亮度，紫相位不受影响），只拉平色轮相位间的亮度差，
-// 图案内部的明暗结构（核心亮、外环弱）保持不变。
-const float INJECT_LUM_REF = 0.42;
-
-// ---- 收尾 -----------------------------------------------------------------
-const float TONE_EXPOSURE = 1.05;
-const float SAT_BOOST = 0.95;        // 轻降饱和（色轮本身已艳，1.12 实测 sat 0.96+）
-const float VIGNETTE = 0.32;
-const float SEED_SPREAD = 173.0;
-
-// 色族（palIQ 的频率/相位向量）
+// ---- 色彩 ---------------------------------------------------------------
 const vec3 PAL_C = vec3(0.9, 1.0, 1.1);
 const vec3 PAL_D = vec3(0.0, 0.12, 0.38);
+const vec3 PAL_C2 = vec3(1.1, 0.9, 1.0);
+const vec3 PAL_D2 = vec3(0.35, 0.10, 0.55);
+const float HUE_WANDER = 0.25;      // 全局色相游走幅度
+const float MAIN_GAIN = 1.00;
+
+// ---- 收尾 ---------------------------------------------------------------
+const float TONE_EXPOSURE = 1.05;
+const float SAT_BOOST = 0.72;
+const float VIGNETTE = 0.30;
+const float TRAIL_ZOOM = 0.9897;    // = 2^(−0.45/30)，对齐恒定流速（30fps）
+const float TRAIL_GAIN = 0.30;      // 运动模糊（别超 ~0.35，盖过新内容）
+const float SEED_SPREAD = 173.0;
 
 vec3 pal(float t) {
     return palIQ(t, PAL_C, PAL_D);
 }
 
-// 万花筒瓣图案：sym 重对称（整数），返回瓣面强度
-float petal(float ia, float ir, float sym, float ts) {
-    float fa = abs(mod(ia + ts * MANDALA_SCROLL, TAU / sym) - PI / sym);
-    return exp(-abs(sin(fa * MANDALA_DETAIL * sym / 6.0 + ts * 0.35 + ir * 15.0)) * 3.2)
-        * exp(-ir * MANDALA_FALLOFF);
+vec3 pal2(float t) {
+    return palIQ(t, PAL_C2, PAL_D2);
+}
+
+// 二面体镜像折叠（D_n 经典万花筒）：0(镜面轴)..1(扇区界)。
+// 重数取整数：mod 的 ±π 接缝被 TAU/seg 整数倍吸收，无角向缝。
+float foldD(float a, float n) {
+    float seg = TAU / n;
+    return abs(mod(a, seg) - seg * 0.5) / (seg * 0.5);
+}
+
+// 旋转折叠（C_n 旋涡轮辐）：0..1 锯齿（扇区界处跳变 = 尖锐辐条）
+float foldC(float a, float n) {
+    float seg = TAU / n;
+    return mod(a, seg) / seg;
+}
+
+// ---- 四种纹样（fa 折叠角坐标 0..1，fr 环带径向，ph 慢漂相位）--------------
+float patPetal(float fa, float fr, float ph, float sd) {
+    float p = pow(1.0 - fa, 1.6);
+    p *= 0.65 + 0.35 * sin(fr * 9.4 + ph + sd);
+    return p;
+}
+
+float patStar(float fa, float fr, float ph, float sd) {
+    float s = pow(1.0 - fa, 7.0) * 1.6 + pow(1.0 - fa, 2.0) * 0.25;
+    s *= 0.7 + 0.3 * sin(fr * 5.0 + ph * 0.7 + sd * 1.7);
+    return s;
+}
+
+float patLattice(float fa, float fr, float ph, float sd) {
+    float g = abs(sin(fa * 6.283 + ph * 0.4))
+        * abs(sin(fr * 9.42 + ph * 0.6 + sd));
+    return pow(g, 0.7);
+}
+
+// 切玻璃碎面：交叉斜向棱线，暗棱亮面——最"万花筒"的纹样
+float patShard(float fa, float fr, float ph, float sd) {
+    float s1 = abs(sin(fa * 4.7 + fr * 3.1 + ph * 0.5 + sd));
+    float s2 = abs(sin(fa * 2.9 - fr * 5.3 + ph * 0.3 + sd * 2.3));
+    float facet = s1 * s2;
+    return pow(facet, 0.6) * 0.9 + pow(facet, 6.0) * 0.8;
+}
+
+float patDots(float fa, float fr, float ph, float sd, float ts) {
+    vec2 g2 = vec2(fa * 8.0, fr * 4.0);
+    vec2 cell = floor(g2);
+    vec2 fp = fract(g2);
+    float h = hash21(cell + floor(sd));
+    vec2 cp = vec2(hash21(cell + 7.0 + floor(sd)),
+        hash21(cell + 13.0 + floor(sd)));
+    // 闪烁也走 wander：同速率不同相位 → 星火感但不机械
+    float tw = wander(ts, 2.0, h * 40.0 + sd + ph);
+    return step(0.62, h) * exp(-dot(fp - cp, fp - cp) * 30.0) * tw * 2.0;
 }
 
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
-    float aspect = aspectRatio();
+    vec2 q = sceneUV(vec2(0.5));
     float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 
-    // ---- 游走焦点：摄像机缓慢跟随的"视线" ----
-    vec2 c = vec2(0.5)
-        + FOCUS_AMP_1 * vec2(sin(ts * FOCUS_WANDER_1.x + sd), cos(ts * FOCUS_WANDER_1.y + sd * 1.7))
-        + FOCUS_AMP_2 * vec2(sin(ts * FOCUS_WANDER_2.x + sd * 2.3), cos(ts * FOCUS_WANDER_2.y + sd));
+    // ---- 八度流：D 严格单调（beat 只进亮度/转角，永不进速度）----
+    float D = ts * DIVE_SPEED + sd * 0.37;
 
-    vec2 d = vUV - c;
-    float r = length(d * vec2(aspect, 1.0));
+    float rho = max(length(q), 1e-4);
+    float ang = atan(q.y, q.x);
 
-    // ---- 反馈变换：每帧向焦点内俯冲（beat 加速）+ 螺旋 + 畸变 ----
-    // 各参数慢漂 → 俯冲速度/螺旋强度/畸变/色散都在演化
-    float k = ZOOM_BASE + ZOOM_DRIFT * sin(ts * 0.011 + sd * 0.7)
-        - ZOOM_BEAT * uBeat - ZOOM_BASS * uBass;
-    float swirlK = 1.0 + SWIRL_EVOLVE * sin(ts * 0.013 + sd * 1.9);
-    float ang = SWIRL_BASE * swirlK * sin(ts * 0.21 + sd)
-        + (SWIRL_CORE + SWIRL_CORE_BASS * uBass) * exp(-r * SWIRL_CORE_FALLOFF) * sin(ts * 0.07 + sd * 2.0)
-        + SWIRL_TREBLE * uTreble * sin(ts * 0.6);
-    vec2 dp = rot(ang) * d * k;
-    dp *= 1.0 + (BARREL + BARREL_EVOLVE * sin(ts * 0.009 + sd * 3.7)) * r * r;
-    dp += CURL_AMP * vec2(
-        vn(vUV * 7.0 + ts * 0.30) - 0.5,
-        vn(vUV * 7.0 + 41.0 - ts * 0.26) - 0.5);
+    float lr = -log(rho) / LNS + D;
+    float ringK = floor(lr);
+    float fr = fract(lr);           // 0=环外缘（浅）→ 1=环内缘（深）
 
-    // 色散：RGB 以微差异速率采样（色散量慢漂）
-    float chK = 0.5 + 0.5 * sin(ts * 0.015 + sd * 2.1);
-    float chIn = CHROMA_IN - CHROMA_EVOLVE * chK;
-    float chOut = CHROMA_OUT + CHROMA_EVOLVE * chK;
-    vec3 prev;
-    prev.r = texture2D(uPrev, c + dp * chIn).r;
-    prev.g = texture2D(uPrev, c + dp).g;
-    prev.b = texture2D(uPrev, c + dp * chOut).b;
-    prev *= DECAY;
-    // 边缘压暗：避免采样夹取产生的边框拖痕
-    float edge = smoothstep(EDGE_FADE_HI, EDGE_FADE_LO, r);
-    prev *= mix(EDGE_DARKEN, 1.0, edge);
+    // ---- 每环独立身份（环号 hash；同环内恒定，环间切换）----
+    float rk1 = hash11(ringK * 0.913 + sd);
+    float rk2 = hash11(ringK * 1.711 + sd + 5.0);
+    float rk3 = hash11(ringK * 2.399 + sd + 11.0);
+    float rk4 = hash11(ringK * 3.127 + sd + 17.0);
+    float nFold = FOLD_MIN + floor(rk1 * 8.999);
+    float sdr = sd + ringK * 7.7;
 
-    // ---- 焦点注入：三种形态慢速轮换，权重速率不可通约 ----
-    vec2 iq = d * vec2(aspect, 1.0);
-    float ir = length(iq);
-    float ia = atan(iq.y, iq.x);
+    // 环旋转：有界随机游走（平滑过零换向）× 每环方向/速率 + beat 微抖
+    float rotAng = (rk2 - 0.5) * 2.0 * ROT_SPAN
+        * wanderBi(ts, ROT_SCALE, sd + ringK * 3.1)
+        + uBeat * 0.15 * (rk4 - 0.5);
+    // 整体转筒慢摆
+    float a = ang + rotAng + BARREL_SWAY * wanderBi(ts, 87.0, sd + 3.3);
 
-    // 形态一：万花筒曼陀罗（瓣数在 5/7/9 间 morph，各折叠各自连续 → 无接缝）
-    float symK = 0.5 + 0.5 * sin(ts * SYM_MORPH_RATE + sd);
-    float mandala = mix(
-        mix(petal(ia, ir, 5.0, ts), petal(ia, ir, 7.0, ts), clamp(symK * 2.0, 0.0, 1.0)),
-        petal(ia, ir, 9.0, ts),
-        clamp(symK * 2.0 - 1.0, 0.0, 1.0));
-    // 形态二：对数螺旋臂
-    float sp = sin(ia * SPIRAL_ARMS - log(ir + 0.02) * SPIRAL_TWIST + ts * SPIRAL_SCROLL);
-    float spiral = exp(-abs(sp) * SPIRAL_SHARP) * exp(-ir * SPIRAL_FALLOFF);
-    // 形态三：绕焦点的彗星（亮点被反馈拉成弧轨）
-    float comet = 0.0;
-    for (int i = 0; i < COMET_COUNT; i++) {
-        float fi = float(i);
-        float cw = 0.35 + 0.22 * hash11(fi * 7.7 + sd);
-        float cr = 0.05 + 0.13 * hash11(fi * 3.1 + sd + 9.0);
-        float cph = hash11(fi * 5.5 + sd + 21.0) * TAU;
-        vec2 cp = c + cr * vec2(cos(ts * cw + cph), sin(ts * cw + cph)) / vec2(aspect, 1.0);
-        vec2 cd = (vUV - cp) * vec2(aspect, 1.0);
-        comet += exp(-dot(cd, cd) * COMET_GLOW);
-    }
-    comet *= exp(-ir * COMET_FALLOFF);
-    // 三种形态的权重（慢、不可通约 → 合成形态极长周期才重复）
-    float wM = 0.15 + 0.85 * pow(0.5 + 0.5 * sin(ts * 0.010 + sd * 0.3), 2.0);
-    float wS = 0.10 + 0.90 * pow(0.5 + 0.5 * sin(ts * 0.014 + sd * 1.9), 2.0);
-    float wC = 0.10 + 0.90 * pow(0.5 + 0.5 * sin(ts * 0.017 + sd * 3.3), 2.0);
+    // 镜像 D_n ↔ 锯齿 C_n 模式 morph（压向两端，大部分时间是纯模式）
+    float modeK = smoothstep(0.25, 0.75,
+        wander2(ts, MODE_SCALE, sd + ringK * 9.7 + rk3));
+    float fa = mix(foldD(a, nFold), foldC(a, nFold), modeK);
 
-    // 常驻：脉冲光环（随节拍亮度呼吸）+ 核心辉光 + 星火
-    float rings = exp(-pow(fract(ir * RING_FREQ - ts * RING_SCROLL) - 0.5, 2.0) * RING_SHARP)
-        * exp(-ir * RING_FALLOFF) * (0.45 + 0.85 * uBeat);
-    float core = exp(-ir * ir * CORE_GLOW) * (0.8 + 1.0 * uBeat);
-    vec2 cell = floor(vUV * uRes / 3.0);
-    float spark = step(SPARK_DENSITY, fract(hash21(cell) + ts * 0.6)) * exp(-ir * SPARK_FALLOFF);
+    // ---- 纹样：五形态 winner-take-most 轮换（全部 wander 驱动）----
+    float frP = fr * (0.7 + 0.9 * rk4); // 每环纹样密度不同
+    float ph1 = wanderBi(ts, 19.0, sdr + 1.0) * 9.0;
+    float ph2 = wanderBi(ts, 27.0, sdr + 2.0) * 9.0;
+    float ph3 = wanderBi(ts, 17.0, sdr + 3.0) * 9.0;
+    float ph4 = wanderBi(ts, 23.0, sdr + 4.0) * 9.0;
+    float ph5 = wanderBi(ts, 21.0, sdr + 5.0) * 9.0;
+    float w1 = pow(wander2(ts, W_SCALE_1, sdr), W_SHARP);
+    float w2 = pow(wander2(ts, W_SCALE_2, sdr + 13.1), W_SHARP);
+    float w3 = pow(wander2(ts, W_SCALE_3, sdr + 27.7), W_SHARP);
+    float w4 = pow(wander2(ts, W_SCALE_4, sdr + 41.3), W_SHARP);
+    float w5 = pow(wander2(ts, W_SCALE_2, sdr + 57.9), W_SHARP);
+    float wsum = w1 + w2 + w3 + w4 + w5 + 1e-4;
+    // 各纹样按平均覆盖率归一化（稀疏 dots ×1.45、致密 lattice ×0.85…）：
+    // 不做归一时，形态轮换 = 全屏亮度轮换（实测起伏 2×，超 1.8× 目标带）
+    float I = (patPetal(fa, frP, ph1, sdr) * 1.00 * w1
+        + patStar(fa, frP, ph2, sdr) * 1.05 * w2
+        + patLattice(fa, frP, ph3, sdr) * 0.85 * w3
+        + patShard(fa, frP, ph5, sdr) * 0.95 * w5
+        + patDots(fa, frP, ph4, sdr, ts) * 1.45 * w4) / wsum;
+    I = pow(I, 0.75); // 抬稀疏相位的覆盖率，进一步压缩形态间亮度差
 
-    // 色族：相位大范围游走 + treble 微扰
-    float hueBase = ts * 0.014 + sd * 0.02 + uTreble * 0.05
-        + 0.25 * sin(ts * 0.008 + sd * 1.1);
-    vec3 injectCol = pal(hueBase + ir * 0.35);
-    float pl = dot(injectCol, vec3(0.299, 0.587, 0.114));
-    injectCol *= min(1.0, INJECT_LUM_REF / max(pl, 1e-3));
-    // 轮换形态做权重归一：三权重同时高位时能量不叠加（否则会叠到 ~3 倍过曝）
-    float formSum = max(wM + wS + wC, 1.0);
-    vec3 inject = injectCol * ((mandala * wM * 0.9 + spiral * wS * 0.8
-        + comet * wC * 1.2) / formSum + rings + core * 0.9);
-    inject += vec3(0.9, 0.95, 1.0) * spark * 0.85;
-    inject *= transA;   // 切换时内容渐入，反馈不断（见文件头说明）
+    // ---- 着色：每环色相基准不同 + 全局慢游 + beat 微扰 ----
+    float hueBase = rk3 + HUE_WANDER * wanderBi(ts, 67.0, sd + 4.4)
+        + uTreble * 0.03;
+    float hue = hueBase + fa * (0.10 + 0.08 * rk2) + fr * (0.15 * rk4);
+    float palK = smoothstep(0.2, 0.8, wander2(ts, 97.0, sd + 8.8));
+    vec3 colr = mix(pal(hue), pal2(hue), palK);
+    // 色度归一（只压不抬）：余弦色轮各相位固有亮度差 ~2 倍（黄 0.8/紫 0.4），
+    // 每环色相基准是环号抽签 → 亮环过境全屏泛白、紫环过境全屏转暗。
+    // 把亮于 REF 的色度压回 REF，色相性格保留、亮度彩票消除
+    float pl = dot(colr, vec3(0.299, 0.587, 0.114));
+    colr *= min(1.0, 0.44 / max(pl, 1e-3));
 
-    vec3 col = prev + inject * INJECT_GAIN;
+    float ringGain = 0.82 + 0.18 * rk2; // 每环明暗性格不同（压缩区间：
+                                        //   环亮度是逐环切换的，差太大
+                                        //   会让全屏亮度随深潜大幅起伏）
+    vec3 col = colr * I * ringGain * MAIN_GAIN;
+    // 基底微光：兜住稀疏纹样相位（dots 主导时覆盖率低）的整屏过暗
+    col += colr * 0.028;
 
-    // 软映射 + 轻饱和 + 暗角
+    // 镜片缝线（扇区界）+ 环缘玻璃亮边（外缘亮、内缘弱）
+    float edgeLine = exp(-fa * EDGE_LINE_SHARP)
+        + exp(-(1.0 - fa) * EDGE_LINE_SHARP);
+    col += mix(vec3(1.0), colr, 0.35) * edgeLine * EDGE_LINE_GAIN * ringGain;
+    float rim = exp(-fr * RIM_SHARP) * 0.6 + exp(-(1.0 - fr) * RIM_SHARP) * 0.3;
+    col += mix(vec3(1.0), colr, 0.5) * rim * ringGain;
+
+    // beat 只进亮度
+    col *= 0.94 + 0.18 * uBeat;
+    col *= transA;
+
+    // 中心消失点：淡出消锯齿 + 核心辉光强化"往里钻"
+    col *= smoothstep(0.0, CENTER_FADE, rho);
+    float hueCore = rk3 + 0.2 * wanderBi(ts, 61.0, sd + 6.6) + uTreble * 0.05;
+    col += pal(hueCore + 0.10) * exp(-rho * rho * CORE_GLOW)
+        * (0.45 + 0.55 * uBeat) * transA;
+    col *= 1.0 - VIGNETTE * dot(q, q);
+
+    // 反馈拖尾：缩放率对齐恒定八度流速 → 只是沿光流方向的运动模糊
+    vec2 prevUV = (vUV - 0.5) * TRAIL_ZOOM + 0.5;
+    col += texture2D(uPrev, prevUV).rgb * TRAIL_GAIN;
+
     col = toneExp(col, TONE_EXPOSURE);
     col = satBoost(col, SAT_BOOST);
-    vec2 vq = (vUV - 0.5) * vec2(aspect, 1.0);
-    col *= 1.0 - VIGNETTE * dot(vq, vq);
+    col += dither(vUV * uRes, ts);
 
     gl_FragColor = vec4(col, 1.0);
 }
