@@ -1,93 +1,110 @@
-// pan.frag：高温锅底上的莱顿弗罗斯特水滴（写实向重制版）。
+// pan.frag：高温锅底上的莱顿弗罗斯特水珠（照片级重制 v3）。
 //
-// 重制对照（旧版三处"假"的根源）：
-//   1. 锅底：旧版是规则 sin 同心圆纹 + 近黑铸铁色 + 烧红炉环——
-//      规则等距圆纹读起来就是年轮；锅底烧到红热 (>500°C) 时水滴早已
-//      瞬间汽化，莱顿弗罗斯特效应 (~200°C) 的锅底不该发红光。
-//      新版 = 拉丝不锈钢：刷痕沿圆周方向的高频低对比各向异性噪声
-//      （真锅底的拉丝是亚毫米细纹，明暗差肉眼刚可辨）+ 宽阔镜面光泽
-//      梯度 + 炉头区的热氧化回火色（稻草黄↔钢蓝的不规则斑块——
-//      这才是热锅底最真实的标志性特征）+ 大尺度使用痕迹。
-//   2. 水珠：旧版全是正圆（元球仅沿运动方向拉伸）。新版给每滴水
-//      加角向谐波扰动（2/3/5 阶正弦叠加在有效距离上）——轮廓呈
-//      圆三角/椭圆/不规则 blob 且随时间 churn；大小改帕累托分布
-//      （大量小滴 + 少量大滴），寿命按 d² 蒸发定律 ∝ 初始面积
-//      （大滴活得久），小滴蹿得快、大滴晃得慢——全是物理一致的方向。
-//   3. 阴影/贴合：旧版是整块偏移采样的"投影"，水滴像浮在锅上。
-//      真实水滴没有分离投影：蒸气隙在接触线形成紧贴边缘的暗环 +
-//      一圈极轻的环境光遮蔽。新阴影全部从同一份元球场推出
-//      （F 的等值带），水滴必然贴合锅底，且省掉第二次全场求值。
+// v3 的物理升级（相对 v2——v2 结构对，材质是"示意图"）：
+//   1. 球冠高度场精确法线：h = √(1−1/F) 是元球场 F=r²/d² 下单滴的解析
+//      球冠解（d²=r²/F 代入球冠公式直接得）。它自带全部正确的几何：
+//      滴心平顶、边缘立墙、斜率 ∝ 1/r（大滴自动摊平、小滴自动更圆），
+//      法线 n = normalize(−∇h, 1) 全场连续，颈缩合并处自然过渡。
+//      v2 的 tilt=3/(1+(F−1)·k) 是凑的——滴内太平、边缘突变层次错。
+//   2. 程序化 3D 环境光 envMap(r)：冷白大窗 + 暖灯泡 + 房间梯度 + 炉灶
+//      余温。锅面与水珠共用同一环境——照片感的核心是"所有物体被同一组
+//      光照亮"。
+//   3. 锅面 = 金属：镜面反射主导（envMap(reflect) × 菲涅耳）+ 拉丝噪声
+//      扰动法线（= 刷痕粗糙度，把窗光拉成弧形光带，真拉丝钢的样子），
+//      漫反射只占小头。
+//   4. 水珠 = 折射/反射能量混合：F = 0.02+0.98(1−cosθ)⁵；滴心看穿
+//      （折射锅面 + 吸收 + 焦点亮斑），边缘全反射（窗形高光贴着水珠
+//      边缘弯成弧）；再加背光侧亮新月（内全反射的经典标志）。
+//   5. 接触阴影：保留从同一份场推出的贴合暗环 + AO，加光源方向不对称。
+//   6. 热气：垂直 advect 的 fbm 丝缕，窗侧逆光更可见，bass 增浓。
+//   7. 收尾：filmic 色调映射 + 轻暗角 + 亮度加权颗粒（照片后期链）。
 //
-// 保留的物理骨架（这些是对的）：元球场融合（靠近自然颈缩合并）、
-// d² 蒸发 + 出生快速长大、蒸气垫高频颤抖（真水滴是"蹿"不是"漂"）、
-// 濒死狂跳 + 边缘泡沫化、硬约束不出锅沿、球透镜向心折射 +
-// 主/辅双高光 + 菲涅尔亮边 + 边缘内侧焦散环。
+// 保留 v2 的物理骨架：元球融合、d² 蒸发 + 出生快速长大、蒸气垫颤抖、
+// 濒死狂跳 + 边缘泡沫化、角向谐波轮廓、硬约束不出锅沿。
 //
-// 公共函数（hash/vn/fbm/hue2rgb/toneExp/applyTransition/…）由工具链从
-// common.glsl 注入，不要在本文件重复定义。
+// 公共函数（hash/vn/fbm/filmic/dither/…）由工具链从 common.glsl 注入，
+// 不要在本文件重复定义。
+
+// ---- 环境光（锅与水珠共用同一组光）----------------------------------------
+const vec3 WIN_DIR = vec3(-0.486, 0.549, 0.684);   // 冷白窗（已归一）
+const vec3 BULB_DIR = vec3(0.503, 0.302, 0.809);   // 暖灯泡（已归一）
+const vec3 WIN_COLOR = vec3(0.92, 1.00, 1.18);
+const vec3 BULB_COLOR = vec3(1.30, 0.98, 0.62);
+const vec3 ROOM_SKY = vec3(0.045, 0.052, 0.070);   // 房间上半球（暗蓝灰）
+const vec3 ROOM_FLOOR = vec3(0.020, 0.014, 0.009); // 下半球（炉灶暗暖）
+const float WIN_SHARP = 20.0;      // 窗立体角（pow 锐度；宽一点让更多
+                                    //   水珠边缘能挂到窗形高光）
+const float BULB_SHARP = 90.0;     // 灯泡更小
 
 // ---- 锅 -------------------------------------------------------------------
-const float PAN_R = 0.44;            // 锅内半径（q 空间，圆）
+const float PAN_R = 0.44;          // 锅内半径（q 空间，圆）
+const float PAN_SPEC = 0.62;       // 钢面镜面强度（金属！反射主导）
+const float PAN_DIFF = 0.30;       // 钢面漫反射占比
+const float BRUSH_PERTURB = 0.085; // 拉丝法线扰动幅度（=粗糙度）
+const float DISH_TILT = 0.30;      // 锅底微凹的宏观法线外倾
 
-// ---- 水滴群 -------------------------------------------------------------
-const int DROPLET_COUNT = 15;        // 10 主滴 + 5 卫星滴
-const float SATELLITE_FROM = 9.5;    // fi ≥ 9.5 的是卫星滴
-const float R_MAIN_MIN = 0.009;      // 主滴半径区间（帕累托：pow(u,2.6)，
-const float R_MAIN_MAX = 0.058;      //   大量小滴 + 少量大滴）
-const float R_SAT_MIN = 0.005;       // 卫星滴半径区间
+// ---- 水滴群 ---------------------------------------------------------------
+const int DROPLET_COUNT = 15;      // 10 主滴 + 5 卫星滴
+const float SATELLITE_FROM = 9.5;
+const float R_MAIN_MIN = 0.009;
+const float R_MAIN_MAX = 0.058;
+const float R_SAT_MIN = 0.005;
 const float R_SAT_MAX = 0.016;
-const float LIFE_BASE = 7.0;         // 寿命 = BASE + K·r²（d² 蒸发定律：
-const float LIFE_K = 9500.0;         //   蒸发时间 ∝ 初始面积。r=0.01→~8s，
-                                     //   r=0.03→~16s，r=0.058→~39s）
-const float GROW_PHASE = 0.025;      // 出生后快速长大的寿命占比
-const float GROW_MIN = 0.10;         // 出生时的初始半径比例
-const float FIELD_EPS = 1e-7;        // 场贡献下限（蒸发完的滴跳过）
+const float LIFE_BASE = 7.0;       // 寿命 = BASE + K·r²（d² 蒸发定律）
+const float LIFE_K = 9500.0;
+const float GROW_PHASE = 0.025;
+const float GROW_MIN = 0.10;
+const float FIELD_EPS = 1e-7;
 
-// ---- 形状不规则（角向谐波扰动）--------------------------------------------
-const float WOB_SMALL_AMP = 0.05;    // 小滴：近球形，仅微扰
-const float WOB_BIG_AMP = 0.20;      // 大滴：摊成水洼，轮廓大幅晃动
-const float WOB_SIZE_LO = 0.010;     // 扰动幅度随半径插值的区间
+// ---- 形状不规则（角向谐波）-------------------------------------------------
+const float WOB_SMALL_AMP = 0.05;
+const float WOB_BIG_AMP = 0.20;
+const float WOB_SIZE_LO = 0.010;
 const float WOB_SIZE_HI = 0.045;
 
 // ---- 游走与濒死 ----------------------------------------------------------
-const float PANIC_FROM = 0.93;       // 寿命占比超过它开始狂跳
-const float PANIC_BOOST = 5.0;       // 濒死颤抖放大倍数
-const float SIZZLE_FROM = 0.90;      // 寿命占比超过它场注入噪声 → 边缘泡沫化
+const float PANIC_FROM = 0.93;
+const float PANIC_BOOST = 5.0;
+const float SIZZLE_FROM = 0.90;
 const float SIZZLE_AMP = 2.4;
-const float TREMBLE_AMP = 0.0042;    // 蒸气垫高频颤抖幅度
-const float TREMBLE_BASS = 1.6;      // bass 加重颤抖
-const float WANDER_NORM = 1.55;      // 正弦叠加的天然限幅
-const float SPEED_STRETCH = 0.22;    // 运动方向拉长系数（速度 → 变形；
-                                     //   幅度低于旧版——形状不规则已由
-                                     //   角向扰动承担，别再叠出"香蕉形"）
+const float TREMBLE_AMP = 0.0042;
+const float TREMBLE_BASS = 1.6;
+const float WANDER_NORM = 1.55;
+const float SPEED_STRETCH = 0.22;
 
 // ---- 场到表面的判定 -------------------------------------------------------
-const float ISO_LO = 0.85;           // 水滴表面等值区间（smoothstep 两端）
+const float ISO_LO = 0.85;
 const float ISO_HI = 1.15;
-const float BEAT_BOIL = 0.05;        // 节拍 → 表面微沸腾
-const float CONTACT_DARKEN = 0.52;   // 接触线暗环深度
-const float AO_DARKEN = 0.16;        // 外围环境遮蔽深度
+const float BEAT_BOIL = 0.05;
+const float CONTACT_DARKEN = 0.50; // 接触线暗环深度
+const float AO_DARKEN = 0.16;
 
-// ---- 材质 -----------------------------------------------------------------
-const float REFRACT_LEN = 0.030;     // 折射取样向滴心偏移量（球透镜放大）
-const vec3 LIGHT_MAIN = vec3(-0.42, 0.60, 0.68);
-const vec3 LIGHT_FILL = vec3(0.55, -0.35, 0.55);
-const float SPEC_MAIN_POW = 110.0;   // 主高光锐度（小滴上也要看得出亮点，
-                                     //   160 在小滴上收成亚像素点 = 看不见）
-const float SPEC_FILL_POW = 45.0;
-const float FRESNEL_POW = 4.0;       // 菲涅尔亮边锐度（收窄到贴边一薄圈，
-                                     //   3.0 的宽边 + 焦散叠出"垫圈"感）
-const vec3 RIM_UP = vec3(0.72, 0.80, 0.94);   // 上沿反射环境光（窗/灯，亮）
-const vec3 RIM_DOWN = vec3(0.05, 0.05, 0.06); // 下沿反射炉灶（暗）
+// ---- 水珠材质 -------------------------------------------------------------
+const float REFRACT_LEN = 0.052;   // 折射取样偏移量（球透镜）
+const float FOCUS_GAIN = 0.38;     // 滴心焦点亮斑（窗光被透镜聚到滴底）
+const float ABSORB_R = 1.5;        // 边缘路径吸收（水微吸收红；克制——
+                                    //   内部要亮，暗交给反射混合去做）
+const float CRESCENT_GAIN = 0.70;  // 背光侧内反射亮新月（水珠签名特征）
+const float SPARKLE_GAIN = 1.8;    // treble 驱动的闪点
 
-// ---- 收尾 -----------------------------------------------------------------
-const float TRAIL_RISE = 0.0006;     // 热气拖影上飘速度
-const float TRAIL_GAIN = 0.06;       // 极轻反馈（重了就糊）
+// ---- 热气 / 收尾 ----------------------------------------------------------
+const float STEAM_GAIN = 0.05;
+const float TRAIL_RISE = 0.0006;
+const float TRAIL_GAIN = 0.05;
 const float SEED_SPREAD = 173.0;
 
-// 水滴元球场：F = Σ r²/d_eff²，g = ∇F（近似，指向滴心）。
-// d_eff 含两项变形：运动方向各向异性拉伸 + 角向谐波轮廓扰动（不规则感核心）。
-// 濒死（lifeK→1）时场注入噪声 → 边缘泡沫化。
+// 环境辐射：一组方向光照亮整个场景（锅面镜面、水珠反射、锅外炉灶全用它）
+vec3 envMap(vec3 r) {
+    vec3 c = mix(ROOM_FLOOR, ROOM_SKY, smoothstep(-0.5, 0.45, r.z));
+    float w = max(dot(r, WIN_DIR), 0.0);
+    c += WIN_COLOR * (pow(w, WIN_SHARP) * 2.8 + pow(w, 6.0) * 0.50);
+    float b = max(dot(r, BULB_DIR), 0.0);
+    c += BULB_COLOR * (pow(b, BULB_SHARP) * 2.4 + pow(b, 10.0) * 0.22);
+    return c;
+}
+
+// 水滴元球场：F = Σ r²/d_eff²，g = ∇F（指向滴心的负梯度方向由调用方翻转）。
+// d_eff 含运动方向拉伸 + 角向谐波轮廓 + 濒死泡沫化（同 v2）。
 float field(vec2 q, float ts, float sd, out vec2 g) {
     g = vec2(0.0);
     float F = 0.0;
@@ -98,20 +115,15 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
         float h2 = hash11(fi * 3.71 + sd + 11.0);
         float h3 = hash11(fi * 5.39 + sd + 23.0);
         float h4 = hash11(fi * 9.17 + sd + 37.0);
-        // 帕累托大小分布：pow 偏置小滴（主滴 2.6 次、卫星滴 1.5 次）
         float r0 = mix(mix(R_MAIN_MIN, R_MAIN_MAX, pow(h3, 2.6)),
             mix(R_SAT_MIN, R_SAT_MAX, pow(h3, 1.5)), small);
-        // d² 蒸发定律：寿命 ∝ 初始面积（大滴持久、小滴转瞬即逝）
         float P = (LIFE_BASE + LIFE_K * r0 * r0) * (0.70 + 0.60 * h1);
         float age = mod(ts + h2 * P, P);
         float lifeK = age / P;
-        // d² 蒸发：半径平方随时间线性下降 + 出生一小段寿命内快速长大
         float grow = mix(GROW_MIN, 1.0, smoothstep(0.0, GROW_PHASE, lifeK));
         float rr = r0 * r0 * grow * max(1.0 - lifeK, 0.0);
         if (rr < FIELD_EPS) continue;
         float rad = sqrt(rr);
-        // 游走轨迹（正弦叠加，光滑且天然限幅 WANDER_NORM）；
-        // 小滴蹿得快、大滴挪得慢（蒸气垫托小滴更灵）
         float sp = (0.9 + 0.5 * h4) * pow(0.020 / max(r0, 0.008), 0.35);
         sp = clamp(sp, 0.6, 2.4);
         float panic = 1.0 + PANIC_BOOST * smoothstep(PANIC_FROM, 1.0, lifeK);
@@ -126,18 +138,15 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
         vec2 pos = vec2(
             sin(age * w1 + p1) + 0.55 * sin(age * w2 + p2),
             cos(age * w3 + p3) + 0.55 * cos(age * w4 + p4));
-        // 解析速度（用于运动方向拉长）
         vec2 vel = vec2(
             w1 * cos(age * w1 + p1) + 0.55 * w2 * cos(age * w2 + p2),
             -w3 * sin(age * w3 + p3) - 0.55 * w4 * sin(age * w4 + p4));
         float range = PAN_R - rad - 0.03;
         pos *= range / WANDER_NORM;
         vel *= range / WANDER_NORM;
-        // 蒸气垫高频颤抖（bass 加重）
         vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
             * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
         pos += trem;
-        // 硬约束：等值面（约 2.1 倍半径）必须留在锅内，一滴都不许出锅
         float maxR = PAN_R - 2.1 * rad - 0.012;
         if (maxR > 0.0) {
             float pl = length(pos);
@@ -145,18 +154,14 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
                 pos *= maxR / pl;
             }
         } else {
-            continue; // 滴太大收不进锅（理论上不发生），跳过
+            continue;
         }
         vec2 d = q - pos;
-        // 运动方向拉长：沿速度压缩、横向膨胀
         float spd = length(vel);
         float k = clamp(spd * SPEED_STRETCH, 0.0, 0.6);
         vec2 vh = vel / max(spd, 1e-4);
         float dpar = dot(d, vh) * (1.0 - 0.24 * k);
         float dperp = dot(d, vec2(-vh.y, vh.x)) * (1.0 + 0.18 * k);
-        // 角向谐波轮廓扰动：有效距离随方向按 2/3/5 阶正弦起伏 →
-        // 轮廓呈圆三角/椭圆/不规则 blob；相位随时间旋转 = 形状在 churn；
-        // 大滴（摊成水洼）扰动大且晃得慢，小滴近球形且抖得快
         float dlen2 = dpar * dpar + dperp * dperp + 1e-6;
         float wsize = smoothstep(WOB_SIZE_LO, WOB_SIZE_HI, rad);
         float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize);
@@ -168,7 +173,6 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
             + 0.20 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83));
         float d2 = dlen2 * wob * wob;
         float w = rr / d2;
-        // 濒死泡沫化
         float sizzle = smoothstep(SIZZLE_FROM, 1.0, lifeK);
         w *= 1.0 + sizzle * (vn(q * 260.0 + age * 7.0) - 0.5) * SIZZLE_AMP;
         F += w;
@@ -177,45 +181,49 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
     return F;
 }
 
-// 锅底：拉丝不锈钢 + 宽阔光泽梯度 + 热氧化回火色斑块 + 使用痕迹 + 锅沿。
-// 没有任何规则同心纹——拉丝是沿圆周方向的各向异性噪声，不是年轮。
+// 锅底：拉丝不锈钢（镜面主导）+ 热氧化回火色 + 使用痕迹 + 锅沿。
+// n 由"微凹宏观倾角 + 拉丝法线扰动"构成——扰动即粗糙度，把窗光糊成
+// 沿圆周拉长的弧形光带（真拉丝钢的反射形态）。
 vec3 bg(vec2 q, float ts) {
     float r = length(q);
     float ang = atan(q.y, q.x);
 
-    // 拉丝：刷痕沿圆周方向（半径方向高频、角度方向低频的各向异性噪声），
-    // 幅度 ±0.02 量级——真锅底的亚毫米细纹，刚可辨，不是沟
+    // 拉丝：圆周向刷痕（半径高频 / 角度低频）+ 微观法线扰动
     float brush = vn(vec2(r * 260.0, ang * 3.0));
     float brushHi = vn(vec2(r * 720.0 + 40.0, ang * 9.0));
-    vec3 c = vec3(0.30, 0.31, 0.33);
-    c += vec3(0.045) * (brush - 0.5);
-    c += vec3(0.026) * (brushHi - 0.5);
+    vec2 radialDir = q / max(r, 1e-4);
+    vec3 n = normalize(vec3(
+        radialDir * (brushHi - 0.5) * BRUSH_PERTURB + q * DISH_TILT, 1.0));
 
-    // 宽阔镜面光泽：主光从左上来 → 左上软亮、右下渐暗（体积光感）
-    c *= 0.80 + 0.42 * clamp(0.5 - q.x * 0.8 + q.y * 0.6, 0.0, 1.0);
+    // 金属着色：漫反射（小头）+ 镜面反射（大头，菲涅耳增强掠射）
+    vec3 refl = 2.0 * n.z * n - vec3(0.0, 0.0, 1.0);
+    vec3 spec = envMap(refl);
+    float fres = 0.55 + 0.40 * pow(1.0 - n.z, 3.0);
+    vec3 albedo = vec3(0.30, 0.31, 0.33)
+        + vec3(0.045) * (brush - 0.5)
+        + vec3(0.026) * (brushHi - 0.5);
+    vec3 c = albedo * envMap(vec3(0.0, 0.0, 1.0)) * PAN_DIFF
+        + spec * PAN_SPEC * fres;
 
-    // 大尺度使用痕迹：油渍/水垢/烧灼斑（fbm 斑块，低对比）
+    // 大尺度使用痕迹（油渍/水垢，低对比乘性）
     c *= 0.92 + 0.16 * fbm(q * 3.2 + 7.0);
 
-    // 热氧化回火色：不锈钢长烧后炉头区的氧化膜色——稻草黄/琥珀 ↔ 钢蓝
-    // 的不规则斑块（热锅底最真实的标志；不是发红光，200°C 远不到红热）
+    // 热氧化回火色：稻草黄/琥珀 ↔ 钢蓝斑块（缓慢热漂移；不是发红光）
     float burner = smoothstep(0.08, 0.16, r) * smoothstep(0.44, 0.30, r);
-    float tp = fbm(vec2(ang * 2.5 + 3.0, r * 9.0 - 2.0));
-    vec3 temper = mix(vec3(0.55, 0.38, 0.16), vec3(0.16, 0.26, 0.50),
+    float tp = fbm(vec2(ang * 2.5 + 3.0, r * 9.0 - 2.0 + ts * 0.004));
+    vec3 temper = mix(vec3(0.62, 0.42, 0.16), vec3(0.15, 0.25, 0.52),
         smoothstep(0.25, 0.75, tp));
-    c = mix(c, temper, burner * 0.50 * (0.4 + 0.6 * fbm(q * 5.0 + 11.0)));
+    c = mix(c, temper * (0.35 + 0.65 * fres), burner * 0.50
+        * (0.4 + 0.6 * fbm(q * 5.0 + 11.0)));
 
-    // 锅底中部微凹的柔光斑
-    c += vec3(0.030, 0.032, 0.035) * exp(-r * r * 18.0);
-
-    // 锅沿：侧壁向沿渐暗 + 卷边金属高光弧（下侧受环境反光更亮）
+    // 锅沿：侧壁渐暗 + 卷边高光弧（用环境光，下侧映炉灶更暗）
     c *= 1.0 - 0.30 * smoothstep(0.36, PAN_R, r);
     float rim = exp(-abs(r - PAN_R) * 80.0);
-    c += vec3(0.20, 0.21, 0.23) * rim * (0.45 + 0.40 * clamp(-q.y + 0.3, 0.0, 1.0));
+    c += envMap(normalize(vec3(q / PAN_R * 1.7, 0.6))) * rim * 0.55;
 
-    // 锅外炉灶：近黑（微噪，别死黑）
+    // 锅外炉灶：近黑微噪
     float outk = smoothstep(PAN_R, 0.54, r);
-    c = mix(c, vec3(0.028, 0.028, 0.032) * (0.8 + 0.4 * vn(q * 90.0)), outk);
+    c = mix(c, vec3(0.024, 0.024, 0.028) * (0.8 + 0.4 * vn(q * 90.0)), outk);
     return c;
 }
 
@@ -230,7 +238,6 @@ void main() {
         * vec2(vn(q * 13.0 + ts * 1.1), vn(q * 13.0 + 31.0 - ts * 0.9))
         - (0.0006 + 0.0008 * heat);
 
-    // 锅内 mask：场与影都不许溢出锅沿
     float panMask = smoothstep(PAN_R + 0.02, PAN_R - 0.05, length(qw));
 
     vec2 g;
@@ -239,56 +246,72 @@ void main() {
 
     float m = smoothstep(ISO_LO, ISO_HI, F);
 
-    // 贴合阴影（全部从同一份场推出，水滴必然贴锅）：
-    //   接触环 = 紧贴水滴外缘的暗环（蒸气隙阴影 + 边缘全反射），
-    //   AO     = 外扩一圈极轻的环境遮蔽；
-    //   只在水滴外、锅内。旧版"偏移采样投影"会让水滴看起来像浮起来，已拆。
-    float ringSh = smoothstep(0.30, ISO_LO, F) * (1.0 - m) * panMask;
+    // ---- 高度场法线：h = √(1−1/F)（单滴解析球冠；斜率 ∝ 1/r 自动缩放）----
+    float Fin = max(F, 1.0);
+    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0));
+    // dh/dF = 1/(2F²√(1−1/F))；边缘奇异 → clamp 分母防炸（墙立到 ~88°）
+    float dh = 0.5 / (Fin * Fin * max(hDome, 0.035));
+    vec3 n = normalize(vec3(-g * dh, 1.0));
+
+    // ---- 贴合阴影（同一份场推出；光源方向不对称：背光侧更深）----
+    vec2 gn0 = g / (length(g) + 1e-4);
+    float azq = atan(qw.y, qw.x);
+    float awayWin = 0.5 - 0.5 * cos(azq - atan(WIN_DIR.y, WIN_DIR.x));
+    float ringSh = smoothstep(0.30, ISO_LO, F) * (1.0 - m) * panMask
+        * (0.75 + 0.5 * awayWin);
     float ao = smoothstep(0.06, 0.30, F) * (1.0 - m) * panMask;
 
     vec3 col = bg(qw, ts);
     col *= 1.0 - CONTACT_DARKEN * ringSh - AO_DARKEN * ao;
 
-    // ---- 水滴材质 ----
-    // 球冠剖面：边缘斜率最大、滴心平顶（tilt 随 F 增大而减小）
-    vec2 gn = g / (length(g) + 1e-4);
-    float tilt = 3.0 / (1.0 + max(F - 1.0, 0.0) * 1.2);
-    vec3 n = normalize(vec3(-gn * tilt, 1.0));
-
-    vec3 L = normalize(LIGHT_MAIN);
+    // ---- 水珠：折射/反射能量混合 ----
     vec3 V = vec3(0.0, 0.0, 1.0);
+    float ndv = max(dot(n, V), 0.0);
+    float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
-    // 折射：向滴心取样（球透镜放大倒像），折射量随斜率增大、限制在滴内；
-    // 放大的是新锅底的拉丝与回火色斑——透过水滴看得到锅面纹理才叫贴锅
-    vec2 ruv = qw + gn * tilt * REFRACT_LEN;
-    vec3 through = bg(ruv, ts);
-    through *= vec3(0.90, 0.96, 1.04);
-    through *= mix(0.92, 0.70, clamp((F - 1.0) * 0.15, 0.0, 1.0));
+    // 折射：球透镜放大（偏向滴心；边缘偏移大）；路径吸收（微吸红）
+    vec2 ruv = qw + gn0 * (1.0 - n.z) * REFRACT_LEN;
+    vec3 through = bg(ruv, ts) * 1.25;
+    through *= vec3(0.965, 0.982, 0.996);
+    through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.4, 1.0, 0.8));
+    // 焦点亮斑：窗光被透镜聚到滴底（滴心平顶处最亮）
+    through += WIN_COLOR * pow(ndv, 7.0) * FOCUS_GAIN;
 
-    float spec = pow(max(dot(reflect(-L, n), V), 0.0), SPEC_MAIN_POW);
-    vec3 L2 = normalize(LIGHT_FILL);
-    float spec2 = pow(max(dot(reflect(-L2, n), V), 0.0), SPEC_FILL_POW);
-    float fres = pow(1.0 - max(n.z, 0.0), FRESNEL_POW);
-    // 菲涅尔亮边：上沿拾取环境亮光、下沿没入炉灶暗部（光源方向唯一）
-    float up = clamp(0.5 + n.y * 2.4, 0.0, 1.0);
-    vec3 rimCol = mix(RIM_DOWN, RIM_UP, up);
-    // 边缘内侧焦散亮环（treble 让环面闪烁）
-    float ca = smoothstep(1.05, 1.35, F) * smoothstep(2.9, 1.45, F);
-    ca *= 0.75 + 0.5 * uTreble * vn(q * 160.0 + ts * 3.0);
+    // 反射：环境镜像（边缘高光 = 窗/灯的形状贴着水珠边缘弯成弧）
+    vec3 refl = 2.0 * ndv * n - V;
+    vec3 mirrored = envMap(refl);
 
-    vec3 drop = through;
-    drop += rimCol * fres * 0.45;
-    drop += vec3(1.0, 0.98, 0.94) * spec * (2.2 + 0.8 * uTreble);
-    drop += vec3(0.8, 0.9, 1.0) * spec2 * 0.30;
-    drop += vec3(0.95, 0.92, 0.80) * ca * 0.25;
+    // 背光侧亮新月：内全反射把环境亮部折到背光侧内缘（水珠的签名特征）
+    float crescent = smoothstep(0.35, 0.10, n.z)
+        * pow(max(-dot(gn0, normalize(WIN_DIR.xy)), 0.0), 1.6);
+    // treble 闪点：细碎的全反射 sparkle（活泼但仍是亮度域）
+    float sparkle = pow(max(dot(refl, BULB_DIR), 0.0), 220.0)
+        * (0.6 + 0.4 * vn(qw * 320.0 + ts * 5.0));
+
+    vec3 drop = mix(through, mirrored, fres);
+    drop += WIN_COLOR * crescent * CRESCENT_GAIN;
+    drop += BULB_COLOR * sparkle * SPARKLE_GAIN * (0.7 + 0.6 * uTreble);
 
     col = mix(col, drop, m);
 
-    // 极轻反馈：热气拖影（向上飘）
+    // ---- 热气丝缕（窗侧逆光更可见；bass 增浓）----
+    float wisp = fbm(vec2(q.x * 6.0 + q.y * 1.5, q.y * 5.0 - ts * 0.5));
+    wisp = smoothstep(0.52, 0.78, wisp)
+        * smoothstep(PAN_R + 0.06, 0.1, length(q))
+        * smoothstep(0.62, 0.30, q.y);
+    float litSide = 0.55 + 0.45 * smoothstep(0.2, -0.4, q.x);
+    col += WIN_COLOR * wisp * litSide * STEAM_GAIN * (1.0 + 1.2 * uBass)
+        * panMask;
+
+    // 极轻反馈：热气拖影
     col += texture2D(uPrev, vUV + vec2(0.0, -TRAIL_RISE)).rgb * TRAIL_GAIN;
 
-    col = toneExp(col, 1.05);
-    col = pow(col, vec3(0.95));
+    // ---- 照片后期链 ----
+    col = filmic(col);
+    col *= 1.0 - 0.24 * dot(q * 0.85, q * 0.85);
+    float L = dot(col, vec3(0.299, 0.587, 0.114));
+    col += vec3((hash21(vUV * uRes + fract(ts) * 13.0) - 0.5)
+        * mix(0.014, 0.004, smoothstep(0.0, 0.5, L)));
 
     col = applyTransition(col);
 
