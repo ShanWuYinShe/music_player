@@ -50,8 +50,12 @@ const float BODY_H = 0.42;          // 帘体向上衰减高度（贯穿上半�
 const float BORDER_W = 0.0045;      // 下缘亮线 σ（极锐！且下方不对称截止）
 const float RED_LIFT = 0.24;        // 氧红层相对绿层的抬升量
 const float RED_H_K = 1.5;          // 氧红层衰减高度 = BODY_H × K
-const float RAY_FREQ = 82.0;        // 光柱角向频率
-const float RAY_DRIFT = 0.090;      // 光柱沿帘漂移
+const float STRIPE_FREQ_A = 150.0;  // 细条纹频率 A（跨屏 ~70 条——极光的
+                                    //   "琴键感"来自细锐亮柱与暗隙分明；
+                                    //   旧 fbm 光柱跨屏只有 ~16 个模糊块，
+                                    //   是"谁家极光"的主要答案）
+const float STRIPE_FREQ_B = 260.0;  // 细条纹频率 B（次级，更细）
+const float STRIPE_DRIFT = 0.9;     // 条纹沿帘漂移（格/秒，缓慢）
 const float BODY_GAIN = 1.15;       // 帘体增益
 const float EDGE_GAIN = 4.60;       // 下缘亮线增益（帘幕最亮元素）
 const float WIDE_GAIN = 0.14;       // 宽尺度环境光晕（镜头 bloom 解析近似）
@@ -100,8 +104,9 @@ vec3 starLayer(vec2 q, float S, float thresh, float ts, float sd) {
 }
 
 // 帘幕层：返回线性 HDR 发射量。depth 0=最远 → 1=最近。
+// azx：伪透视角坐标（条纹近竖直、微微向天顶汇聚），main 里一次算好。
 // out wideEnv：宽尺度环境光晕（bloom 解析近似），主循环外统一收。
-vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
+vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     float act, float beatG, out float wideEnv) {
     float h1 = hash11(fi * 3.77 + sd);
     float h2 = hash11(fi * 7.31 + sd + 5.0);
@@ -129,17 +134,18 @@ vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
         0.6 * vn(vec2(q.x * 0.55 + fi * 11.0, ts * 0.010 + sd * 0.7))
         + 0.4 * vn(vec2(q.x * 1.7 + fi * 3.0, ts * 0.017 + sd * 1.9)));
 
-    // 光柱：az 恒定的直线族 → 条纹沿磁力线拉直并向天顶收拢。
-    // 三层：暗柱铺底（覆盖）+ 英雄柱（幂律）+ 针状细光线（高频高次幂——
-    // 实拍里帘幕总有几根扎眼的细亮线，其余是刚可辨的背景柱）
-    float rf = fbm(vec2(az * RAY_FREQ + ts * RAY_DRIFT * (0.6 + 0.5 * h2)
-        + fi * 17.0, fi * 3.1 + sd));
+    // 光柱：细锐条纹——单倍频值噪声（fbm 的 4 倍频叠会把高频糊成块，就是
+    // 旧版"模糊绿块"的根源）+ 幂律拉对比（亮柱与暗隙分明的琴键感）。
+    // 两组频率/速度错开叠层次；treble 驱动闪烁（亮度域，合规）
+    float sA = vn(vec2(azx * STRIPE_FREQ_A + ts * STRIPE_DRIFT + fi * 31.0,
+        fi * 3.1 + sd));
+    float sB = vn(vec2(azx * STRIPE_FREQ_B - ts * STRIPE_DRIFT * 0.7
+        + fi * 17.0, fi * 7.7 + sd));
+    float rf = 0.62 * sA + 0.38 * sB;
     float rays = 0.06 + 0.94 * pow(rf, 2.4);
-    float hero = pow(rf, 2.8) * (1.0 + 3.2 * act);
-    float needles = pow(fbm(vec2(az * RAY_FREQ * 2.7
-        + ts * RAY_DRIFT * 1.35 + fi * 23.0, fi * 6.7 + sd)), 8.0)
-        * (0.9 + 2.8 * act);
-    float flick = 0.84 + 0.16 * sin(ts * (2.6 + 2.2 * h3) + az * 240.0
+    float hero = pow(sA, 2.8) * (1.0 + 3.2 * act);
+    float needles = pow(sB, 7.0) * (0.9 + 2.8 * act);
+    float flick = 0.84 + 0.16 * sin(ts * (2.6 + 2.2 * h3) + azx * 90.0
         + fi * 5.0 + uTreble * 5.0);
 
     // 剖面：d>0 帘体指数衰减 + 宽光晕；d≈0 下缘亮线（d² 型；线下方
@@ -196,18 +202,19 @@ void main() {
     // 节拍只进亮度（局部元素增益）
     float beatG = 1.0 + 0.32 * uBeat;
 
-    // 磁天顶（屏幕上方外侧，慢游走）——光柱直线族的汇聚点
+    // 磁天顶（画面上方远处，慢游走）——光柱直线族的汇聚点
     vec2 apex = APEX_BASE + APEX_WANDER
         * vec2(wanderBi(ts, 61.0, sd + 3.0), wanderBi(ts, 47.0, sd + 9.0));
-    vec2 vd = q - apex;
-    float az = atan(vd.y, vd.x);
+    // 伪透视角坐标：条纹近竖直、随高度微微向天顶收敛（比 atan 便宜且
+    // 在远天顶近似下更稳定）
+    float azx = (q.x - apex.x) / max(apex.y - q.y, 0.25);
 
     // ---- 帘幕线性 HDR 叠加 + 宽尺度光晕 ----
     vec3 emis = vec3(0.0);
     float wide = 0.0;
     for (int i = 0; i < CURTAIN_N; i++) {
         float wenv;
-        emis += curtain(q, az, float(i), ts, sd,
+        emis += curtain(q, azx, float(i), ts, sd,
             float(i) / float(CURTAIN_N - 1), act, beatG, wenv);
         wide += wenv * mix(0.3, 1.0, float(i) / float(CURTAIN_N - 1));
     }

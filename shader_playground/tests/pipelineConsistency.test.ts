@@ -58,6 +58,7 @@ describe('shader 管线跨端配置一致性', () => {
 		expect(names).toEqual(expectedLabels);
 		expect(core).toContain('export const PRESET_COUNT = VIZ_PRESET_NAMES.length;');
 		expect(view).not.toContain('export const PRESET_COUNT');
-		expect(PRESETS.map((preset) => preset.id)).toEqual([0, 1, 2, 3]);
+		// id 从 0 起连续（preset 轮换与 shader 槽位索引依赖它）
+		expect(PRESETS.map((preset) => preset.id)).toEqual(PRESETS.map((_, i) => i));
 	});
 });

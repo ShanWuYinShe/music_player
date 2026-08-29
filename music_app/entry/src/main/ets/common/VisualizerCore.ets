@@ -16,8 +16,7 @@ export const PRESET_SPAN_MS = 18000;
 export const VIZ_PRESET_NAMES: string[] = [
   '无限分形',
   '热锅水珠',
-  '全屏极光',
-  '无尽万花筒'
+  '全屏极光'
 ];
 
 export const PRESET_COUNT = VIZ_PRESET_NAMES.length;

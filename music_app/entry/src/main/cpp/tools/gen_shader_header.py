@@ -67,7 +67,7 @@ BLIT_HEADER = (
 
 # 默认场景槽顺序必须与 CMake SHADER_SCENES、VisualizerCore.ets 和
 # shader_playground/src/presets.ts 的 PRESETS 一致。
-DEFAULT_SCENE_FILES = ["fractal.frag", "pan.frag", "aurora.frag", "kaleido.frag"]
+DEFAULT_SCENE_FILES = ["fractal.frag", "pan.frag", "aurora.frag"]
 
 # 场景共享公共库：注入到每个场景"头之后、场景源之前"（presets.ts COMMON_FILE）
 COMMON_FILE = "common.glsl"

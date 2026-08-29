@@ -37,7 +37,7 @@ pnpm run preview   # 预览构建产物，http://localhost:8792/
 
 ## 功能
 
-- **左侧 4 个 preset 文件**（fractal / pan / aurora / kaleido），点击或按 `1`-`4` 切换
+- **左侧 3 个 preset 文件**（fractal / pan / aurora），点击或按 `1`-`3` 切换
 - **CodeMirror 编辑器**：GLSL 高亮、行号、撤销历史；编辑即重编译（可关）
 - **文件拖拽**：把 `.frag` / `.vert` 从 Finder 拖进窗口即试跑——
   `.frag` 按顺序填入场景槽（从当前槽开始），`.vert` 替换顶点源；
@@ -65,7 +65,7 @@ pnpm run preview   # 预览构建产物，http://localhost:8792/
 
 ## 与移动端的一致性
 
-> 工具与手机端都启用 4 个 preset 槽（fractal / pan / aurora / kaleido），
+> 工具与手机端都启用 3 个 preset 槽（fractal / pan / aurora），
 > 顺序由 `src/presets.ts`、`music_app/entry/src/main/cpp/CMakeLists.txt` 的
 > `SHADER_SCENES` 和 `VisualizerCore.ets` 的名称清单共同定义。
 > `tests/pipelineConsistency.test.ts` 会校验三端顺序、名称和源文件是否一致。

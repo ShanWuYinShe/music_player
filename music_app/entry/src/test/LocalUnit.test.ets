@@ -283,13 +283,13 @@ export default function LocalUnitSuite() {
     });
 
     it('presetRotatesBySpan', 0, () => {
-      expect(PRESET_COUNT).assertEqual(4);
+      expect(PRESET_COUNT).assertEqual(3);
       expect(VIZ_PRESET_NAMES.length).assertEqual(PRESET_COUNT);
       const s = presetAt(0, 42);
       expect(s.index >= 0 && s.index < PRESET_COUNT).assertTrue();
       expect(presetAt(PRESET_SPAN_MS - 1, 42).index).assertEqual(s.index);
 
-      // 远离 t=0 clamp 边界，连续四个 span 必须能到达全部四个场景。
+      // 远离 t=0 clamp 边界，连续 span 必须能到达全部场景。
       const t0 = PRESET_COUNT * PRESET_SPAN_MS;
       const seen: boolean[] = new Array(PRESET_COUNT).fill(false);
       for (let i = 0; i < PRESET_COUNT; i++) {
