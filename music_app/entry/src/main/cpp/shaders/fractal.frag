@@ -1,4 +1,4 @@
-// fractal.frag：多形态分形引擎（五套结构互异场 × wander 轮换 × 平滑 crossfade）。
+// fractal.frag：多形态分形引擎（五套结构互异场 × 出场轮换调度）。
 //
 // 设计目标——"风格多变，不只是旋转和放大"（MilkDrop 的观感来自每个 preset
 // 结构完全不同）：
@@ -13,11 +13,13 @@
 //               膜连续变形（脑珊瑚/生物晶格感）；
 //     4 VORONOI 移动 cell 的 F2−F1 边网络——霓虹电路，脉冲沿边行波。
 //
-// 轮换机制：五路权重 = pow(wander2(ts, 独立尺度, 独立种子), SHARP)——
-// winner-take-most（大部分时间单一形态独占，权重是帧级一致量 → 只计算
-// 前二名两套场，其余跳过零成本）；过渡期两形态连续 crossfade。wander
-// 无周期 → 形态序列永不重演；各形态内部参数（c / warp 相位 / 切片深度 /
-// cell 相位）也在慢漂——"同一形态"每次出场长相也不同。
+// 轮换机制（v3 返工）：出场序号调度——preset 周期 72s（4×18s），本场景
+// 每次出场 18s、序号 +1，hash 选形态且与上一出场不同 → 每次切回来必然
+// 换形态（旧 wander 轮换的尺度是分钟级，72s 后回来时大概率还是同一形态，
+// 这是"看起来总一个样"的病根）。形态跳变发生在本场景不在场的时刻，被
+// preset 切换的 crossfade 掩盖；锁定观看时进入侧 1s 淡入保险。各形态
+// 内部参数（c / warp 相位 / 切片深度 / cell 相位）仍由 wander 慢漂——
+// "同一形态"每次出场长相也不同。
 //
 // 旧版平滑性经验全部保留（血换来的，别回退）：
 //   1. DIVE 的行程 D = ts × 恒定速度严格单调；beat 永不进速度；
@@ -94,13 +96,15 @@ const float VOR_EDGE_K = 160.0;      // 边线锐度
 const float VOR_PULSE_RATE = 1.6;    // 沿边脉冲行波速度
 
 // ---- 形态轮换 --------------------------------------------------------------
-const float MODE_SHARP = 3.0;        // winner-take-most 锐化
-const float MODE_SCALE_0 = 47.0;     // 各形态 wander 时间尺度（互相错开）
-const float MODE_SCALE_1 = 61.0;
-const float MODE_SCALE_2 = 53.0;
-const float MODE_SCALE_3 = 71.0;
-const float MODE_SCALE_4 = 67.0;
-const float BLEND_SKIP = 0.04;       // 次权重低于它 → 只算主形态（零成本跳过）
+// 出场序号调度（与 kaleido.frag 同机制）：preset 周期 72s（4×18s），
+// 本场景每次出场 18s、序号 +1 → hash 选形态且与上一出场不同——
+// 每次切回来必然换形态。wander 尺度分钟级的旧机制下，72s 后回到本场景
+// 时大概率还是同一形态，这是"风格不多变"的病根。形态跳变发生在本场景
+// 不在场的时刻，被 preset 切换的 crossfade 掩盖；锁定观看时进入侧 1s
+// 淡入保险。mod 97 保护 hash 精度（97 质数 → 序列看似不循环）。
+const float SHOW_PERIOD = 72.0;
+const float SHOW_KEY_MOD = 97.0;
+const float BLEND_IN = 0.015;
 
 // ---- 着色 / 收尾 -----------------------------------------------------------
 const float BAND_FREQ = 0.85;
@@ -393,7 +397,7 @@ vec3 modeVoronoi(vec2 q, float ts, float sd) {
     return col;
 }
 
-// 形态分发（int 比较；仅前二名会被调用，其余零成本）
+// 形态分发（出场序号决定，一次只算一套场）
 vec3 evalMode(int idx, vec2 q, float ts, float sd) {
     if (idx == 0) return modeDive(q, ts, sd);
     if (idx == 1) return modeKali(q, ts, sd);
@@ -402,46 +406,33 @@ vec3 evalMode(int idx, vec2 q, float ts, float sd) {
     return modeVoronoi(q, ts, sd);
 }
 
+// 出场序号 → 形态（与上一出场不同）
+float modeForShow(float showIdx, float sd) {
+    float key = mod(showIdx, SHOW_KEY_MOD);
+    float sel = floor(hash11(key * 0.913 + sd) * 5.0);
+    float prev = floor(hash11(mod(showIdx - 1.0, SHOW_KEY_MOD) * 0.913 + sd) * 5.0);
+    if (sel == prev) {
+        sel = mod(sel + 1.0 + floor(hash11(key * 3.31 + sd * 1.7) * 4.0), 5.0);
+    }
+    return sel;
+}
+
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
     vec2 q = sceneUV(vec2(0.5));
 
-    // ---- 五路 winner-take-most 权重（wander 无周期）----
-    float w0 = pow(wander2(ts, MODE_SCALE_0, sd + 1.0), MODE_SHARP);
-    float w1 = pow(wander2(ts, MODE_SCALE_1, sd + 13.1), MODE_SHARP);
-    float w2 = pow(wander2(ts, MODE_SCALE_2, sd + 27.7), MODE_SHARP);
-    float w3 = pow(wander2(ts, MODE_SCALE_3, sd + 41.3), MODE_SHARP);
-    float w4 = pow(wander2(ts, MODE_SCALE_4, sd + 57.9), MODE_SHARP);
-
-    // 主形态与次形态（帧级一致 → 分支全 warp 一致，跳过的不花算力）
-    int maxIdx = 0;
-    float wmax = w0;
-    if (w1 > wmax) { wmax = w1; maxIdx = 1; }
-    if (w2 > wmax) { wmax = w2; maxIdx = 2; }
-    if (w3 > wmax) { wmax = w3; maxIdx = 3; }
-    if (w4 > wmax) { wmax = w4; maxIdx = 4; }
-    float c0 = maxIdx == 0 ? -1.0 : w0;
-    float c1 = maxIdx == 1 ? -1.0 : w1;
-    float c2 = maxIdx == 2 ? -1.0 : w2;
-    float c3 = maxIdx == 3 ? -1.0 : w3;
-    float c4 = maxIdx == 4 ? -1.0 : w4;
-    float wsec = max(max(max(c0, c1), max(c2, c3)), c4);
-    int secIdx = 0;
-    if (wsec == c1) secIdx = 1;
-    if (wsec == c2) secIdx = 2;
-    if (wsec == c3) secIdx = 3;
-    if (wsec == c4) secIdx = 4;
-
-    float wsum = wmax + wsec + 1e-5;
-    float kSec = wsec / wsum; // 次形态归一权重（大部分时间 ≈ 0）
-
-    vec3 col;
-    if (kSec > BLEND_SKIP) {
-        col = (evalMode(maxIdx, q, ts, sd) * wmax
-            + evalMode(secIdx, q, ts, sd) * wsec) / wsum;
-    } else {
-        col = evalMode(maxIdx, q, ts, sd);
+    // ---- 出场轮换：本场景每次出场（72s 序号 +1）必然换形态 ----
+    float cyc = ts / SHOW_PERIOD;
+    float showIdx = floor(cyc);
+    float bph = fract(cyc);
+    int modeIdx = int(modeForShow(showIdx, sd));
+    vec3 col = evalMode(modeIdx, q, ts, sd);
+    // 进入侧 1s 淡入保险（锁定本场景连续观看时也不跳闪）
+    float blendIn = smoothstep(0.0, BLEND_IN, bph);
+    if (blendIn < 0.999) {
+        int prevIdx = int(modeForShow(showIdx - 1.0, sd));
+        col = mix(evalMode(prevIdx, q, ts, sd), col, blendIn);
     }
 
     // beat 只进亮度（速度恒定铁律）
@@ -449,12 +440,13 @@ void main() {
     col *= 1.0 - VIGNETTE * dot(q, q);
 
     // 反馈拖尾：深潜形态用对齐流速的缩放率，其余用近恒等轻模糊
-    float diveW = 0.0;
-    if (maxIdx == 0) diveW = wmax / wsum;
-    if (secIdx == 0 && kSec > BLEND_SKIP) diveW = max(diveW, wsec / wsum);
-    vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
     vec3 prevS = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
-    col += mix(prevS, prevD, diveW) * TRAIL_GAIN;
+    if (modeIdx == 0) {
+        vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
+        col += mix(prevS, prevD, blendIn) * TRAIL_GAIN;
+    } else {
+        col += prevS * TRAIL_GAIN;
+    }
 
     col = toneExp(col, 1.0);
     // 抬暗部压缩"周期性忽明忽暗"的观感幅度
