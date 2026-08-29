@@ -100,3 +100,20 @@ describe('AudioSim', () => {
 		}
 	});
 });
+
+describe('AudioSim 与设备端公式对齐', () => {
+	test('setSeed 派生 bpm（bpmFromSeed 同源）', () => {
+		const sim = new AudioSim();
+		sim.setSeed(424242);
+		expect(sim.bpm).toBe(bpmFromSeed(424242));
+	});
+
+	test('sample 的 beat 与裸包络一致（无缩放）', () => {
+		const sim = new AudioSim();
+		sim.setSeed(777);
+		sim.advance(1234);
+		const { beat } = sim.sample();
+		// 无手动脉冲时 = beatEnvelope 裸值（可能被 min(1) 截断，但包络 ≤1）
+		expect(beat).toBeCloseTo(beatEnvelope(sim.playClock, sim.bpm, (777 % 997) / 997), 10);
+	});
+});

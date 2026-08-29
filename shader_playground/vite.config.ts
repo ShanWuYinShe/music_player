@@ -65,11 +65,20 @@ function shaderSnapshotPlugin(): Plugin {
 		name: 'shader-playground-snapshot',
 		apply: 'build',
 		buildStart() {
+			if (!fs.existsSync(SHADER_DIR)) {
+				throw new Error(
+					`shader 源目录不存在：${SHADER_DIR}\n本工具必须位于 music_player 仓库内运行（shaders 由 music_app 批次提供）`,
+				);
+			}
 			for (const name of SHADER_FILES) {
+				const file = path.join(SHADER_DIR, name);
+				if (!fs.existsSync(file)) {
+					throw new Error(`shader 源文件缺失：${file}`);
+				}
 				this.emitFile({
 					type: 'asset',
 					fileName: `shaders/${name}`,
-					source: fs.readFileSync(path.join(SHADER_DIR, name)),
+					source: fs.readFileSync(file),
 				});
 			}
 		},

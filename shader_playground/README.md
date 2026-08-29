@@ -60,6 +60,12 @@ bun run preview    # 预览构建产物，http://localhost:8792/
 
 ## 与移动端的一致性
 
+> **注意**：工具里 4 个 preset 槽（fractal / pan / aurora / mirror）都是可调试场景，
+> 但**手机端只打包 `music_app/entry/src/main/cpp/CMakeLists.txt` 里 `SHADER_SCENES`
+> 列出的场景**（当前仅 `aurora.frag`）——其余三个只在本地跑，不进 so。
+> 要让某个场景上端，改 `SHADER_SCENES` 并同步 ArkTS 的 `PRESET_COUNT` /
+> `VIZ_PRESET_NAMES`（`VisualizerCore.ets` 与 `VisualizerView.ets` 各一处）。
+
 工具内 WebGL2 渲染管线与 `cpp/visualizer.cpp` 完全一致：
 
 - 4 个 GLSL ES 1.00 fragment shader 经 `/shaders/*` 读取

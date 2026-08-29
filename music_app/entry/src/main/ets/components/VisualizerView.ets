@@ -2,10 +2,11 @@
  * VisualizerView：MilkDrop 风格音乐可视化（@ComponentV2）。
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
- * full：XComponent(SURFACE)+GLES3 真透视 shader 管线（10 风格，点击循环 0..9）——
- *   全部以真实透视相机建模（FOV 呼吸 + yaw/pitch/roll + dolly 位移，ray 由透视投影生成，
- *   深度层按 1/depth 视差缩放/位移/雾化，非等比缩放），反馈拖尾亦为径向透视流动（距消失点越远拖尾越长，
- *   近快远慢）；运算量只与像素数相关、半分辨率渲染线性上屏。
+ * full：XComponent(SURFACE)+GLES3 shader 管线（当前打包单一场景「全屏极光」）——
+ *   5 层 fbm 帘幕沿整个画面高度铺开（底层帘从画面下缘升起、光柱贯穿全屏），
+ *   颜色随高度翠绿→青→蓝→紫粉渐变 + 缓慢面相漂移，配银河斜带、双层闪烁星空
+ *   与地平线山脊剪影；柔和色调映射出梦幻感。
+ *   运算量只与像素数相关、半分辨率（1/2）渲染线性上屏；反馈拖尾轻度参与柔化。
  * mini：全宽金色频谱柱，垫于迷你条卡片底层（2D Canvas 双离屏 ping-pong）。
  * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛即停。
  */
@@ -18,14 +19,11 @@ import {
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
-/** 可视化风格总数（与 shader_src.h 保持一致）；风格仅由点击/按钮切换，无自动轮换 */
-export const PRESET_COUNT = 10;
+/** 可视化风格总数（与 CMakeLists.txt 的 SHADER_SCENES 条数一致）；当前只有极光一个场景 */
+export const PRESET_COUNT = 1;
 
-/** 风格显示名（与 shader_src.h 各 preset 段一一对应） */
-export const VIZ_PRESET_NAMES: string[] = [
-  '霓虹跑道', '水晶洞窟', '分形地形等高线', '赛博隧道', '传送门',
-  '激光幕墙', '镜屋', '冲击波竞技场', '星门环廊', '云海空战'
-];
+/** 风格显示名（与 cpp/shaders/ 下打包进 so 的场景一一对应） */
+export const VIZ_PRESET_NAMES: string[] = ['全屏极光'];
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
 interface XComponentNativeHandle {

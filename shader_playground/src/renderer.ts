@@ -7,6 +7,7 @@ import { type Diagnostic, ShaderError, toDiagnostic } from './errors';
 import {
 	BLIT_HEADER_LINES,
 	FRAG_HEADER_LINES,
+	hasEntryPoint,
 	patchBlitForWebGL2,
 	patchFragForWebGL2,
 	patchVertForWebGL2,
@@ -137,10 +138,15 @@ export class VizRenderer {
 
 	/**
 	 * 编译全部 program（blit + 4 场景）。任一失败：保留旧 program、返回诊断；
-	 * 全部成功：替换并返回 null。
+	 * 全部成功：替换并返回 null。草稿（无 main()）的场景文件跳过编译、
+	 * 沿用旧 program，返回 skipDraft 标记供状态栏提示。
 	 */
-	compileAll(sources: Record<string, string>): Diagnostic | null {
+	compileAll(sources: Record<string, string>): {
+		diag: Diagnostic | null;
+		skippedDrafts: string[];
+	} {
 		const gl = this.gl;
+		const skippedDrafts: string[] = [];
 		try {
 			const blitSrc = patchBlitForWebGL2(sources['blit.frag'], 'blit.frag');
 			const vs = compileShader(
@@ -158,16 +164,24 @@ export class VizRenderer {
 			this.blitProgram = newBlit;
 			this.blitLoc = gl.getUniformLocation(newBlit, 'uTex');
 		} catch (err) {
-			return toDiagnostic(err, 'blit 管线');
+			return { diag: toDiagnostic(err, 'blit 管线'), skippedDrafts };
 		}
 
 		for (const preset of PRESETS) {
 			const src = sources[preset.file];
 			if (typeof src !== 'string') {
-				return toDiagnostic(
-					new ShaderError('source', preset.file, `源文件 ${preset.file} 尚未载入`),
-					preset.label,
-				);
+				return {
+					diag: toDiagnostic(
+						new ShaderError('source', preset.file, `源文件 ${preset.file} 尚未载入`),
+						preset.label,
+					),
+					skippedDrafts,
+				};
+			}
+			// 草稿（清空/尚未写到 main）不是错误：跳过，保留上一版画面
+			if (!hasEntryPoint(src)) {
+				skippedDrafts.push(preset.file);
+				continue;
 			}
 			try {
 				const fragSrc = patchFragForWebGL2(src, preset.file);
@@ -186,10 +200,10 @@ export class VizRenderer {
 				this.programs[preset.id] = p;
 				this.locs[preset.id] = getSceneLocs(gl, p);
 			} catch (err) {
-				return toDiagnostic(err, preset.label);
+				return { diag: toDiagnostic(err, preset.label), skippedDrafts };
 			}
 		}
-		return null;
+		return { diag: null, skippedDrafts };
 	}
 
 	get ready(): boolean {

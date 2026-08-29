@@ -9,8 +9,12 @@
 /** preset 轮换周期：每个图形风格展示时长 */
 export const PRESET_SPAN_MS = 18000;
 
-/** 可视化 preset 数量（播放页全屏 10 风格，与 shader_src.h 同步） */
-export const PRESET_COUNT = 10;
+/**
+ * 可视化 preset 数量。手机端目前只打包一个场景（全屏极光 aurora.frag，
+ * 由 CMake 的 SHADER_SCENES 决定），其余场景只在 shader_playground 里调试。
+ * 需要与 cpp/CMakeLists.txt 的 SHADER_SCENES 条数同步。
+ */
+export const PRESET_COUNT = 1;
 
 export interface PresetSpan {
   index: number;

@@ -1,5 +1,10 @@
 /**
- * 与手机端 common/VisualizerCore.ets 完全等价的纯函数实现。
+ * 与手机端 VisualizerCore.ets / VisualizerView.ets 完全等价的纯函数实现。
+ * 设备端公式（VisualizerView 帧驱动）：
+ *   beat   = beatEnvelope(t, bpmFromSeed(seed), beatPhase)   // 裸值，无缩放
+ *   bass   = (spec[0] + spec[1]) / 2
+ *   treble = (spec[6] + spec[7]) / 2
+ * 唯一的工具差异：手动「触发节拍」叠加 beatBoost（设备无此输入）。
  * 改动这里任何系数之前，先确认与 ArkTS 侧保持一致。
  */
 
@@ -25,7 +30,7 @@ export function seedFromId(id: string): number {
 }
 
 export function bpmFromSeed(seed: number): number {
-	return 90 + Math.floor(hash01((seed + 0x5f3a) | 0) * 61);
+	return 90 + Math.floor(hash01(seed + 0x5f3a) * 61);
 }
 
 export function beatEnvelope(tMs: number, bpm: number, phase: number): number {
@@ -56,25 +61,19 @@ export function synthSpectrum(seed: number, tMs: number, count: number): number[
 /** 音乐律动合成器状态：播放时钟推进 + beat 脉冲衰减 + 每帧采样 */
 export class AudioSim {
 	seed = 12345678;
-	bpm = 120;
-	beatScale = 0.6;
-	bassScale = 0.55;
-	trebleScale = 0.5;
+	/** 由 seed 派生（与设备 bpmFromSeed 一致），不作为可调参数 */
+	bpm = bpmFromSeed(12345678);
 	/** 播放时钟（ms），暂停时不推进 */
 	playClock = 0;
-	/** 手动触发节拍叠加的脉冲量 */
+	/** 手动「触发节拍」叠加的脉冲量（设备无此输入） */
 	beatBoost = 0;
 	private beatPhase = 0;
 
 	setSeed(seed: number): void {
 		this.seed = seed >>> 0;
+		this.bpm = bpmFromSeed(this.seed);
 		this.beatPhase = (this.seed % 997) / 997;
 		this.playClock = 0;
-	}
-
-	/** bpm 等节拍参数变化时重置相位，避免相位跳变 */
-	resetPhase(): void {
-		this.beatPhase = 0;
 	}
 
 	/** 推进时钟并衰减 beatBoost；dtMs 为距上次调用的真实间隔 */
@@ -89,18 +88,13 @@ export class AudioSim {
 		this.beatBoost = Math.min(1, this.beatBoost + 0.6);
 	}
 
-	/** 当前帧的 beat/bass/treble，取值范围 [0,1] */
+	/** 当前帧的 beat/bass/treble，取值范围 [0,1]；公式与设备端一致（裸值） */
 	sample(): { beat: number; bass: number; treble: number } {
 		const t = this.playClock;
-		const beat = Math.min(
-			1,
-			beatEnvelope(t, this.bpm, this.beatPhase) * this.beatScale + this.beatBoost,
-		);
+		const beat = Math.min(1, beatEnvelope(t, this.bpm, this.beatPhase) + this.beatBoost);
 		const spec = synthSpectrum(this.seed, t, 8);
 		const low = (spec[0] ?? 0.04) + (spec[1] ?? 0.04);
 		const high = (spec[6] ?? 0.04) + (spec[7] ?? 0.04);
-		const bass = Math.min(1, (low / 2) * this.bassScale + this.beatBoost * 0.4);
-		const treble = Math.min(1, (high / 2) * this.trebleScale + this.beatBoost * 0.3);
-		return { beat, bass, treble };
+		return { beat, bass: low / 2, treble: high / 2 };
 	}
 }

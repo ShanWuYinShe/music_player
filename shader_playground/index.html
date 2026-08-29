@@ -9,22 +9,22 @@
 </head>
 <body>
   <div id="drop-overlay" aria-hidden="true">
-    <div class="drop-card">释放以载入着色器文件<span>.frag 填入场景槽 · .vert 替换顶点源</span></div>
+    <div class="drop-card">释放以替换<code id="drop-target">fractal.frag</code></div>
   </div>
 
   <header class="topbar">
     <div class="brand">
       <span class="logo">⬢</span>
       <span class="title">Shader Playground</span>
-      <span class="sub">music_player · 本地 shader 调试器</span>
+      <span class="sub">music_player 可视化调试</span>
     </div>
     <div class="topbar-actions">
       <label class="auto-reload">
         <input id="auto-reload" type="checkbox" checked />
-        <span>保存即重编</span>
+        <span>自动重编</span>
       </label>
       <button id="btn-reload" class="btn" title="从磁盘重新读取当前文件并编译">↻ 重读磁盘</button>
-      <button id="btn-reset" class="btn ghost" title="丢弃编辑器改动，回到本次页面加载时的磁盘版本">⤺ 还原磁盘</button>
+      <button id="btn-reset" class="btn ghost" title="丢弃编辑器改动，回到磁盘版本">⤺ 还原</button>
       <button id="btn-screenshot" class="btn ghost">📷 截图</button>
       <span class="status" id="status">就绪</span>
     </div>
@@ -32,73 +32,27 @@
 
   <main class="layout">
     <aside class="sidebar">
-      <div class="section">
-        <div class="section-title">着色器文件</div>
+      <section class="section">
+        <h2 class="section-title">预设</h2>
         <ul class="file-list" id="file-list"></ul>
-      </div>
+      </section>
 
-      <div class="section">
-        <div class="section-title">音乐律动参数</div>
+      <section class="section">
+        <h2 class="section-title">调试</h2>
         <div class="row">
           <label class="row-label" for="ctl-seed">seed</label>
           <input id="ctl-seed" type="range" min="0" max="4294967295" step="1" value="12345678" />
           <span class="row-value" id="val-seed">12345678</span>
         </div>
-        <div class="row">
-          <label class="row-label" for="ctl-bpm">bpm</label>
-          <input id="ctl-bpm" type="range" min="60" max="180" step="1" value="120" />
-          <span class="row-value" id="val-bpm">120</span>
-        </div>
-        <div class="row">
-          <label class="row-label" for="ctl-beat">beat 强度</label>
-          <input id="ctl-beat" type="range" min="0" max="100" step="1" value="60" />
-          <span class="row-value" id="val-beat">0.60</span>
-        </div>
-        <div class="row">
-          <label class="row-label" for="ctl-bass">bass</label>
-          <input id="ctl-bass" type="range" min="0" max="100" step="1" value="55" />
-          <span class="row-value" id="val-bass">0.55</span>
-        </div>
-        <div class="row">
-          <label class="row-label" for="ctl-treble">treble</label>
-          <input id="ctl-treble" type="range" min="0" max="100" step="1" value="50" />
-          <span class="row-value" id="val-treble">0.50</span>
-        </div>
-        <div class="row">
-          <label class="row-label" for="ctl-trans">transition</label>
-          <input id="ctl-trans" type="range" min="0" max="100" step="1" value="100" />
-          <span class="row-value" id="val-trans">1.00</span>
-        </div>
-        <div class="row buttons">
+        <div class="btn-row">
+          <button id="btn-random-seed" class="btn small">🎲 随机 seed</button>
           <button id="btn-tap-beat" class="btn small">🥁 触发节拍</button>
-          <button id="btn-random-seed" class="btn small ghost">🎲 随机 seed</button>
         </div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">渲染</div>
-        <div class="row">
-          <label class="row-label" for="ctl-scale">内部分辨率</label>
-          <input id="ctl-scale" type="range" min="30" max="100" step="5" value="67" />
-          <span class="row-value" id="val-scale">0.67×</span>
+        <div class="btn-row">
+          <button id="btn-pause" class="btn small wide">⏸ 暂停</button>
         </div>
-        <div class="row">
-          <label class="row-label" for="ctl-fps">目标帧率</label>
-          <input id="ctl-fps" type="range" min="15" max="60" step="1" value="30" />
-          <span class="row-value" id="val-fps">30</span>
-        </div>
-        <div class="row">
-          <label class="row-label" for="ctl-pause">暂停渲染</label>
-          <input id="ctl-pause" type="checkbox" />
-          <span class="row-value" id="val-pause">运行中</span>
-        </div>
-      </div>
-
-      <div class="section tips">
-        <div class="section-title">提示</div>
-        <p>把 <code>.frag</code> / <code>.vert</code> 文件拖进窗口即可试跑；
-           编辑只影响预览，不会写回磁盘。</p>
-      </div>
+        <p class="tips">拖入 <code>.frag</code> 替换当前预设，<code>.vert</code> 替换顶点着色器；改动只影响预览，不写回磁盘。</p>
+      </section>
     </aside>
 
     <section class="editor-pane">
@@ -119,25 +73,20 @@
     </section>
 
     <section class="canvas-pane">
-      <div class="canvas-header">
-        <span class="h-title">预览</span>
-        <span class="h-meta">
-          <span id="meta-fps">— fps</span>
-          <span class="sep">·</span>
-          <span id="meta-size">— × —</span>
-          <span class="sep">·</span>
-          <span id="meta-time">t=0.000 s</span>
-        </span>
+      <canvas id="gl" width="800" height="600"></canvas>
+      <div class="hud hud-top">
+        <span id="meta-fps">— fps</span>
+        <span class="sep"></span>
+        <span id="meta-size">— × —</span>
+        <span class="sep"></span>
+        <span id="meta-time">t=0.0s</span>
       </div>
-      <div class="canvas-wrap">
-        <canvas id="gl" width="800" height="800"></canvas>
-      </div>
-      <div class="canvas-footer">
-        <span class="legend">点击预览：切换 preset</span>
-        <span class="legend">1-4：直达</span>
-        <span class="legend">空格：暂停</span>
-        <span class="legend">S：截图</span>
-        <span class="legend">⌘S：编译</span>
+      <div class="hud hud-bottom">
+        <span>点击画面切换预设</span>
+        <span>1-4 直达</span>
+        <span>空格暂停</span>
+        <span>S 截图</span>
+        <span>⌘S 编译</span>
       </div>
     </section>
   </main>

@@ -76,6 +76,15 @@ const VERSION_RE = /^[ \t]*#version[^\n]*/;
 const PRECISION_RE = /^[ \t]*precision[ \t]+\w+[ \t]+\w+[ \t]*;[ \t]*/gm;
 const VARYING_RE = /^[ \t]*varying[ \t]+[^;\n]+;[ \t]*/gm;
 const APOS_RE = /^[ \t]*(?:attribute|in)[ \t]+vec2[ \t]+aPos[ \t]*;[ \t]*/gm;
+const MAIN_RE = /\bvoid[ \t]+main[ \t]*\(/;
+
+/**
+ * 草稿检测：编辑中被清空 / 还没写到 main() 的源码不算错误，
+ * 跳过编译并保留上一版 program（清空后报链接错误极不合理）。
+ */
+export function hasEntryPoint(src: unknown): boolean {
+	return typeof src === 'string' && MAIN_RE.test(src);
+}
 
 function requireString(src: unknown, what: string): string {
 	if (typeof src !== 'string') {

@@ -5,11 +5,14 @@
  * OnSurfaceCreated 创建 EGL 上下文与 GLES 3.0 管线；每次 displaySync
  * 回调经 NAPI 调 renderFrame(t, seed, playing) 同步渲染一帧。
  *
- * 渲染方式：全屏三角形（2 vertices, 4 个 gl_Vertex 由 glDrawArrays 展开，
- * 顶点阶段仅做全屏四边形覆盖——所有视觉全部在 fragment shader 逐像素
- * 解算，运算量只与像素数相关，与效果复杂度无关（参数驱动演化））。
- * 拖尾反馈：FBO 纹理 ping-pong，上一帧结果作为 uPrev 采样，domain warp/
- * 衰减全部在 fragment 内完成——逐像素精确，无分块或旋转矩形等伪影。
+ * 渲染方式：全屏三角形（3 顶点覆盖视口），顶点阶段只做全屏覆盖——
+ * 所有视觉在 fragment shader 逐像素解算，运算量只与像素数相关。
+ * 拖尾反馈：FBO 纹理 ping-pong，上一帧结果作为 uPrev 采样。
+ *
+ * shader 源码：磁盘上 cpp/shaders 目录下的 .frag 文件（GLSL ES 1.00，与
+ * shader_playground 预览同源），由 CMake 在构建期经
+ * tools/gen_shader_header.py 转成 GLES3 头文件 shader_src.h（生成到构建目录，
+ * 不进源码树）。每个场景一个 program，按 presetLock 切换。
  *
  * 参数：t(有效播放时钟 ms)、seed(曲目 id 派生)、playing(暂停分支)。
  */
@@ -40,8 +43,22 @@ EGLContext gEglContext = nullptr;
 EGLSurface gEglSurface = nullptr;
 EGLDisplay gEglDisplay = nullptr;
 
-GLuint gProgramScene = 0;
+/** 场景 uniform 位置缓存（每个场景 program 一套，避免每帧 glGetUniformLocation） */
+struct SceneLocs {
+    GLint t = -1;
+    GLint seed = -1;
+    GLint res = -1;
+    GLint beat = -1;
+    GLint bass = -1;
+    GLint treble = -1;
+    GLint transition = -1;
+    GLint prev = -1;
+};
+
+GLuint gProgramScene[kVizPresetCount] = {0};
+SceneLocs gLocs[kVizPresetCount];
 GLuint gProgramBlit = 0;
+GLint gBlitTex = -1;
 GLuint gVao = 0;
 GLuint gVbo = 0;
 
@@ -73,6 +90,34 @@ GLuint CompileShader(GLenum type, const char* src) {
         return 0;
     }
     return shader;
+}
+
+/** 链接一个 program 并缓存 uniform 位置；失败返回 0 */
+GLuint LinkProgram(GLuint vs, GLuint fs, SceneLocs* locs) {
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    GLint linked = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024] = {0};
+        glGetProgramInfoLog(prog, sizeof(log) - 1, nullptr, log);
+        OH_LOG_ERROR(LOG_APP, "[%s] link failed: %{public}s", LOG_TAG, log);
+        glDeleteProgram(prog);
+        return 0;
+    }
+    if (locs != nullptr) {
+        locs->t = glGetUniformLocation(prog, "uT");
+        locs->seed = glGetUniformLocation(prog, "uSeed");
+        locs->res = glGetUniformLocation(prog, "uRes");
+        locs->beat = glGetUniformLocation(prog, "uBeat");
+        locs->bass = glGetUniformLocation(prog, "uBass");
+        locs->treble = glGetUniformLocation(prog, "uTreble");
+        locs->transition = glGetUniformLocation(prog, "uTransition");
+        locs->prev = glGetUniformLocation(prog, "uPrev");
+    }
+    return prog;
 }
 
 void SwapFbo() {
@@ -153,40 +198,43 @@ void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // 临时候选：先编译最小 shader 验证管线（正式 shader 由 shader_src.h 提供）
+    // 顶点 shader 编译一次，供全部 program 复用
     GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
     if (!vs) {
+        OH_LOG_ERROR(LOG_APP, "[%s] vertex shader compile failed", LOG_TAG);
         return;
     }
-    GLuint fsScene = CompileShader(GL_FRAGMENT_SHADER, kFragScene);
+    // 每个场景一个 program（程序清单由 CMake 的 SHADER_SCENES 决定）
+    for (int i = 0; i < kVizPresetCount; i++) {
+        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragScene[i]);
+        if (!fs) {
+            OH_LOG_ERROR(LOG_APP, "[%s] scene %{public}d compile failed", LOG_TAG, i);
+            glDeleteShader(vs);
+            return;
+        }
+        gProgramScene[i] = LinkProgram(vs, fs, &gLocs[i]);
+        glDeleteShader(fs);
+        if (!gProgramScene[i]) {
+            glDeleteShader(vs);
+            return;
+        }
+    }
     GLuint fsBlit = CompileShader(GL_FRAGMENT_SHADER, kFragBlit);
-    if (!fsScene || !fsBlit) {
+    if (!fsBlit) {
+        glDeleteShader(vs);
         return;
     }
-    gProgramScene = glCreateProgram();
-    glAttachShader(gProgramScene, vs);
-    glAttachShader(gProgramScene, fsScene);
-    glLinkProgram(gProgramScene);
-    GLint linked = 0;
-    glGetProgramiv(gProgramScene, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        OH_LOG_ERROR(LOG_APP, "[%s] scene link failed", LOG_TAG);
+    gProgramBlit = LinkProgram(vs, fsBlit, nullptr);
+    if (!gProgramBlit) {
+        glDeleteShader(vs);
         return;
     }
-    gProgramBlit = glCreateProgram();
-    glAttachShader(gProgramBlit, vs);
-    glAttachShader(gProgramBlit, fsBlit);
-    glLinkProgram(gProgramBlit);
-    glGetProgramiv(gProgramBlit, GL_LINK_STATUS, &linked);
-    if (!linked) {
-        OH_LOG_ERROR(LOG_APP, "[%s] blit link failed", LOG_TAG);
-        return;
-    }
+    gBlitTex = glGetUniformLocation(gProgramBlit, "uTex");
     glDeleteShader(vs);
-    glDeleteShader(fsScene);
     glDeleteShader(fsBlit);
     gReady = true;
-    OH_LOG_INFO(LOG_APP, "[%s] GLES init ok, size=%{public}dx%{public}d", LOG_TAG, gWidth, gHeight);
+    OH_LOG_INFO(LOG_APP, "[%s] GLES init ok, size=%{public}dx%{public}d, presets=%{public}d",
+        LOG_TAG, gWidth, gHeight, kVizPresetCount);
 }
 
 void VizOnSurfaceChanged(OH_NativeXComponent* component, void* window) {
@@ -223,6 +271,11 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     if (gEglDisplay == EGL_NO_DISPLAY || !eglMakeCurrent(gEglDisplay, gEglSurface, gEglSurface, gEglContext)) {
         return;
     }
+    // 场景选择：presetLock 越界时回落 0（ArkTS 保证 0..kVizPresetCount-1）
+    int idx = static_cast<int>(presetLock + 0.5);
+    if (idx < 0 || idx >= kVizPresetCount) {
+        idx = 0;
+    }
     // 内部目标分辨率: 显示 1/2(移动 GPU fragment 负载减 4 倍,上屏放大柔化)
     gRenderW = gWidth / 2;
     gRenderH = gHeight / 2;
@@ -240,36 +293,26 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     glBindVertexArray(gVao);
     // pass A：场景 + 反馈拖尾 -> 当前 FBO 纹理（采样另一张上一帧纹理）
     glBindFramebuffer(GL_FRAMEBUFFER, gFbo[gFlip]);
-    glUseProgram(gProgramScene);
-    GLint uT = glGetUniformLocation(gProgramScene, "uT");
-    GLint uSeed = glGetUniformLocation(gProgramScene, "uSeed");
-    GLint uRes = glGetUniformLocation(gProgramScene, "uRes");
-    GLint uBeat = glGetUniformLocation(gProgramScene, "uBeat");
-    GLint uBass = glGetUniformLocation(gProgramScene, "uBass");
-    GLint uTreble = glGetUniformLocation(gProgramScene, "uTreble");
-    GLint uPrev = glGetUniformLocation(gProgramScene, "uPrev");
-    glUniform1f(uT, static_cast<float>(t));
-    glUniform1f(uSeed, static_cast<float>(seed));
-    glUniform2f(uRes, static_cast<float>(gRenderW), static_cast<float>(gRenderH));
-    glUniform1f(uBeat, static_cast<float>(beat));
-    glUniform1f(uBass, static_cast<float>(bass));
-    glUniform1f(uTreble, static_cast<float>(treble));
-    GLint uPresetSel = glGetUniformLocation(gProgramScene, "uPresetSel");
-    glUniform1f(uPresetSel, static_cast<float>(presetLock));
-    GLint uTransition = glGetUniformLocation(gProgramScene, "uTransition");
-    glUniform1f(uTransition, static_cast<float>(transition));
+    glUseProgram(gProgramScene[idx]);
+    const SceneLocs& loc = gLocs[idx];
+    glUniform1f(loc.t, static_cast<float>(t));
+    glUniform1f(loc.seed, static_cast<float>(seed));
+    glUniform2f(loc.res, static_cast<float>(gRenderW), static_cast<float>(gRenderH));
+    glUniform1f(loc.beat, static_cast<float>(beat));
+    glUniform1f(loc.bass, static_cast<float>(bass));
+    glUniform1f(loc.treble, static_cast<float>(treble));
+    glUniform1f(loc.transition, static_cast<float>(transition));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
-    glUniform1i(uPrev, 0);
+    glUniform1i(loc.prev, 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     // pass B：反馈帧 -> 屏幕(全尺寸, GPU 拉伸)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, gWidth, gHeight);
     glUseProgram(gProgramBlit);
-    GLint uTex = glGetUniformLocation(gProgramBlit, "uTex");
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[gFlip]);
-    glUniform1i(uTex, 0);
+    glUniform1i(gBlitTex, 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
     SwapFbo();

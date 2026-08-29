@@ -1,7 +1,7 @@
 /**
- * 全局文件拖拽：把 .frag / .vert 文件从 Finder 拖进窗口即可载入预览。
- * 旧版页面没有 preventDefault，拖文件进来浏览器会直接打开文件内容，
- * 这里统一接管并以遮罩提示落点。
+ * 全局文件拖拽：把着色器文件从 Finder 拖进窗口即**替换当前目标**。
+ * 语义是替换而非追加——一次只取拖入的第一个文件，避免多文件依序
+ * 填槽导致的"改了别的文件"错乱；目标文件名显示在遮罩上。
  */
 
 export interface LoadedFile {
@@ -12,7 +12,9 @@ export interface LoadedFile {
 export interface DndOptions {
 	/** 拖拽悬停时显示/隐藏遮罩 */
 	overlay: HTMLElement;
-	onFiles(files: LoadedFile[]): void;
+	/** 遮罩上展示的将被替换的目标文件名（随当前选中项变化） */
+	getTargetName(): string;
+	onFile(file: LoadedFile): void;
 }
 
 function isShaderFile(name: string): boolean {
@@ -21,6 +23,7 @@ function isShaderFile(name: string): boolean {
 
 export function installDnd(opts: DndOptions): () => void {
 	const { overlay } = opts;
+	const targetEl = overlay.querySelector<HTMLElement>('#drop-target');
 	let depth = 0;
 
 	const hasFiles = (e: DragEvent): boolean =>
@@ -30,6 +33,7 @@ export function installDnd(opts: DndOptions): () => void {
 		if (!hasFiles(e)) return;
 		e.preventDefault();
 		depth++;
+		if (targetEl) targetEl.textContent = opts.getTargetName();
 		overlay.classList.add('visible');
 	};
 
@@ -51,11 +55,12 @@ export function installDnd(opts: DndOptions): () => void {
 		e.preventDefault();
 		depth = 0;
 		overlay.classList.remove('visible');
-		const files = Array.from(e.dataTransfer?.files ?? []).filter((f) => isShaderFile(f.name));
-		if (files.length === 0) return;
+		const first = Array.from(e.dataTransfer?.files ?? []).find((f) => isShaderFile(f.name));
+		if (!first) return;
 		// drop 事件处理器返回前 File 对象同步可读，先取文本再回调
-		Promise.all(files.map(async (f) => ({ name: f.name, text: await f.text() })))
-			.then((loaded) => opts.onFiles(loaded))
+		first
+			.text()
+			.then((text) => opts.onFile({ name: first.name, text }))
 			.catch((err: unknown) => {
 				console.error('读取拖入文件失败', err);
 			});

@@ -11,10 +11,10 @@ export interface Preset {
 }
 
 export const PRESETS: Preset[] = [
-	{ id: 0, file: 'fractal.frag', name: 'fractal', label: '分形漩涡', color: '#ff7a59' },
-	{ id: 1, file: 'pan.frag', name: 'pan', label: '炒锅水珠', color: '#5db7ff' },
-	{ id: 2, file: 'aurora.frag', name: 'aurora', label: '极光', color: '#7af0a4' },
-	{ id: 3, file: 'mirror.frag', name: 'mirror', label: '镜屋', color: '#c39bff' },
+	{ id: 0, file: 'fractal.frag', name: 'fractal', label: '无限分形', color: '#ff7a59' },
+	{ id: 1, file: 'pan.frag', name: 'pan', label: '热锅水珠', color: '#5db7ff' },
+	{ id: 2, file: 'aurora.frag', name: 'aurora', label: '全屏极光', color: '#7af0a4' },
+	{ id: 3, file: 'mirror.frag', name: 'mirror', label: '无尽镜渊', color: '#c39bff' },
 ];
 
 export const VERT_FILE = 'visualizer.vert';

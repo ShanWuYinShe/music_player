@@ -3,6 +3,7 @@ import { ShaderError } from '../src/errors';
 import {
 	BLIT_HEADER_LINES,
 	FRAG_HEADER_LINES,
+	hasEntryPoint,
 	patchBlitForWebGL2,
 	patchFragForWebGL2,
 	patchVertForWebGL2,
@@ -128,5 +129,22 @@ describe('patchVertForWebGL2 / patchBlitForWebGL2', () => {
 		expect(out).toContain('texture(uTex, vUV)');
 		expect(bodyAfter(out, 'out vec4 fragColor;\n')).not.toContain('uniform sampler2D uTex;');
 		expect(bodyAfter(out, 'out vec4 fragColor;\n')).not.toContain('texture2D');
+	});
+});
+
+describe('hasEntryPoint 草稿检测', () => {
+	test('含 void main 判为可编译', () => {
+		expect(hasEntryPoint('void main() {}')).toBe(true);
+		expect(hasEntryPoint('void  main ( ) {}')).toBe(true);
+		expect(hasEntryPoint(FRAG_SRC)).toBe(true);
+	});
+
+	test('空串 / 注释 / 非字符串判为草稿', () => {
+		expect(hasEntryPoint('')).toBe(false);
+		expect(hasEntryPoint('   \n\t')).toBe(false);
+		expect(hasEntryPoint('// 只写了注释')).toBe(false);
+		expect(hasEntryPoint('void mainLoop() {}')).toBe(false);
+		expect(hasEntryPoint(undefined)).toBe(false);
+		expect(hasEntryPoint(null)).toBe(false);
 	});
 });
