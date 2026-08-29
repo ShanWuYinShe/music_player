@@ -122,6 +122,12 @@ vec3 toneExp(vec3 col, float exposure) {
     return 1.0 - exp(-col * exposure);
 }
 
+// ACES 电影感近似（Narkowicz）：HDR 线性 → 展示色。高亮滚降比 toneExp
+// 柔和，超亮区域向白过渡而不是钳成色块——照片感的关键一环
+vec3 filmic(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
 // 抖动去色带；fragPx 传 vUV*uRes（像素坐标），ts 为秒
 vec3 dither(vec2 fragPx, float ts) {
     return vec3((hash21(fragPx + fract(ts) * 7.0) - 0.5) * (1.5 / 255.0));

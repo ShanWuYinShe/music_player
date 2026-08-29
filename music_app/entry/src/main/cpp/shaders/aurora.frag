@@ -1,265 +1,250 @@
-// aurora.frag：结构化极光（直绘帘幕 × 弱反馈柔化）。
+// aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
-// 重制对照（旧版"美不起来"的根源）：
-//   旧版把帘幕当"注入源"全靠 fbm 反馈流糅合成像——结果是紫粉色的雾，
-//   极光的所有标志性结构都被反馈抹掉了。真实极光的辨识度来自：
-//     1. 帘幕剖面：下缘最亮且锐利（电子沉降密度峰值高度），向上指数
-//        衰减散开——不是对称的光带，是"一边刀口一边渐隐"的帘；
-//     2. 垂直光柱（rays）：沿磁力线的精细条纹，帘不是均匀发光体；
-//     3. 褶皱增亮（folds）：帘面波浪翻卷，折叠处视线穿过更厚发光层
-//        → 亮度 ∝ √(1+slope²)，亮弧沿帘跑；
-//     4. 颜色稳定：氧绿 557.7nm 为主（不是彩虹！），上缘氧红 630nm
-//        紫红过渡，活跃时下缘闪氮蓝紫；颜色稳、形态变，才高级；
-//     5. 纵深：多条帘前后叠——远帘暗、小、慢、偏蓝（大气透视），
-//        近帘亮、大、快；
-//     6. 偶发爆发（substorm）：慢噪声过阈值时整帘增亮 + 翻卷提速，
-//        持续几秒衰减——"等什么"的期待感是持续观看欲的核心。
+// v3 相对 v2 的"照片感"差距清单（v2 是结构对的"插画"，v3 按实拍照片逐项补）：
+//   1. 发射谱而不是色轮：557.7nm 氧绿 (0.28,1.0,0.42) 是唯一主体色；
+//      630nm 氧红是**更高海拔的独立发光层**（沿同一条磁力线向上抬升、
+//      更宽更慢——不是对绿光插值)；N2+ 粉紫只在活跃下缘以亮线形态出现
+//      （picket fence）。颜色稳、形态变——真实极光从不彩虹。
+//   2. 磁天顶汇聚：所有光柱沿"汇聚到磁天顶的直线族"分布（摄影里放射状
+//      收敛的铁轨透视，极光照片的身份证）。光柱坐标 az = atan(q-apex)，
+//      同一条线上 az 恒定 → 条纹自动沿场线拉直、向天顶收拢。
+//   3. 动态范围：下缘亮线与英雄光柱按 HDR 叠加（单帘峰值可到 3+），
+//      经 ACES 滚降——亮而不溢，暗部仍有结构。
+//   4. 光柱幂律亮度：pow(hash,3.2) 少数英雄柱 + 大量暗柱，亮度差跨一个
+//      数量级（实拍里帘幕永远是有主次的，不是均匀亮带）。
+//   5. 下缘锐利：d² 型亮线（σ≈0.008）贴着帘幕基线，活跃时沿亮线泛粉。
+//   6. 深度堆叠：远帘暗/细/偏蓝（瑞利散射）/慢，近帘亮/宽/快，线性叠加
+//      自然产生纵深。
+//   7. 摄影"后期链"：ACES → 天光底色（夜空不是纯黑）→ 亮度加权胶片颗粒
+//      （暗部颗粒重）→ 轻暗角。星空/银河/山脊是"锚"，帘幕再亮也盖不穿。
+//   8. 行为：wander 慢相位驱动"平静帘 ↔ 活跃爆发"（substorm），爆发时
+//      英雄柱增益×3、下缘泛粉、褶皱幅度抬升；beat/bass/treble 只进亮度/
+//      幅度/闪烁，永不进速度与色相。
 //
-// 成像分工：帘幕全部直绘（每帧重建清晰结构），反馈流只负责柔化边缘
-// 与风场糅合感（短拖尾、弱注入、亮度自适应衰减防积雾——对比度命门）。
-// 星空/银河/山脊直绘保持清晰（静的锚点），不被帘光吞掉。
-//
-// 公共函数（hash/vn/fbm/rot/hue2rgb/satBoost/toneExp/dither）由工具链从
-// common.glsl 注入，不要在本文件重复定义。
+// 公共函数（hash/vn/fbm/wander/rot/filmic/dither/…）由工具链从 common.glsl
+// 注入，不要在本文件重复定义。
 
-// ---- 反馈流（降级为柔化辅助）------------------------------------------------
-const float DECAY_BASE = 0.935;      // 反馈衰减基准（短拖尾，别糊住直绘结构）
-const float LUMA_FADE = 0.50;        // 亮度自适应衰减：亮雾褪得快、夜空保持暗
-const float WARP_LO = 0.0012;        // 流场扭曲幅度区间（风，弱）
-const float WARP_HI = 0.0040;
-const float ZOOM_IN = -0.006;        // 缩放率区间（比旧版收敛，减少"吸入感"）
-const float ZOOM_OUT = 0.003;
-const float ROT_AMP = 0.006;
-const float DRIFT_X_AMP = 0.0016;    // 整体平流（风）幅度
-const float DRIFT_Y_AMP = 0.0026;
-const float CHROMA_IN = 0.9980;      // RGB 微差异采样 → 色散（微量）
-const float CHROMA_OUT = 1.0020;
-const float EDGE_FADE_LO = 0.78;
-const float EDGE_FADE_HI = 1.32;
-const float EDGE_DARKEN = 0.90;
+// ---- 反馈（只做轻柔光晕余晖，不参与结构）--------------------------------
+const float FB_GAIN = 0.20;         // 反馈增益（>0.35 会拖泥带水盖过直绘）
+const float FB_ZOOM = 1.004;        // 采样微胀——余晖微微向外晕开
+const float FB_CHROMA = 0.0009;     // 极轻色散（镜头感）
 
-// ---- 游走焦点 -------------------------------------------------------------
-const vec2 FOCUS_WANDER_1 = vec2(0.083, 0.071);
-const vec2 FOCUS_WANDER_2 = vec2(0.027, 0.037);
-const float FOCUS_AMP_1 = 0.14;
-const float FOCUS_AMP_2 = 0.05;
+// ---- 磁天顶（光柱汇聚点，屏幕上方外侧，慢游走）----------------------------
+const vec2 APEX_BASE = vec2(0.02, 0.90);   // 场景坐标（sceneUV 系）；
+                                            //   离屏顶近 → 放射汇聚更明显
+const vec2 APEX_WANDER = vec2(0.13, 0.11);
 
 // ---- 帘幕结构 --------------------------------------------------------------
-const int CURTAIN_COUNT = 4;         // 1 远 + 3 近，纵深分层
-// 基线范围按竖屏可视区标定（q.y ∈ 约 −0.42~0.58）：
-// 最低帘沉到下 1/3，最高帘贴画面上缘——四条帘铺满全屏纵深
-const float BASE_Y_LO = -0.28;
-const float BASE_Y_HI = 0.40;
-const float BASE_Y_WANDER = 0.05;    // 基线慢漂移幅度
-const float FBM_CURVE = 0.28;        // 大尺度 fbm 弧（帘的整体走势）
-const float WOB1_AMP = 0.060;        // 行波褶皱 1（大波）
-const float WOB2_AMP = 0.034;        // 行波褶皱 2（小波，反向）
-const float PROFILE_BELOW = 26.0;    // 下缘锐度（刀口）
-const float PROFILE_ABOVE = 3.2;     // 向上衰减（帘体散开）
-const float EDGE_SHARP = 55.0;       // 下缘亮线锐度
-const float FOLD_GAIN = 8.0;         // 褶皱增亮强度（√(1+k·slope²)）
-const float RAY_FREQ = 14.0;         // 光柱条纹空间频率基数（近帘）
-const float RAY_DRIFT = 0.35;        // 光柱沿帘漂移速度
-const float INJECT_EDGE = 0.016;     // 注入反馈的亮线强度（弱：只供糅合）
-const float INJECT_BODY = 0.003;
-const float INJECT_LUM_REF = 0.40;   // 注入色亮度归一（色轮相位固有亮度差）
+const int CURTAIN_N = 4;
+const float BASE_Y_LO = -0.190;     // 帘幕基线区间（竖屏 q.y ∈ −0.42~0.58）
+const float BASE_Y_HI = 0.360;
+const float ARC_GAIN = 0.30;        // 大尺度弧（帘的整体走势）
+const float WOB_AMP = 0.050;        // 行波褶皱幅度（叠加两波）
+const float BODY_H = 0.145;         // 帘体向上指数衰减高度
+const float BORDER_W = 0.0035;      // 下缘亮线 σ（极锐！且下方不对称更快截止）
+const float RED_LIFT = 0.135;       // 氧红层相对绿层的抬升量
+const float RED_H_K = 2.3;          // 氧红层衰减高度 = BODY_H × K（更宽）
+const float RAY_FREQ = 92.0;        // 光柱角向频率（az 跨度约 0.27 rad）
+const float RAY_DRIFT = 0.090;      // 光柱沿帘漂移
+const float BODY_GAIN = 0.85;       // 帘体增益
+const float EDGE_GAIN = 4.20;       // 下缘亮线增益（帘幕最亮元素，实拍里
+                                    //   最抢眼的就是这条线——宁亮勿暗）
+const float WIDE_GAIN = 0.16;       // 宽尺度环境光晕（镜头 bloom 的解析近似）
 
-// ---- 颜色（稳定，慢漂收窄）---------------------------------------------------
-const float HUE_GREEN = 0.66;        // 氧绿主锚（hue2rgb 色轮）
-const float HUE_RED = 0.97;          // 上缘氧红（紫红）
-const float HUE_NITROGEN = 0.30;     // 氮蓝紫（活跃下缘）
-const float RED_EDGE_MAX = 0.95;     // 上缘红过渡的最大占比（随时间演化）
-const float HUE_DRIFT_AMP = 0.030;   // 色相慢漂幅度（收窄！彩虹漂移是旧版
-                                     //   "塑料感"的根源，真实极光颜色很稳）
+// ---- 发射谱色（线性 HDR）----------------------------------------------------
+const vec3 EMIT_GREEN = vec3(0.300, 1.000, 0.450);  // OI 557.7nm（略偏青消霓虹感）
+const vec3 EMIT_RED = vec3(1.000, 0.180, 0.100);    // OI 630.0nm 暗红（高层）
+const vec3 EMIT_PINK = vec3(1.000, 0.520, 0.720);   // N2+ 活跃下缘（picket）
+const float RED_BASE = 0.10;        // 氧红常驻量（有，但淡）
+const float RED_ACT = 0.40;         // 活跃时氧红增强量
 
-// ---- 爆发（substorm）---------------------------------------------------------
-const float BURST_RATE = 0.035;      // 爆发驱动噪声速率（~30s 一格）
-const float BURST_LO = 0.60;         // 触发阈值区间
-const float BURST_HI = 0.82;
-const float BURST_GAIN = 1.6;        // 爆发时整帘增亮倍数上限
+// ---- 行为相位 --------------------------------------------------------------
+const float ACT_SCALE = 71.0;       // substorm 慢相位（秒/格）
+const float SURGE_RATE = 0.10;      // 沿帘扫过的增亮波（空间频率系，速度恒定）
 
-// ---- 背景元素 ----------------------------------------------------------------
-const float MW_FALLOFF = 3.2;        // 银河斜带宽度
-const float RIDGE_BASE = -0.40;      // 山脊基线（贴着画面下缘，旧版 −0.72
-                                     //   在竖屏可视区外 = 没有地面锚点）
-const float RIDGE_AMP = 0.07;
-const float AIRGLOW = 0.07;          // 地平线大气辉光（淡绿）
-
-// ---- 收尾 ---------------------------------------------------------------------
-const float TONE_EXPOSURE = 0.95;
-const float VIGNETTE = 0.26;
+// ---- 背景 ------------------------------------------------------------------
+const vec3 SKY_ZENITH = vec3(0.010, 0.016, 0.030);
+const vec3 SKY_HORIZON = vec3(0.030, 0.042, 0.062);
+const float MW_GAIN = 0.55;
+const float RIDGE_FAR_Y = -0.335;
+const float RIDGE_NEAR_Y = -0.435;
 const float SEED_SPREAD = 173.0;
 
-// 星空层：S 密度，thresh 阈值，tw 闪烁相速
-vec3 stars(vec2 q, float S, float thresh, float tw, float ts) {
+// 星层：幂律亮度 + 温度色 + 亮星衍射星芒（摄影衍射Artifact，加一点就够）
+vec3 starLayer(vec2 q, float S, float thresh, float ts, float sd) {
     vec2 cell = floor(q * S);
     vec2 pos = fract(q * S) - 0.5;
     float h = hash21(cell);
     if (h < thresh) return vec3(0.0);
-    vec2 off = (vec2(hash21(cell + 7.0), hash21(cell + 13.0)) - 0.5) * 0.7;
-    float d2 = dot(pos - off, pos - off);
-    float twk = 0.55 + 0.45 * sin(ts * tw + h * 40.0);
-    float star = exp(-d2 * 220.0) * twk;
-    return vec3(0.9, 0.93, 1.0) * star * (0.4 + 0.6 * hash21(cell + 29.0));
+    vec2 off = (vec2(hash21(cell + 7.1), hash21(cell + 13.3)) - 0.5) * 0.72;
+    vec2 sp = pos - off;
+    float d2 = dot(sp, sp);
+    float mag = pow(hash21(cell + 29.7), 7.0);   // 幂律：绝大多数肉眼刚可辨
+    float twk = 0.72 + 0.28 * sin(ts * (1.3 + 2.6 * hash21(cell + 3.3))
+        + hash21(cell + 5.5) * 40.0);
+    float star = exp(-d2 * 250.0) * mag * twk;
+    // 最亮的一撮加十字星芒
+    float spike = step(0.965, hash21(cell + 41.0));
+    star += spike * mag * 0.22 * exp(-d2 * 60.0)
+        * (exp(-abs(sp.x) * 30.0) + exp(-abs(sp.y) * 30.0));
+    float tt = hash21(cell + 61.0);
+    vec3 sc = mix(vec3(1.0, 0.80, 0.62), vec3(0.70, 0.80, 1.0), tt);
+    sc = mix(vec3(0.94, 0.95, 1.0), sc, 0.7);
+    return sc * star;
 }
 
-// 帘幕层 i：返回颜色，prof/edge 输出供注入复用。
-// depth：0=最远（暗、小、慢、偏蓝）→ 1=最近（亮、大、快）。
-vec3 curtain(vec2 q, float fi, float ts, float sd, float depth,
-    float bassSway, float burst, float hueBase,
-    out float prof, out float edge) {
+// 帘幕层：返回线性 HDR 发射量。depth 0=最远 → 1=最近。
+// out wideEnv：宽尺度环境光晕（bloom 解析近似），主循环外统一收。
+vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
+    float act, float beatG, out float wideEnv) {
     float h1 = hash11(fi * 3.77 + sd);
     float h2 = hash11(fi * 7.31 + sd + 5.0);
     float h3 = hash11(fi * 11.9 + sd + 13.0);
 
-    // 基线：纵贯分布 + 慢漂移；近帘摆动幅度大
-    float span = mix(0.55, 1.5, depth);
-    float baseY = mix(BASE_Y_LO, BASE_Y_HI, fi / float(CURTAIN_COUNT - 1))
-        + BASE_Y_WANDER * sin(ts * (0.05 + 0.03 * h2) + fi * 2.2);
+    float span = mix(0.62, 1.55, depth);
 
-    // 大尺度弧（帘的整体走势，fbm 缓变）+ 两条反向行波褶皱；
-    // 爆发时褶皱提速（翻卷加剧）
-    float wobSpeed = (0.5 + bassSway) * (1.0 + 0.8 * burst);
-    float k1 = 2.2 + 1.0 * h2;
-    float k2 = 4.7 + 1.5 * h1;
-    float ph1 = q.x * k1 - ts * (0.25 + 0.20 * h3) * wobSpeed + fi;
-    float ph2 = q.x * k2 + ts * (0.16 + 0.15 * h2) * wobSpeed + fi * 2.4;
-    float yc = baseY
-        + (fbm(vec2(q.x * (0.5 + 0.3 * h1) + fi * 7.0, ts * 0.02)) - 0.5)
-            * FBM_CURVE * span
-        + (WOB1_AMP * sin(ph1) + WOB2_AMP * sin(ph2)) * span * bassSway;
+    // 基线：纵贯分布 + 大尺度 fbm 弧（帘的走势，慢）
+    float baseY = mix(BASE_Y_LO, BASE_Y_HI, fi / float(CURTAIN_N - 1))
+        + 0.04 * sin(ts * 0.05 + fi * 2.2 + h2 * 6.28);
+    float yc = baseY + (fbm(vec2(q.x * (0.7 + 0.5 * h1) + fi * 7.7,
+        ts * 0.014 + sd)) - 0.5) * ARC_GAIN * span;
+    // 行波褶皱（速度恒定；幅度随活跃度抬升——不是速度）+ 高频小荷叶边
+    // （实拍下缘永远有细碎的褶——"帘"的质感来源）
+    float wobA = WOB_AMP * span * (0.55 + 0.75 * act);
+    yc += wobA * sin(q.x * (2.3 + 1.1 * h2) - ts * (0.26 + 0.16 * h3) + fi * 2.1);
+    yc += wobA * 0.55 * sin(q.x * (4.9 + 1.6 * h1) + ts * (0.17 + 0.12 * h2) + fi * 4.7);
+    yc += 0.0045 * span * sin(q.x * (16.0 + 5.0 * h1) + ts * 0.55 + fi * 9.0);
+
+    // 水平存在感：帘有缺口/进退（画面不是均匀被帘铺满；低频 → 大段缺口）
+    // （性能：低频信号用 2 个单倍频 vn 拼而非 4 倍频 fbm）
+    float presence = smoothstep(0.38, 0.62,
+        0.6 * vn(vec2(q.x * 0.55 + fi * 11.0, ts * 0.010 + sd * 0.7))
+        + 0.4 * vn(vec2(q.x * 1.7 + fi * 3.0, ts * 0.017 + sd * 1.9)));
+
+    // 光柱：az 恒定的直线族 → 条纹沿磁力线拉直并向天顶收拢。
+    // 三层：暗柱铺底（覆盖）+ 英雄柱（幂律）+ 针状细光线（高频高次幂——
+    // 实拍里帘幕总有几根扎眼的细亮线，其余是刚可辨的背景柱）
+    float rf = fbm(vec2(az * RAY_FREQ + ts * RAY_DRIFT * (0.6 + 0.5 * h2)
+        + fi * 17.0, fi * 3.1 + sd));
+    float rays = 0.08 + 0.92 * pow(rf, 2.2);
+    float hero = pow(rf, 3.0) * (0.9 + 2.8 * act);
+    float needles = pow(fbm(vec2(az * RAY_FREQ * 2.7
+        + ts * RAY_DRIFT * 1.35 + fi * 23.0, fi * 6.7 + sd)), 9.0)
+        * (0.9 + 2.6 * act);
+    float flick = 0.84 + 0.16 * sin(ts * (2.6 + 2.2 * h3) + az * 240.0
+        + fi * 5.0 + uTreble * 5.0);
+
+    // 剖面：d>0 帘体指数衰减 + 宽光晕；d≈0 下缘亮线（d² 型；线下方
+    // 截止更快——σ 收 0.35 倍，实拍里线下方几乎是断崖）
     float d = q.y - yc;
+    float dd = max(d, 0.0);
+    float H = BODY_H * mix(1.30, 1.0, depth) * (0.85 + 0.30 * h2);
+    float body = exp(-dd / H) * presence;
+    float sig = d < 0.0 ? BORDER_W * 0.35 : BORDER_W;
+    // 亮线的水平断口比帘体更强（presence²）：实拍亮线常整段消失再出现
+    float border = exp(-d * d / (2.0 * sig * sig)) * presence * presence;
+    wideEnv = exp(-dd / (H * 3.0)) * presence;
 
-    // 褶皱增亮：视线穿过倾斜帘面的路径更长（fbm 缓坡忽略，取行波解析斜率）
-    float slope = (WOB1_AMP * k1 * cos(ph1) + WOB2_AMP * k2 * cos(ph2))
-        * span * bassSway;
-    float fold = sqrt(1.0 + slope * slope * FOLD_GAIN);
+    // 沿帘扫过的增亮波（速度恒定的行波，由慢噪声选通——爆发期更频繁）
+    float surge = smoothstep(0.60, 0.85,
+        vn(vec2(q.x * 1.4 - ts * SURGE_RATE + fi * 7.0, sd + 3.0))) * act;
 
-    // 剖面：下缘刀口（d<0 陡降）+ 向上散开（d>0 指数衰减）
-    prof = mix(exp(-d * (PROFILE_ABOVE + 1.5 * h3)), exp(d * PROFILE_BELOW),
-        step(d, 0.0));
+    // 强度（HDR，近帘为基准）
+    float dk = mix(0.30, 1.0, depth);
+    float bI = body * (rays + hero * 0.55 + needles * 1.1) * flick
+        * (1.0 + 0.7 * surge);
+    float eI = border * (0.75 + 0.60 * rf) * (1.0 + 1.8 * act * rf + 1.2 * surge);
 
-    // 垂直光柱：沿帘切向的高频条纹，随时间漂移 + treble 闪烁；
-    // 远帘条纹更细密（透视缩小）。pow 拉对比——真极光是亮柱与暗隙
-    // 分明的"琴键"，软 fbm 糊成一片就没有帘感
-    float rayFreq = RAY_FREQ * mix(1.7, 1.0, depth) * (0.8 + 0.5 * h1);
-    float r1 = fbm(vec2(q.x * rayFreq + ts * RAY_DRIFT * (0.5 + h2) + fi * 13.0,
-        yc * 3.0));
-    float rays = pow(r1, 1.5) * 1.35;
-    rays *= 0.75 + 0.25 * sin(q.x * rayFreq * 4.0 + ts * 2.0 + fi
-        + uTreble * 3.0);
-    prof *= rays * fold;
-    edge = exp(-abs(d) * EDGE_SHARP) * rays * fold;
-
-    // 颜色：下缘亮绿 → 中部翠绿 → 上缘紫红。
-    // 氧红 630nm 物理上是更高海拔的**独立发光层**：必须叠加而非插值——
-    // 插值会把亮绿换成暗红（红相固有色度低），等于"上缘变脏"而不是泛红
-    float redK = RED_EDGE_MAX * (0.4 + 0.6 * h2)
-        * (0.5 + 0.5 * sin(ts * 0.010 + sd * 1.3 + fi));
-    vec3 cGreen = hue2rgb(hueBase + 0.02 * h2);
-    vec3 cc = cGreen;
-    float redLayer = smoothstep(0.08, 0.35, d) * exp(-d * 2.2) * redK;
-    cc += hue2rgb(HUE_RED + HUE_DRIFT_AMP * h1) * redLayer * 1.3;
-    // 爆发时下缘闪氮蓝紫；远帘整体偏蓝（大气透视）
-    cc += hue2rgb(HUE_NITROGEN) * exp(-abs(d) * 80.0) * burst * 0.35;
-    cc = mix(cc, cc * vec3(0.55, 0.65, 1.05), (1.0 - depth) * 0.5);
-    // 纵深：远帘压暗
-    cc *= mix(0.28, 1.0, depth);
-    // 下缘亮线更艳
-    cc += cGreen * edge * 0.9 * mix(0.5, 1.0, depth);
-    return cc;
+    vec3 emis = EMIT_GREEN * bI * BODY_GAIN * dk * beatG;
+    emis += EMIT_GREEN * eI * EDGE_GAIN * dk * beatG;
+    // 氧红：抬升 + 变宽的独立层（沿同一批磁力线；高频被高空扩散抹平，
+    // 所以光柱图案直接复用绿层的 rf，不再单独造一份）
+    float dr = d - RED_LIFT * span;
+    float red = exp(-max(dr, 0.0) / (H * RED_H_K)) * presence
+        * (0.55 + 0.45 * rf);
+    emis += EMIT_RED * red * (RED_BASE + RED_ACT * act)
+        * (0.5 + 0.9 * h2) * dk * beatG;
+    // N2+ 粉紫：只挂在活跃期的下缘亮线上
+    emis += EMIT_PINK * eI * act * 0.34 * dk * beatG;
+    // 远帘偏蓝（大气散射）+ 已由 dk 压暗
+    emis = mix(emis * vec3(0.60, 0.72, 1.15), emis, depth);
+    return emis;
 }
 
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
-    float aspect = aspectRatio();
-    float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
     vec2 q = sceneUV(vec2(0.5, 0.42));
+    float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 
-    // ---- 行为演化相位（全部连续慢漂，速率不可通约）----
-    float storm = 0.5 + 0.5 * sin(ts * 0.021 + sd);
-    float zoomK = 1.0 + mix(ZOOM_IN, ZOOM_OUT, 0.5 + 0.5 * sin(ts * 0.013 + sd * 1.7));
-    float rotA = ROT_AMP * sin(ts * 0.017 + sd * 2.3);
-    vec2 wind = vec2(DRIFT_X_AMP * sin(ts * 0.016 + sd * 4.1),
-        DRIFT_Y_AMP * sin(ts * 0.019 + sd * 3.1));
-    float hueBase = HUE_GREEN + HUE_DRIFT_AMP * sin(ts * 0.012 + sd * 0.6);
+    // 活跃度（substorm 慢相位）：平静帘 ↔ 爆发
+    float act = smoothstep(0.40, 0.78, wander2(ts, ACT_SCALE, sd + 7.0));
+    // 节拍只进亮度（局部元素增益）
+    float beatG = 1.0 + 0.32 * uBeat;
 
-    // 爆发（substorm）：慢噪声过阈值 → 偶发整帘增亮 + 翻卷提速
-    float burst = smoothstep(BURST_LO, BURST_HI, vn(vec2(ts * BURST_RATE, sd)));
+    // 磁天顶（屏幕上方外侧，慢游走）——光柱直线族的汇聚点
+    vec2 apex = APEX_BASE + APEX_WANDER
+        * vec2(wanderBi(ts, 61.0, sd + 3.0), wanderBi(ts, 47.0, sd + 9.0));
+    vec2 vd = q - apex;
+    float az = atan(vd.y, vd.x);
 
-    // ---- 反馈采样：绕焦点旋 + 胀缩 + 流场扭曲 + 风（柔化辅助）----
-    vec2 c = vec2(0.5, 0.52)
-        + FOCUS_AMP_1 * vec2(sin(ts * FOCUS_WANDER_1.x + sd), cos(ts * FOCUS_WANDER_1.y + sd * 1.7))
-        + FOCUS_AMP_2 * vec2(sin(ts * FOCUS_WANDER_2.x + sd * 2.3), cos(ts * FOCUS_WANDER_2.y + sd));
-    vec2 d = vUV - c;
-    float r = length(d * vec2(aspect, 1.0));
-    float warpAmp = mix(WARP_LO, WARP_HI, storm) * (1.0 + 0.5 * uBass);
-    vec2 dp = rot(rotA * (0.6 + 0.4 * storm)) * d * zoomK;
-    dp += warpAmp * vec2(
-        fbm(vUV * 3.2 + vec2(ts * 0.05, sd)) - 0.5,
-        fbm(vUV * 3.2 + vec2(sd + 31.0, -ts * 0.043)) - 0.5) * 2.0;
-    dp += wind * (0.5 + storm);
-
-    vec3 prev;
-    prev.r = texture2D(uPrev, c + dp * CHROMA_IN).r;
-    prev.g = texture2D(uPrev, c + dp).g;
-    prev.b = texture2D(uPrev, c + dp * CHROMA_OUT).b;
-    prev *= DECAY_BASE - 0.015 * storm;
-    // 亮度自适应衰减：亮雾退得快，夜空保持暗——反馈场景的对比度命门
-    float prevLum = dot(prev, vec3(0.299, 0.587, 0.114));
-    prev *= 1.0 - LUMA_FADE * clamp(prevLum - 0.15, 0.0, 0.5);
-    float edgeFade = smoothstep(EDGE_FADE_HI, EDGE_FADE_LO, r);
-    prev *= mix(EDGE_DARKEN, 1.0, edgeFade);
-
-    // ---- 帘幕：直绘（结构主体）+ 弱注入（供反馈糅合）----
-    float bassSway = 0.7 + 0.6 * uBass;
-    vec3 inject = vec3(0.0);
-    vec3 direct = vec3(0.0);
-    for (int i = 0; i < CURTAIN_COUNT; i++) {
-        float fi = float(i);
-        float depth = fi / float(CURTAIN_COUNT - 1); // 0=最远 → 1=最近
-        float prof;
-        float edge;
-        vec3 cc = curtain(q, fi, ts, sd, depth, bassSway, burst, hueBase,
-            prof, edge);
-        float beat = 1.0 + 0.5 * uBeat * (0.5 + 0.5 * sin(ts * 1.3 + fi * 2.6));
-        vec3 lineCol = cc * edge;
-        float pl = dot(lineCol, vec3(0.299, 0.587, 0.114));
-        lineCol *= min(1.0, INJECT_LUM_REF / max(pl, 1e-3));
-        inject += (lineCol * INJECT_EDGE + cc * prof * INJECT_BODY) * beat;
-        // 直绘增益按"四帘叠加不过曝"标定（实测 0.55/0.30 时 lum 0.40、
-        // bright 90%，极光再亮也不该把夜空照成白昼）
-        direct += cc * prof * 0.30 * beat + cc * edge * (0.18 + 0.35 * burst);
+    // ---- 帘幕线性 HDR 叠加 + 宽尺度光晕 ----
+    vec3 emis = vec3(0.0);
+    float wide = 0.0;
+    for (int i = 0; i < CURTAIN_N; i++) {
+        float wenv;
+        emis += curtain(q, az, float(i), ts, sd,
+            float(i) / float(CURTAIN_N - 1), act, beatG, wenv);
+        wide += wenv * mix(0.3, 1.0, float(i) / float(CURTAIN_N - 1));
     }
-    inject *= transA;
-    direct *= transA * (1.0 + BURST_GAIN * burst);
+    emis *= transA;
+    wide *= transA;
 
-    vec3 col = prev + inject + direct;
+    // ---- 夜空底色（天顶→地平线渐变，不是纯黑）----
+    float horiz = smoothstep(0.30, -0.42, q.y);
+    vec3 sky = mix(SKY_ZENITH, SKY_HORIZON, horiz);
+    // 地平线大气辉光（淡绿，极光夜的常客）
+    sky += vec3(0.020, 0.045, 0.030)
+        * exp(-pow((q.y - (-0.28)) * 5.5, 2.0)) * (0.5 + 0.5 * act);
 
-    // ---- 直绘锚点：星空（清晰，帘亮处稍掩）----
-    float veil = clamp(dot(col, vec3(0.299, 0.587, 0.114)) * 2.2, 0.0, 1.0);
-    vec3 starCol = stars(q, 96.0, 0.90, 2.6, ts) * 1.2
-        + stars(q, 38.0, 0.93, 1.4, ts) * 1.5;
-    col += starCol * (1.0 - veil * 0.70) * transA;
+    // ---- 银河：斜带 + 云絮 + 尘带（暗线是辨识度的关键）----
+    vec2 mwDir = normalize(vec2(0.83, 1.0));
+    float mwAxis = dot(q, mwDir) - 0.05;
+    float band = exp(-mwAxis * mwAxis * 6.0);
+    float cloud = 0.6 * fbm(q * 4.0 + 31.0) + 0.4 * fbm(q * 9.0 + 7.0);
+    float dust = smoothstep(0.40, 0.62, fbm(q * 5.0 + 77.0));
+    float along = dot(q, vec2(-mwDir.y, mwDir.x));
+    vec3 mwCol = mix(vec3(0.10, 0.12, 0.19), vec3(0.21, 0.17, 0.13),
+        smoothstep(-0.3, 0.35, along));
+    sky += mwCol * band * (0.35 + 0.65 * cloud) * (1.0 - 0.60 * dust)
+        * MW_GAIN * transA;
 
-    // ---- 银河斜带（淡）----
-    float mw = exp(-pow(dot(q, normalize(vec2(0.55, 1.0))), 2.0) * MW_FALLOFF);
-    col += vec3(0.10, 0.12, 0.19) * mw * (0.35 + 0.65 * fbm(q * 3.1 + 7.0)) * 0.35 * transA;
+    // ---- 星空（透过帘：按发射亮度衰减透射率，薄处仍见星）----
+    float veil = exp(-dot(emis, vec3(0.299, 0.587, 0.114)) * 0.85);
+    vec3 stars = starLayer(q, 110.0, 0.82, ts, sd) * 1.6
+        + starLayer(q, 46.0, 0.88, ts, sd) * 1.9
+        + starLayer(q, 19.0, 0.94, ts, sd) * 2.4;
+    sky += stars * veil * transA;
 
-    // ---- 地平线大气辉光（淡绿，极光常客）----
-    float horizon = RIDGE_BASE + 0.10;
-    col += hue2rgb(HUE_GREEN) * exp(-pow((q.y - horizon) * 6.0, 2.0))
-        * AIRGLOW * (0.6 + 0.4 * burst) * transA;
+    // ---- 合成：直绘 + 宽光晕 + 反馈余晖 ----
+    // 宽光晕偏蓝：散射光把绿拉向青蓝（夜空里帘幕周围的弥散光就是这样）
+    vec3 col = sky + emis
+        + mix(EMIT_GREEN, vec3(0.40, 0.70, 1.00), 0.35) * wide * WIDE_GAIN;
 
-    // ---- 地平线山脊剪影（静的锚点）----
-    float ridge = RIDGE_BASE + fbm(vec2(q.x * 2.6, sd)) * RIDGE_AMP;
-    float ground = smoothstep(ridge + 0.005, ridge - 0.02, q.y);
-    col = mix(col, col * 0.10 + vec3(0.003, 0.006, 0.010), ground);
+    // 反馈余晖：微胀采样 + 轻色散（镜头感），只做柔光不参与结构
+    vec2 fuv = (vUV - 0.5) * FB_ZOOM + 0.5;
+    vec3 prev;
+    prev.r = texture2D(uPrev, fuv + FB_CHROMA).r;
+    prev.g = texture2D(uPrev, fuv).g;
+    prev.b = texture2D(uPrev, fuv - FB_CHROMA).b;
+    col += prev * FB_GAIN;
 
-    col = toneExp(col, TONE_EXPOSURE);
-    col *= 1.0 - VIGNETTE * dot(q * 0.8, q * 0.8);
-    col += dither(vUV * uRes, ts);
+    // ---- 摄影后期链：ACES → 暗角 → 亮度加权颗粒 ----
+    col = filmic(col);
+    col *= 1.0 - 0.30 * dot(q * 0.75, q * 0.75);
+    float L = dot(col, vec3(0.299, 0.587, 0.114));
+    col += vec3((hash21(vUV * uRes + fract(ts) * 17.0) - 0.5)
+        * mix(0.022, 0.005, smoothstep(0.0, 0.35, L)));
 
     gl_FragColor = vec4(col, 1.0);
 }
