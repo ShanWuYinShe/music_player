@@ -161,7 +161,9 @@ vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
     float dk = mix(0.30, 1.0, depth);
     float bI = body * (rays + hero * 0.55 + needles * 1.1) * flick
         * (1.0 + 0.7 * surge);
-    float eI = border * (0.75 + 0.60 * rf) * (1.0 + 1.8 * act * rf + 1.2 * surge);
+    // 下缘亮线沿光柱断续（rf 深调制——实拍亮线是一段段的，光柱强处
+    // 亮线在、暗隙处亮线缺）
+    float eI = border * (0.40 + 0.85 * rf) * (1.0 + 1.8 * act * rf + 1.2 * surge);
 
     vec3 emis = EMIT_GREEN * bI * BODY_GAIN * dk * beatG;
     emis += EMIT_GREEN * eI * EDGE_GAIN * dk * beatG;
@@ -172,8 +174,12 @@ vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
         * (0.55 + 0.45 * rf);
     emis += EMIT_RED * red * (RED_BASE + RED_ACT * act)
         * (0.5 + 0.9 * h2) * dk * beatG;
-    // N2+ 粉紫：只挂在活跃期的下缘亮线上
+    // N2+ 粉紫：只挂在活跃期的下缘亮线上 + 亮线下方的弥散薄层
+    // （picket fence 观感：粉紫在绿线的下面/外面，不在帘体内）
     emis += EMIT_PINK * eI * act * 0.34 * dk * beatG;
+    float sigP = BORDER_W * 3.2;
+    float under = d < 0.0 ? exp(-d * d / (2.0 * sigP * sigP)) : 0.0;
+    emis += EMIT_PINK * under * presence * act * 0.26 * dk * beatG;
     // 远帘偏蓝（大气散射）+ 已由 dk 压暗
     emis = mix(emis * vec3(0.60, 0.72, 1.15), emis, depth);
     return emis;
@@ -207,6 +213,13 @@ void main() {
     }
     emis *= transA;
     wide *= transA;
+
+    // ---- 亮芯白化：发射最强的芯部向白偏移（传感器饱和的观感）。
+    // 通体等饱和度的绿是"程序生成塑料感"的主因——实拍里最亮的褶皱/
+    // 英雄柱芯部全都是白绿，中强部才是纯绿，弱部偏青
+    float eL = dot(emis, vec3(0.299, 0.587, 0.114));
+    float whiteK = smoothstep(0.75, 2.8, eL) * 0.8;
+    emis = mix(emis, vec3(1.02, 1.08, 1.00) * eL * 1.12, whiteK);
 
     // ---- 夜空底色（天顶→地平线渐变，不是纯黑）----
     float horiz = smoothstep(0.30, -0.42, q.y);

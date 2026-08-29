@@ -1,26 +1,23 @@
-// kaleido.frag：万花筒多形态引擎（出场轮换调度 × 四套结构互异场）。
+// kaleido.frag：万花筒多形态引擎（22s 形态轮换 × 四套结构互异场）。
 //
-// v3 返工要点（"一坨年轮一直缩放有啥看的"的根治）：
-//   1. 删掉环带深潜（RINGS）——同心环+恒速缩放正是用户点名的无聊形态；
-//      隧道的前飞有面板/灯环/折角立体结构，保留；缩放类从此只剩隧道。
-//   2. 形态调度改为"出场序号"：preset 自动轮换周期 72s（4×18s），本场景
-//      每次出场对应 floor(uT/72) 的一个序号 → hash 选形态且与上一出场
-//      不同——**每次切回来必然换一副面孔**（wander 时间尺度分钟级，
-//      旧机制下一次出场基本还是同一形态，这是 v2 观感单调的病根）；
-//      形态跳变恰好发生在本场景不在场的时刻，被 preset 切换的 1.5s
-//      crossfade 天然掩盖；锁定本场景连续观看时同样 72s 一换，且带
-//      进入侧 1s 淡入保险，绝不跳闪。
-//   3. 四套形态的运动性格互不相同（都不是"匀速旋转/缩放"）：
+// v3.1 返工要点（"还是年轮缩放"的两层病根）：
+//   1. 删掉环带深潜（RINGS）——同心环+恒速缩放正是被点名的无聊形态；
+//   2. 形态轮换周期 72s → 22s（两侧 1.5s crossfade）：72s 只对"自动
+//      轮播回到本场景"成立，手动挑中本场景盯看时 72s 才换一次脸 =
+//      看起来根本没有多形态；22s 保证连续盯看 30s 必见换脸，且大部分
+//      18s 出场内也会换一次（crossfade 平滑无跳变）；
+//   3. 四套形态的运动语言全部脱离"匀速旋转/缩放"：
 //     CHAMBER 真镜室：两面镜夹角 2π/n 的扇形镜室里漂浮半透明玻璃碎块
 //               与亮珠；每片对镜轴 abs 一次 = 一片变两片的真实双像；
-//               整体只做慢速摆动（wanderBi 来回，不是匀速转）；
+//               运动 = 碎块漂移 + 亮珠快闪 + 整体摆动（wanderBi 来回）；
 //     TUNNEL  透视隧道：n 折管壁面板 + 恒速前飞 + 沿壁扫过的灯环 +
-//               镜缝折角阴影（立体管，不是平面环）；
-//     MANDALA 呼吸曼陀罗：三层互素重数花瓣、旋向交替、绽放外扩慢周期，
-//               beat 只镀亮度与呼吸幅度——完全不缩放；
-//     ROSE    域扭曲玫瑰：两层 rose 曲线花边被演化中的 fbm 域扭曲，
-//               花瓣边界持续流动变形，θ 只小幅摆动（wanderBi，非旋转），
-//               r 恒定不缩放。
+//               镜缝折角阴影（立体管，不是平面环）——唯一的缩放类；
+//     MANDALA 呼吸曼陀罗：三层互素重数花瓣、绽放外扩慢周期为运动主轴
+//               （v3.1 去掉了三层匀速旋转，花瓣角度改双向摆动）；
+//     ROSE    域扭曲玫瑰：两层 rose 花边被演化中的 fbm 域扭曲（v3.1
+//               提速 3.5×，流动肉眼可见），花边上有沿边跑的行波微光；
+//               θ 只小幅摆动，r 恒定不缩放。
+//   形态跳变落在 1.5s crossfade 内，锁定观看/轮播切换都不闪。
 //
 // 防闪烁与速度铁律沿用（别回退）：色相慢漂 ≤ 每几分钟一圈；音频量只进
 // 亮度/幅度；速度类恒定；硬阈值 smoothstep 软化。
@@ -29,22 +26,28 @@
 // 工具链从 common.glsl 注入，不要在本文件重复定义。
 
 // ---- 出场轮换调度 ----------------------------------------------------------
-// preset 周期 = 4 场景 × 18s = 72s；本场景每次出场 18s，序号 +1。
+// v3.1：形态周期 72s → 22s。72s 的设计只对"自动轮播回到本场景"成立，
+// 用户手动挑中本场景盯看时 72s 才换一次脸 = 看起来根本没有多形态。
+// 22s + 两侧 1.5s crossfade：连续盯看 30s 必见一次换形态；轮播场景下
+// 一次 18s 出场内也常有一次换脸（crossfade 平滑，无跳变）。
 // mod 97 保护 hash 精度（97 质数 → 序列看似不循环）。
-const float SHOW_PERIOD = 72.0;
-const float SHOW_KEY_MOD = 97.0;
-const float BLEND_IN = 0.015;        // 进入侧淡入带宽（72s 的 1.5% ≈ 1s）
+const float FORM_PERIOD = 22.0;
+const float FORM_KEY_MOD = 97.0;
+const float FORM_XF_SEC = 1.5;       // 形态切换的 crossfade 时长（秒）
 
 // ---- CHAMBER（镜室碎玻璃）--------------------------------------------------
 const float CH_N_MIN = 6.0;          // 镜室重数下限（6..10 整数）
 const float CH_N_SPAN = 4.999;
-const float CH_SWAY_RATE = 31.0;     // 整体慢摆（wanderBi 双向，非匀速转）
+const float CH_SWAY_RATE = 21.0;     // 整体慢摆（wanderBi 双向，非匀速转）
 const float CH_SWAY_AMP = 0.55;      // 摆幅（弧度）
 const int CH_SHARDS = 6;             // 碎块数（每片经镜轴双像 × n 折重复）
-const float CH_DRIFT_SCALE = 31.0;   // 碎块漂移时间尺度
+const float CH_DRIFT_SCALE = 17.0;   // 碎块漂移时间尺度（快一档：
+                                     //   镜室要"活着"，慢漂读作静物）
 const float CH_BODY_ALPHA = 0.42;    // 片体透射（半透明玻璃）
 const float CH_EDGE_GAIN = 0.75;     // 边线（切玻璃轮廓）
+const float CH_STREAK_GAIN = 0.30;   // 片内高光条（假环境亮带）
 const float CH_BEAD_DENSITY = 0.64;  // 亮珠密度
+const float CH_TW_SCALE = 1.6;       // 亮珠闪烁时间尺度（快闪 = 星火感）
 const float CH_BASE = 0.045;         // 镜室底色微光
 
 // ---- TUNNEL（透视隧道）-----------------------------------------------------
@@ -56,7 +59,10 @@ const float TN_RING_RATE = 0.30;     // 灯环空间频率
 const float TN_SEAM_DARK = 0.55;     // 镜缝折角阴影深度
 
 // ---- MANDALA（呼吸曼陀罗）--------------------------------------------------
-const float MD_BLOOM_RATE = 0.045;   // 绽放周期（秒⁻¹，恒定）
+// v3.1：去掉三层匀速旋转（那正是"只是旋转"的观感来源）——花瓣角度改
+// wanderBi 来回摆动，运动主轴 = 绽放：花瓣从中心生成、外扩、淡出。
+const float MD_BLOOM_RATE = 0.060;   // 绽放周期（~17s 一轮，恒定）
+const float MD_SWAY_AMP = 0.45;      // 花瓣层角度摆幅（双向摆动）
 const float MD_PETAL_POW = 3.0;      // 花瓣横向锐度
 
 // ---- ROSE（域扭曲玫瑰）-----------------------------------------------------
@@ -64,9 +70,11 @@ const float RS_N1_MIN = 5.0;         // 内层玫瑰重数（5..7）
 const float RS_N1_SPAN = 2.999;
 const float RS_N2_MIN = 8.0;         // 外层玫瑰重数（8..11）
 const float RS_N2_SPAN = 3.999;
-const float RS_WARP_RATE = 0.045;    // 域扭曲相位演化速率（花瓣边界流动）
+const float RS_WARP_RATE = 0.16;     // 域扭曲相位演化速率（v3.1 提速 3.5×：
+                                     //   花边流动要肉眼可见）
 const float RS_EDGE_K = 240.0;       // 花边锐度
 const float RS_SWAY_AMP = 0.35;      // θ 摆幅（wanderBi 来回，非匀速旋转）
+const float RS_SHIM_RATE = 1.4;      // 花边行波微光（沿边流动的光）
 
 // ---- 色彩 / 收尾 -----------------------------------------------------------
 const vec3 PAL_C = vec3(0.9, 1.0, 1.1);
@@ -149,7 +157,7 @@ vec3 modeChamber(vec2 q, float ts, float sd) {
         col += sc * alpha * CH_BODY_ALPHA * (1.0 - acc * 0.6)
             * (0.8 + 0.4 * uBeat);
         col += mix(vec3(1.0), sc, 0.4) * edge * CH_EDGE_GAIN * (1.0 - acc * 0.5);
-        col += vec3(0.95, 0.98, 1.05) * streak * 0.20;
+        col += vec3(0.95, 0.98, 1.05) * streak * CH_STREAK_GAIN;
         acc += alpha * 0.42;
     }
 
@@ -159,7 +167,7 @@ vec3 modeChamber(vec2 q, float ts, float sd) {
     float bead = step(1.0 - CH_BEAD_DENSITY * 0.25, bh)
         * exp(-length(fract(vec2(u * 9.0, v * 9.0)) - 0.5
             - vec2(hash21(bc + 3.1), hash21(bc + 5.7))) * 18.0);
-    float tw = wander(ts, 2.3, bh * 40.0 + sd);
+    float tw = wander(ts, CH_TW_SCALE, bh * 40.0 + sd);
     col += mix(vec3(1.0), pal(hueBase + 0.15), 0.5) * bead * tw * 1.6;
 
     // 镜缝亮线（切玻璃感）+ 中心淡出（镜筒尽头的暗腔）
@@ -217,14 +225,15 @@ vec3 modeMandala(vec2 q, float ts, float sd) {
     float breath = 1.0 + 0.05 * uBeat; // beat → 尺寸呼吸（合规：尺寸域）
 
     vec3 col = vec3(0.0);
-    // 三层花瓣：重数互素、旋向交替、绽放相位错开 1/3 周期
+    // 三层花瓣：重数互素、绽放相位错开 1/3 周期；角度各做独立摆动
+    // （wanderBi 双向，不是匀速旋转——运动主轴是"绽放外扩"）
     float n1 = 5.0 + floor(hash11(sd + 1.0) * 3.0);
     float n2 = 8.0 + floor(hash11(sd + 7.0) * 4.0);
     float n3 = 12.0 + floor(hash11(sd + 13.0) * 5.0);
     float hueBase = hash11(sd + 23.0) + HUE_WANDER * wanderBi(ts, 67.0, sd + 4.4);
 
-    // 层 1：内层（反向旋）
-    float a1 = ang - ts * 0.030 + sd;
+    // 层 1：内层
+    float a1 = ang + MD_SWAY_AMP * wanderBi(ts, 29.0, sd + 1.0) + sd;
     float fa1 = abs(fract(a1 / TAU * n1) - 0.5) * 2.0;
     float b1 = fract(ts * MD_BLOOM_RATE);
     float rr1 = r / (0.34 * breath);
@@ -233,8 +242,8 @@ vec3 modeMandala(vec2 q, float ts, float sd) {
         * (1.0 - b1 * 0.55);
     col += pal(hueBase) * pow(max(sin(fa1 * PI), 0.0), MD_PETAL_POW) * env1 * 1.1;
 
-    // 层 2：中层（正向旋）
-    float a2 = ang + ts * 0.021 + sd * 1.7;
+    // 层 2：中层（摆动方向/速率不同）
+    float a2 = ang - MD_SWAY_AMP * wanderBi(ts, 37.0, sd + 2.0) + sd * 1.7;
     float fa2 = abs(fract(a2 / TAU * n2) - 0.5) * 2.0;
     float b2 = fract(ts * MD_BLOOM_RATE + 0.33);
     float rr2 = r / (0.62 * breath);
@@ -244,8 +253,8 @@ vec3 modeMandala(vec2 q, float ts, float sd) {
     col += pal(hueBase + 0.18) * pow(max(sin(fa2 * PI), 0.0), MD_PETAL_POW * 1.3)
         * env2 * 0.9;
 
-    // 层 3：外层细瓣（反向旋、更慢）
-    float a3 = ang - ts * 0.013 + sd * 2.3;
+    // 层 3：外层细瓣（摆得更慢）
+    float a3 = ang + MD_SWAY_AMP * wanderBi(ts, 23.0, sd + 3.0) + sd * 2.3;
     float fa3 = abs(fract(a3 / TAU * n3) - 0.5) * 2.0;
     float b3 = fract(ts * MD_BLOOM_RATE + 0.66);
     float rr3 = r / (0.95 * breath);
@@ -282,6 +291,11 @@ vec3 modeRose(vec2 q, float ts, float sd) {
     float d2 = abs(r - (0.72 + 0.16 * cos(n2 * th + 1.7 + w2 * 2.2)));
     float e1 = exp(-d1 * d1 * RS_EDGE_K);
     float e2 = exp(-d2 * d2 * (RS_EDGE_K * 0.8));
+    // 沿花边流动的行波微光（光沿边跑，不是花在转）
+    float shim = 0.72 + 0.38 * sin(n1 * th * 2.0 + ts * RS_SHIM_RATE
+        + uTreble * 2.5);
+    e1 *= shim;
+    e2 *= 0.80 + 0.30 * sin(n2 * th * 2.0 - ts * RS_SHIM_RATE * 0.8);
     // 花瓣体内渐变填充
     float fill1 = smoothstep(0.22, 0.0, d1) * 0.30;
     float fill2 = smoothstep(0.18, 0.0, d2) * 0.26;
@@ -306,9 +320,9 @@ vec3 evalMode(int idx, vec2 q, float ts, float sd) {
 
 // 出场序号 → 形态（与上一出场不同，避免连续两场同一形态）
 float modeForShow(float showIdx, float sd) {
-    float key = mod(showIdx, SHOW_KEY_MOD);
+    float key = mod(showIdx, FORM_KEY_MOD);
     float sel = floor(hash11(key * 0.913 + sd) * 4.0);
-    float prev = floor(hash11(mod(showIdx - 1.0, SHOW_KEY_MOD) * 0.913 + sd) * 4.0);
+    float prev = floor(hash11(mod(showIdx - 1.0, FORM_KEY_MOD) * 0.913 + sd) * 4.0);
     if (sel == prev) {
         sel = mod(sel + 1.0 + floor(hash11(key * 3.31 + sd * 1.7) * 3.0), 4.0);
     }
@@ -320,18 +334,23 @@ void main() {
     float sd = seedHash() * SEED_SPREAD;
     vec2 q = sceneUV(vec2(0.5));
 
-    // ---- 出场轮换：本场景每次出场（72s 序号 +1）必然换形态 ----
-    float cyc = ts / SHOW_PERIOD;
+    // ---- 形态轮换：22s 一换，两侧 crossfade（连续盯看 30s 必见换脸）----
+    float cyc = ts / FORM_PERIOD;
     float showIdx = floor(cyc);
-    float bph = fract(cyc);
+    float ph = fract(cyc);
     int modeIdx = int(modeForShow(showIdx, sd));
     vec3 col = evalMode(modeIdx, q, ts, sd);
-    // 进入侧 1s 淡入保险（锁定本场景连续观看时 72s 一换也不跳闪；
-    // 正常轮播时本场景不在场，淡入白算但零观感成本）
-    float blendIn = smoothstep(0.0, BLEND_IN, bph);
-    if (blendIn < 0.999) {
+    float xf = FORM_XF_SEC / FORM_PERIOD;
+    if (ph < xf) {
+        // 向上一形态淡入
+        float k = smoothstep(0.0, xf, ph);
         int prevIdx = int(modeForShow(showIdx - 1.0, sd));
-        col = mix(evalMode(prevIdx, q, ts, sd), col, blendIn);
+        col = mix(evalMode(prevIdx, q, ts, sd), col, k);
+    } else if (ph > 1.0 - xf) {
+        // 向下一形态淡出
+        float k = smoothstep(1.0 - xf, 1.0, ph);
+        int nextIdx = int(modeForShow(showIdx + 1.0, sd));
+        col = mix(col, evalMode(nextIdx, q, ts, sd), k);
     }
 
     // beat 只进亮度

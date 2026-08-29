@@ -13,12 +13,10 @@
 //               膜连续变形（脑珊瑚/生物晶格感）；
 //     4 VORONOI 移动 cell 的 F2−F1 边网络——霓虹电路，脉冲沿边行波。
 //
-// 轮换机制（v3 返工）：出场序号调度——preset 周期 72s（4×18s），本场景
-// 每次出场 18s、序号 +1，hash 选形态且与上一出场不同 → 每次切回来必然
-// 换形态（旧 wander 轮换的尺度是分钟级，72s 后回来时大概率还是同一形态，
-// 这是"看起来总一个样"的病根）。形态跳变发生在本场景不在场的时刻，被
-// preset 切换的 crossfade 掩盖；锁定观看时进入侧 1s 淡入保险。各形态
-// 内部参数（c / warp 相位 / 切片深度 / cell 相位）仍由 wander 慢漂——
+// 轮换机制（v3.1）：22s 形态轮换 + 两侧 1.5s crossfade——连续盯看 30s
+// 必见换形态（旧 72s 机制下手动挑中本场景盯看几乎看不到换脸）；自动
+// 轮播的 18s 出场内也常有一次换脸（crossfade 平滑无跳变）。各形态内部
+// 参数（c / warp 相位 / 切片深度 / cell 相位）仍由 wander 慢漂——
 // "同一形态"每次出场长相也不同。
 //
 // 旧版平滑性经验全部保留（血换来的，别回退）：
@@ -96,15 +94,12 @@ const float VOR_EDGE_K = 160.0;      // 边线锐度
 const float VOR_PULSE_RATE = 1.6;    // 沿边脉冲行波速度
 
 // ---- 形态轮换 --------------------------------------------------------------
-// 出场序号调度（与 kaleido.frag 同机制）：preset 周期 72s（4×18s），
-// 本场景每次出场 18s、序号 +1 → hash 选形态且与上一出场不同——
-// 每次切回来必然换形态。wander 尺度分钟级的旧机制下，72s 后回到本场景
-// 时大概率还是同一形态，这是"风格不多变"的病根。形态跳变发生在本场景
-// 不在场的时刻，被 preset 切换的 crossfade 掩盖；锁定观看时进入侧 1s
-// 淡入保险。mod 97 保护 hash 精度（97 质数 → 序列看似不循环）。
-const float SHOW_PERIOD = 72.0;
-const float SHOW_KEY_MOD = 97.0;
-const float BLEND_IN = 0.015;
+// 22s 形态轮换 + 两侧 1.5s crossfade（与 kaleido.frag 同机制）：连续盯看
+// 30s 必见换形态；自动轮播的 18s 出场内也常有一次换脸（crossfade 平滑）。
+// mod 97 保护 hash 精度（97 质数 → 序列看似不循环）。
+const float FORM_PERIOD = 22.0;
+const float FORM_KEY_MOD = 97.0;
+const float FORM_XF_SEC = 1.5;
 
 // ---- 着色 / 收尾 -----------------------------------------------------------
 const float BAND_FREQ = 0.85;
@@ -408,9 +403,9 @@ vec3 evalMode(int idx, vec2 q, float ts, float sd) {
 
 // 出场序号 → 形态（与上一出场不同）
 float modeForShow(float showIdx, float sd) {
-    float key = mod(showIdx, SHOW_KEY_MOD);
+    float key = mod(showIdx, FORM_KEY_MOD);
     float sel = floor(hash11(key * 0.913 + sd) * 5.0);
-    float prev = floor(hash11(mod(showIdx - 1.0, SHOW_KEY_MOD) * 0.913 + sd) * 5.0);
+    float prev = floor(hash11(mod(showIdx - 1.0, FORM_KEY_MOD) * 0.913 + sd) * 5.0);
     if (sel == prev) {
         sel = mod(sel + 1.0 + floor(hash11(key * 3.31 + sd * 1.7) * 4.0), 5.0);
     }
@@ -422,31 +417,39 @@ void main() {
     float sd = seedHash() * SEED_SPREAD;
     vec2 q = sceneUV(vec2(0.5));
 
-    // ---- 出场轮换：本场景每次出场（72s 序号 +1）必然换形态 ----
-    float cyc = ts / SHOW_PERIOD;
+    // ---- 形态轮换：22s 一换，两侧 crossfade ----
+    float cyc = ts / FORM_PERIOD;
     float showIdx = floor(cyc);
-    float bph = fract(cyc);
+    float ph = fract(cyc);
     int modeIdx = int(modeForShow(showIdx, sd));
     vec3 col = evalMode(modeIdx, q, ts, sd);
-    // 进入侧 1s 淡入保险（锁定本场景连续观看时也不跳闪）
-    float blendIn = smoothstep(0.0, BLEND_IN, bph);
-    if (blendIn < 0.999) {
+    float xf = FORM_XF_SEC / FORM_PERIOD;
+    if (ph < xf) {
+        float k = smoothstep(0.0, xf, ph);
         int prevIdx = int(modeForShow(showIdx - 1.0, sd));
-        col = mix(evalMode(prevIdx, q, ts, sd), col, blendIn);
+        col = mix(evalMode(prevIdx, q, ts, sd), col, k);
+    } else if (ph > 1.0 - xf) {
+        float k = smoothstep(1.0 - xf, 1.0, ph);
+        int nextIdx = int(modeForShow(showIdx + 1.0, sd));
+        col = mix(col, evalMode(nextIdx, q, ts, sd), k);
     }
 
     // beat 只进亮度（速度恒定铁律）
     col *= 0.95 + 0.18 * uBeat;
     col *= 1.0 - VIGNETTE * dot(q, q);
 
-    // 反馈拖尾：深潜形态用对齐流速的缩放率，其余用近恒等轻模糊
+    // 反馈拖尾：深潜形态用对齐流速的缩放率，其余用近恒等轻模糊；
+    // crossfade 期间两侧有深潜就按比例混
     vec3 prevS = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
-    if (modeIdx == 0) {
-        vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
-        col += mix(prevS, prevD, blendIn) * TRAIL_GAIN;
-    } else {
-        col += prevS * TRAIL_GAIN;
+    vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
+    float diveW = modeIdx == 0 ? 1.0 : 0.0;
+    if (ph < xf && modeForShow(showIdx - 1.0, sd) == 0.0) {
+        diveW = max(diveW, 1.0 - smoothstep(0.0, xf, ph));
     }
+    if (ph > 1.0 - xf && modeForShow(showIdx + 1.0, sd) == 0.0) {
+        diveW = max(diveW, smoothstep(1.0 - xf, 1.0, ph));
+    }
+    col += mix(prevS, prevD, diveW) * TRAIL_GAIN;
 
     col = toneExp(col, 1.0);
     // 抬暗部压缩"周期性忽明忽暗"的观感幅度

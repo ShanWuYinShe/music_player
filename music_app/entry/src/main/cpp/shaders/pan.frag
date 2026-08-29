@@ -82,7 +82,7 @@ const float AO_DARKEN = 0.16;
 // ---- 水珠材质 -------------------------------------------------------------
 const float REFRACT_LEN = 0.052;   // 折射取样偏移量（球透镜）
 const float FOCUS_GAIN = 0.50;     // 滴心焦点亮斑（窗光被透镜聚到滴底）
-const float LENS_GAIN = 0.45;      // 内部聚光：球透镜把房间环境光聚进
+const float LENS_GAIN = 0.58;      // 内部聚光：球透镜把房间环境光聚进
                                     //   滴心——水珠中心比周围锅面亮，
                                     //   这是"活水"的观感来源
 const float ABSORB_R = 0.8;        // 边缘路径吸收（克制：内部要亮，
