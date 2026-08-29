@@ -14,8 +14,13 @@ export const PRESETS: Preset[] = [
 	{ id: 0, file: 'fractal.frag', name: 'fractal', label: '无限分形', color: '#ff7a59' },
 	{ id: 1, file: 'pan.frag', name: 'pan', label: '热锅水珠', color: '#5db7ff' },
 	{ id: 2, file: 'aurora.frag', name: 'aurora', label: '全屏极光', color: '#7af0a4' },
-	{ id: 3, file: 'mirror.frag', name: 'mirror', label: '无尽镜渊', color: '#c39bff' },
+	{ id: 3, file: 'kaleido.frag', name: 'kaleido', label: '无尽万花筒', color: '#c39bff' },
 ];
 
 export const VERT_FILE = 'visualizer.vert';
 export const BLIT_FILE = 'blit.frag';
+/**
+ * 场景共享公共库（glslPatch 注入到头与场景源之间；端侧
+ * gen_shader_header.py 读同一磁盘文件做同样注入）
+ */
+export const COMMON_FILE = 'common.glsl';

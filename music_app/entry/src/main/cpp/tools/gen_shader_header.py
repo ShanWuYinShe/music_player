@@ -2,11 +2,15 @@
 """把 shaders/ 下的 GLSL ES 1.00 源文件转成 GLES3 可用的 shader_src.h。
 
 与 shader_playground 的 src/glslPatch.ts 是同一套规则的两份实现
-（注入头的行数必须完全一致，否则手机端编译报错的行号对不上源文件）：
+（注入内容的行数必须完全一致，否则手机端编译报错的行号对不上源文件）：
   - 注入 #version 300 es 头：精度 + uniform/varying/out 声明
   - 源文件里已声明的 uniform/varying/precision/attribute 一律"整行置空"
     （不是删行！保留行数 → 编译报错行号 − 头行数 = 源文件行号）
   - texture2D → texture、attribute → in、gl_FragColor → fragColor
+  - 场景共享公共库 common.glsl 走同一套置空/替换管线后，注入到
+    "头之后、场景源之前"；场景源不得重复定义其中的函数。
+    行号换算：报错行号 − 头行数(12) − common 行数 = 场景源行号；
+    落在 common 区间内则是 common.glsl 自身行号。
 
 手机端（GLES 3.0）与 playground（WebGL2）因此共用同一份磁盘 GLSL 源文件。
 
@@ -64,7 +68,10 @@ BLIT_HEADER = (
 # 默认场景槽顺序必须与 shader_playground/src/presets.ts 的 PRESETS 一致。
 # 手机端目前只打包极光（--scenes aurora.frag）：其余场景留在 playground 里调，
 # 不进 so，省编译体积与 shader 编译耗时。
-DEFAULT_SCENE_FILES = ["fractal.frag", "pan.frag", "aurora.frag", "mirror.frag"]
+DEFAULT_SCENE_FILES = ["fractal.frag", "pan.frag", "aurora.frag", "kaleido.frag"]
+
+# 场景共享公共库：注入到每个场景"头之后、场景源之前"（presets.ts COMMON_FILE）
+COMMON_FILE = "common.glsl"
 
 # 整行置空的规则（与 glslPatch.ts 同构）
 VERSION_RE = re.compile(r"^[ \t]*#version[^\n]*")
@@ -101,6 +108,18 @@ def strip_common(src: str, label: str) -> str:
     return out
 
 
+def transform_frag_body(src: str, label: str) -> str:
+    """fragment 源码体（场景或 common.glsl）的统一变换：
+    置空注入头已声明的行 + 词汇替换。所有置空都保留行数。
+    与 glslPatch.ts 的 transformFragBody 一一对应。"""
+    out = strip_common(src, label)
+    out = FRAG_UNIFORM_RE.sub("", out)
+    out = TEXTURE2D_RE.sub("texture(", out)
+    out = re.sub(r"\battribute[ \t]+", "in ", out)
+    out = out.replace("gl_FragColor", "fragColor")
+    return out
+
+
 def patch_vert(src: str) -> str:
     out = strip_common(src, "visualizer.vert")
     out = APOS_RE.sub("", out)
@@ -108,13 +127,13 @@ def patch_vert(src: str) -> str:
     return VERT_HEADER + out
 
 
-def patch_frag(src: str, label: str) -> str:
-    out = strip_common(src, label)
-    out = FRAG_UNIFORM_RE.sub("", out)
-    out = TEXTURE2D_RE.sub("texture(", out)
-    out = re.sub(r"\battribute[ \t]+", "in ", out)
-    out = out.replace("gl_FragColor", "fragColor")
-    return FRAG_HEADER + out
+def patch_frag(src: str, label: str, common: str) -> str:
+    """common.glsl 注入到"头之后、场景源之前"（与 glslPatch.ts 同序）"""
+    lib = transform_frag_body(common, COMMON_FILE)
+    if not lib.endswith("\n"):
+        lib += "\n"
+    body = transform_frag_body(src, label)
+    return FRAG_HEADER + lib + body
 
 
 def patch_blit(src: str) -> str:
@@ -155,11 +174,16 @@ def main() -> None:
     d = args.shader_dir
     vert = read(d / "visualizer.vert")
     blit = read(d / "blit.frag")
+    common = read(d / COMMON_FILE)
     scenes = [(f, read(d / f)) for f in scene_files]
 
     vert_p = patch_vert(vert)
     blit_p = patch_blit(blit)
-    scene_p = [(f, patch_frag(s, f)) for f, s in scenes]
+    scene_p = [(f, patch_frag(s, f, common)) for f, s in scenes]
+
+    # 注入区行数（头 + common），编译报错行号减去它即场景源文件行号
+    common_norm = common if common.endswith("\n") else common + "\n"
+    frag_injected = 12 + common_norm.count("\n")
 
     var_name = {f: "kFragScene" + f.split(".")[0].capitalize() for f in scene_files}
     parts: list[str] = []
@@ -169,7 +193,8 @@ def main() -> None:
         " *\n"
         " * 源：entry/src/main/cpp/shaders/ 下的 GLSL ES 1.00 文件（与\n"
         " * shader_playground 预览、shader_playground/src/glslPatch.ts 同源）。\n"
-        " * 注入头行数为 12(frag)/4(vert)/5(blit)，编译报错行号减去它即源文件行号。\n"
+        f" * frag 注入区 {frag_injected} 行（头 12 + common.glsl {common_norm.count(chr(10))}），\n"
+        " * vert/blit 注入头 4/5 行；编译报错行号减去对应注入区行数即源文件行号。\n"
         " */\n"
         "\n"
         "#ifndef MUSICPLAYER_SHADER_SRC_H\n"

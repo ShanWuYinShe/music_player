@@ -26,12 +26,15 @@ export class ShaderError extends Error {
 	readonly label: string;
 	readonly detail: string;
 	readonly sourceLine: number | null;
+	/** 行号落在公共库时给出文件名（如 common.glsl）；null 表示在 label 源文件里 */
+	readonly sourceFile: string | null;
 
 	constructor(
 		kind: 'compile' | 'link' | 'source',
 		label: string,
 		detail: string,
 		sourceLine?: number,
+		sourceFile?: string,
 	) {
 		super(detail);
 		this.name = 'ShaderError';
@@ -39,6 +42,7 @@ export class ShaderError extends Error {
 		this.label = label;
 		this.detail = detail;
 		this.sourceLine = sourceLine ?? null;
+		this.sourceFile = sourceFile ?? null;
 	}
 }
 
@@ -63,7 +67,7 @@ export function toDiagnostic(err: unknown, fallbackTitle: string): Diagnostic {
 		const title = err.label ? `${kind} · ${err.label}` : `${kind} · ${fallbackTitle}`;
 		let log = err.detail || '（无日志）';
 		if (err.sourceLine !== null) {
-			log += `\n\n（源文件第 ${err.sourceLine} 行附近）`;
+			log += `\n\n（${err.sourceFile ?? '源文件'}第 ${err.sourceLine} 行附近）`;
 		}
 		return { title, log };
 	}

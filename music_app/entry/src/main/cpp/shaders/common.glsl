@@ -1,0 +1,110 @@
+// common.glsl：四个场景共享的公共函数库。
+//
+// 本文件不是独立 shader：工具链（playground 的 glslPatch.ts / 端侧构建的
+// gen_shader_header.py）把它原样注入到每个场景"注入头之后、场景源之前"。
+// 场景文件直接使用这里的函数，**不要重复定义**（重复定义会编译报错）。
+//
+// uniform（uT/uSeed/uRes/uBeat/uBass/uTreble/uTransition/uPrev）与 vUV 由
+// 注入头声明，本文件的函数直接读取。书写风格与场景源一致：GLSL ES 1.00
+// （texture2D / 无 #version），词汇替换由工具链统一完成。
+//
+// 行号换算：编译器报错行号 − 注入头行数(12) − 本文件行数 = 场景源文件行号。
+// 报错行号落在本文件区间内时，工具会标注为 common.glsl 的行号。
+
+#define TAU 6.2831853
+#define PI 3.1415927
+
+// ---- 精度安全 hash ------------------------------------------------------
+// fract 系，不用 sin：大 seed（可到 4e9）在移动端 mediump 下 sin 精度崩坏。
+float hash11(float n) {
+    n = fract(n * 0.1031);
+    n *= n + 33.33;
+    n *= n + n;
+    return fract(n);
+}
+
+float hash21(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+// ---- 值噪声 + fbm -------------------------------------------------------
+float vn(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+               mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+// 4 倍频 + 倍频间旋转，消掉网格方向感
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat2 R = mat2(0.8, -0.6, 0.6, 0.8);
+    for (int i = 0; i < 4; i++) {
+        v += a * vn(p);
+        p = R * p * 2.03;
+        a *= 0.5;
+    }
+    return v;
+}
+
+// ---- 小工具 -------------------------------------------------------------
+mat2 rot(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
+}
+
+// uT 单位是毫秒，场景里一律用秒
+float nowSec() {
+    return uT * 0.001;
+}
+
+// 大 seed 先缩小再 hash（精度安全约定）；场景再乘各自的散布系数
+float seedHash() {
+    return hash11(uSeed * 1.0e-7);
+}
+
+float aspectRatio() {
+    return uRes.x / max(uRes.y, 1.0);
+}
+
+// 以 center 为原点、按宽高比修正的场景坐标
+vec2 sceneUV(vec2 center) {
+    return (vUV - center) * vec2(aspectRatio(), 1.0);
+}
+
+// ---- 调色 ---------------------------------------------------------------
+// 余弦色轮：0=红 .17=紫 .33=蓝 .5=青 .67=绿 .83=黄（不是 HSL，别按 HSL 调）
+vec3 hue2rgb(float h) {
+    return 0.5 + 0.5 * cos(TAU * (h + vec3(0.0, 0.33, 0.67)));
+}
+
+// iq 余弦调色板（a=b=0.5 形态），c/d 由场景按自己的色族给出
+vec3 palIQ(float t, vec3 c, vec3 d) {
+    return 0.5 + 0.5 * cos(TAU * (c * t + d));
+}
+
+// 饱和度拉伸：k>1 更艳，k<1 向灰靠
+vec3 satBoost(vec3 col, float k) {
+    return mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, k);
+}
+
+// ---- 收尾 ---------------------------------------------------------------
+// 柔和色调映射（曝光系数由场景定）
+vec3 toneExp(vec3 col, float exposure) {
+    return 1.0 - exp(-col * exposure);
+}
+
+// 抖动去色带；fragPx 传 vUV*uRes（像素坐标），ts 为秒
+vec3 dither(vec2 fragPx, float ts) {
+    return vec3((hash21(fragPx + fract(ts) * 7.0) - 0.5) * (1.5 / 255.0));
+}
+
+// preset 切换交叉淡化：uTransition 0→1 时从上一帧画面渐入新画面
+vec3 applyTransition(vec3 col) {
+    float a = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
+    return mix(texture2D(uPrev, vUV).rgb, col, a);
+}

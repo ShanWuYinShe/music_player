@@ -7,10 +7,18 @@
  *   2. 把工具已统一声明的东西从源码里"置空"（保留行数！）；
  *   3. 词汇替换 texture2D→texture、attribute→in、gl_FragColor→fragColor。
  *
- * 行号对齐是硬性约束：所有 strip 都以空行代替删除，因此编译器报错的行号
- * 减去注入头行数就是源文件行号，错误浮层可以精确定位。
+ * 公共库注入：场景共享的函数库 common.glsl 由调用方读盘后传入，同一份文本
+ * 走同一套置空/替换管线后，插到"注入头之后、场景源之前"。场景源不得重复
+ * 定义 common.glsl 里的函数。端侧 gen_shader_header.py 是同一套规则的另一
+ * 份实现，两边注入的内容与行数必须逐字节一致。
+ *
+ * 行号对齐是硬性约束：所有 strip 都以空行代替删除，因此
+ *   编译器报错行号 − (注入头行数 + common 行数) = 场景源文件行号；
+ * 报错行号落在 common 区间内时，换算为 common.glsl 自身行号
+ * （见 mapFragErrorLine），错误浮层两种都能精确定位。
  */
 import { ShaderError } from './errors';
+import { COMMON_FILE } from './presets';
 
 const VERSION_DIRECTIVE = '#version 300 es\n';
 
@@ -28,8 +36,8 @@ const FRAG_HEADER =
 	'in vec2 vUV;\n' +
 	'out vec4 fragColor;\n';
 
-const VERT_HEADER =
-	VERSION_DIRECTIVE + 'precision highp float;\n' + 'in vec2 aPos;\n' + 'out vec2 vUV;\n';
+// 必须恰好是 VERT_HEADER_LINES(4) 行：换行由 \n 给出，源码排版不得拆行
+const VERT_HEADER = `${VERSION_DIRECTIVE}precision highp float;\nin vec2 aPos;\nout vec2 vUV;\n`;
 
 const BLIT_HEADER =
 	VERSION_DIRECTIVE +
@@ -38,7 +46,7 @@ const BLIT_HEADER =
 	'uniform sampler2D uTex;\n' +
 	'out vec4 fragColor;\n';
 
-/** 注入头的行数；编译器行号 − 该值 = 源文件行号 */
+/** 注入头的行数；编译器行号 − 该值（frag 还要 − common 行数）= 源文件行号 */
 export const FRAG_HEADER_LINES = 12;
 export const VERT_HEADER_LINES = 4;
 export const BLIT_HEADER_LINES = 5;
@@ -108,22 +116,76 @@ function assertNoVersionLeft(s: string, label: string): void {
 	}
 }
 
-function replaceCommon(s: string): string {
+function replaceCommonWords(s: string): string {
 	return s.replace(/\btexture2D[ \t]*\(/g, 'texture(');
 }
 
-export function patchFragForWebGL2(src: unknown, label = 'fragment'): string {
-	let s = requireString(src, label);
+/**
+ * fragment 源码体（场景或 common.glsl）的统一变换：
+ * 置空注入头已声明的行 + 词汇替换。所有置空都保留行数。
+ */
+function transformFragBody(src: string, label: string): string {
+	let s = src;
 	s = s.replace(VERSION_RE, '');
 	s = s.replace(PRECISION_RE, '');
 	s = s.replace(FRAG_UNIFORM_RE, '');
 	// fragment 的 varying 是输入，已由工具头声明，整行置空
 	s = s.replace(VARYING_RE, '');
-	s = replaceCommon(s);
+	s = replaceCommonWords(s);
 	s = s.replace(/\battribute[ \t]+/g, 'in ');
 	s = s.replace(/\bgl_FragColor\b/g, 'fragColor');
 	assertNoVersionLeft(s, label);
-	return FRAG_HEADER + s;
+	return s;
+}
+
+/** 文本行数（以末尾补 \n 后的换行符数计；注入拼接时同样会补 \n，两者一致） */
+export function countLines(s: string): number {
+	const norm = s.endsWith('\n') ? s : `${s}\n`;
+	return norm.split('\n').length - 1;
+}
+
+/**
+ * frag 注入区的总行数：注入头 + common.glsl（有的话）。
+ * 编译器报错行号减去它就是场景源文件行号（见 mapFragErrorLine）。
+ */
+export function fragInjectedLines(common?: string): number {
+	return FRAG_HEADER_LINES + (common === undefined ? 0 : countLines(common));
+}
+
+export interface MappedLine {
+	line: number;
+	/** 设置时表示报错落在公共库里（值为 common.glsl 文件名），否则在场景源 */
+	file?: string;
+}
+
+/**
+ * 把编译器报错行号换算回源文件行号。
+ * patched 布局：[注入头 FRAG_HEADER_LINES 行][common N 行][场景源 …]。
+ */
+export function mapFragErrorLine(patchedLine: number, common?: string): MappedLine {
+	const commonLines = common === undefined ? 0 : countLines(common);
+	if (
+		commonLines > 0 &&
+		patchedLine > FRAG_HEADER_LINES &&
+		patchedLine <= FRAG_HEADER_LINES + commonLines
+	) {
+		return { line: patchedLine - FRAG_HEADER_LINES, file: COMMON_FILE };
+	}
+	return { line: patchedLine - FRAG_HEADER_LINES - commonLines };
+}
+
+/**
+ * @param src    场景 fragment 源（GLSL ES 1.00）
+ * @param label  错误标题用的文件名
+ * @param common 公共库 common.glsl 源文本；传入后注入到头与场景源之间，
+ *               场景源不得重复定义其中的函数
+ */
+export function patchFragForWebGL2(src: unknown, label = 'fragment', common?: string): string {
+	const body = transformFragBody(requireString(src, label), label);
+	if (common === undefined) return FRAG_HEADER + body;
+	const lib = transformFragBody(requireString(common, COMMON_FILE), COMMON_FILE);
+	const libNorm = lib.endsWith('\n') ? lib : `${lib}\n`;
+	return FRAG_HEADER + libNorm + body;
 }
 
 export function patchVertForWebGL2(src: unknown, label = 'vertex'): string {
@@ -133,7 +195,7 @@ export function patchVertForWebGL2(src: unknown, label = 'vertex'): string {
 	// 源文件 vertex 头里只有 `attribute aPos` 与 `varying vUV`，由工具头统一声明
 	s = s.replace(APOS_RE, '');
 	s = s.replace(VARYING_RE, '');
-	s = replaceCommon(s);
+	s = replaceCommonWords(s);
 	assertNoVersionLeft(s, label);
 	return VERT_HEADER + s;
 }
@@ -144,7 +206,7 @@ export function patchBlitForWebGL2(src: unknown, label = 'blit.frag'): string {
 	s = s.replace(PRECISION_RE, '');
 	s = s.replace(BLIT_UNIFORM_RE, '');
 	s = s.replace(VARYING_RE, '');
-	s = replaceCommon(s);
+	s = replaceCommonWords(s);
 	s = s.replace(/\battribute[ \t]+/g, 'in ');
 	s = s.replace(/\bgl_FragColor\b/g, 'fragColor');
 	assertNoVersionLeft(s, label);

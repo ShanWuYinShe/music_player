@@ -8,19 +8,21 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // 磁盘上的 shader 源目录：与手机端 CMake 读取的是同一份，预览永远同源
 export const SHADER_DIR = path.resolve(repoRoot, 'music_app/entry/src/main/cpp/shaders');
 
-/** 需要随 dev/preview/build 提供的着色器源文件 */
+/** 需要随 dev/preview/build 提供的着色器源文件（common.glsl 是场景共享公共库） */
 export const SHADER_FILES = [
 	'visualizer.vert',
+	'common.glsl',
 	'fractal.frag',
 	'pan.frag',
 	'aurora.frag',
-	'mirror.frag',
+	'kaleido.frag',
 	'blit.frag',
 ] as const;
 
 const MIME: Record<string, string> = {
 	'.frag': 'text/plain; charset=utf-8',
 	'.vert': 'text/plain; charset=utf-8',
+	'.glsl': 'text/plain; charset=utf-8',
 };
 
 /** 解析 /shaders/<name> 请求；命中返回文件路径，未命中返回 null */

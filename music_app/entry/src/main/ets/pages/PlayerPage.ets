@@ -67,12 +67,6 @@ export struct PlayerPage {
     });
   }
 
-  /** 切换到下一个可视化风格并提示风格名 */
-  private switchPreset(): void {
-    this.vizPreset = (this.vizPreset + 1) % PRESET_COUNT;
-    this.toastPreset(this.vizPreset);
-  }
-
   private toastPreset(index: number): void {
     const name = VIZ_PRESET_NAMES[index] ?? `风格 ${index + 1}`;
     promptAction.showToast({ message: `${index + 1}/${PRESET_COUNT} · ${name}` });
@@ -107,7 +101,7 @@ export struct PlayerPage {
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
-            .onClick(() => this.switchPreset())
+            .bindMenu(this.VizMenu())
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
@@ -430,6 +424,28 @@ export struct PlayerPage {
       }
     }
     .width(180)
+    .padding(6)
+    .borderRadius(16)
+    .backgroundColor($r('app.color.surface'))
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.15)' })
+  }
+
+  /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
+  @Builder
+  VizMenu() {
+    Column({ space: 2 }) {
+      ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
+        MenuItemRow({
+          label: `${index + 1}. ${name}`,
+          active: this.vizPreset === index,
+          onSelect: (): void => {
+            this.vizPreset = index;
+            this.toastPreset(index);
+          }
+        })
+      }, (name: string) => name)
+    }
+    .width(220)
     .padding(6)
     .borderRadius(16)
     .backgroundColor($r('app.color.surface'))

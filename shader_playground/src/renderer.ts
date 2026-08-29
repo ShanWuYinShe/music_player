@@ -6,14 +6,14 @@
 import { type Diagnostic, ShaderError, toDiagnostic } from './errors';
 import {
 	BLIT_HEADER_LINES,
-	FRAG_HEADER_LINES,
 	hasEntryPoint,
+	mapFragErrorLine,
 	patchBlitForWebGL2,
 	patchFragForWebGL2,
 	patchVertForWebGL2,
 	VERT_HEADER_LINES,
 } from './glslPatch';
-import { PRESETS } from './presets';
+import { BLIT_FILE, COMMON_FILE, PRESETS, VERT_FILE } from './presets';
 
 export interface RenderParams {
 	t: number;
@@ -37,13 +37,20 @@ interface SceneUniforms {
 	prev: WebGLUniformLocation | null;
 }
 
+/** 编译器报错行号 → 源文件行号（可能落在公共库 common.glsl 里） */
+type LineMapper = (patchedLine: number) => { line: number; file?: string };
+
+/** 固定头行数的简单映射（vert / blit 无 common 注入） */
+function offsetMapper(headerLines: number): LineMapper {
+	return (patchedLine) => ({ line: patchedLine - headerLines });
+}
+
 function compileShader(
 	gl: WebGL2RenderingContext,
 	type: number,
 	src: string,
 	label: string,
-	/** 该阶段注入头的行数；编译器行号减去它才是源文件行号 */
-	headerLines: number,
+	mapLine: LineMapper,
 ): WebGLShader {
 	const sh = gl.createShader(type);
 	if (!sh) throw new ShaderError('compile', label, 'createShader 返回空（上下文可能已丢失）');
@@ -53,13 +60,8 @@ function compileShader(
 		const log = (gl.getShaderInfoLog(sh) || '（驱动未返回日志）').replace(/\0/g, '');
 		const lineMatch = log.match(/ERROR:\s*\d+:(\d+)/);
 		gl.deleteShader(sh);
-		const patchedLine = lineMatch?.[1] ? parseInt(lineMatch[1], 10) : undefined;
-		throw new ShaderError(
-			'compile',
-			label,
-			log.trim(),
-			patchedLine !== undefined ? patchedLine - headerLines : undefined,
-		);
+		const mapped = lineMatch?.[1] ? mapLine(parseInt(lineMatch[1], 10)) : undefined;
+		throw new ShaderError('compile', label, log.trim(), mapped?.line, mapped?.file);
 	}
 	return sh;
 }
@@ -140,6 +142,9 @@ export class VizRenderer {
 	 * 编译全部 program（blit + 4 场景）。任一失败：保留旧 program、返回诊断；
 	 * 全部成功：替换并返回 null。草稿（无 main()）的场景文件跳过编译、
 	 * 沿用旧 program，返回 skipDraft 标记供状态栏提示。
+	 *
+	 * 顶点 shader 只编译一次，供全部 program 复用（与 visualizer.cpp 一致）；
+	 * 场景 fragment 注入 common.glsl 公共库（sources[COMMON_FILE]）。
 	 */
 	compileAll(sources: Record<string, string>): {
 		diag: Diagnostic | null;
@@ -147,29 +152,53 @@ export class VizRenderer {
 	} {
 		const gl = this.gl;
 		const skippedDrafts: string[] = [];
+		const common = sources[COMMON_FILE];
+		if (typeof common !== 'string') {
+			return {
+				diag: toDiagnostic(
+					new ShaderError('source', COMMON_FILE, `公共库 ${COMMON_FILE} 尚未载入`),
+					'公共库',
+				),
+				skippedDrafts,
+			};
+		}
+
+		// 顶点 shader 编译一次（attach 到多个 program，最后统一 deleteShader）
+		let vs: WebGLShader | null = null;
 		try {
-			const blitSrc = patchBlitForWebGL2(sources['blit.frag'], 'blit.frag');
-			const vs = compileShader(
+			vs = compileShader(
 				gl,
 				gl.VERTEX_SHADER,
-				patchVertForWebGL2(sources['visualizer.vert']),
-				'visualizer.vert',
-				VERT_HEADER_LINES,
+				patchVertForWebGL2(sources[VERT_FILE]),
+				VERT_FILE,
+				offsetMapper(VERT_HEADER_LINES),
 			);
-			const fs = compileShader(gl, gl.FRAGMENT_SHADER, blitSrc, 'blit.frag', BLIT_HEADER_LINES);
+		} catch (err) {
+			return { diag: toDiagnostic(err, '顶点管线'), skippedDrafts };
+		}
+		try {
+			const blitSrc = patchBlitForWebGL2(sources[BLIT_FILE], BLIT_FILE);
+			const fs = compileShader(
+				gl,
+				gl.FRAGMENT_SHADER,
+				blitSrc,
+				BLIT_FILE,
+				offsetMapper(BLIT_HEADER_LINES),
+			);
 			const newBlit = linkProgram(gl, vs, fs, 'blit');
-			gl.deleteShader(vs);
 			gl.deleteShader(fs);
 			if (this.blitProgram) gl.deleteProgram(this.blitProgram);
 			this.blitProgram = newBlit;
 			this.blitLoc = gl.getUniformLocation(newBlit, 'uTex');
 		} catch (err) {
+			gl.deleteShader(vs);
 			return { diag: toDiagnostic(err, 'blit 管线'), skippedDrafts };
 		}
 
 		for (const preset of PRESETS) {
 			const src = sources[preset.file];
 			if (typeof src !== 'string') {
+				gl.deleteShader(vs);
 				return {
 					diag: toDiagnostic(
 						new ShaderError('source', preset.file, `源文件 ${preset.file} 尚未载入`),
@@ -184,25 +213,21 @@ export class VizRenderer {
 				continue;
 			}
 			try {
-				const fragSrc = patchFragForWebGL2(src, preset.file);
-				const vs = compileShader(
-					gl,
-					gl.VERTEX_SHADER,
-					patchVertForWebGL2(sources['visualizer.vert']),
-					'visualizer.vert',
-					VERT_HEADER_LINES,
+				const fragSrc = patchFragForWebGL2(src, preset.file, common);
+				const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc, preset.file, (line) =>
+					mapFragErrorLine(line, common),
 				);
-				const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc, preset.file, FRAG_HEADER_LINES);
 				const p = linkProgram(gl, vs, fs, preset.name);
-				gl.deleteShader(vs);
 				gl.deleteShader(fs);
 				if (this.programs[preset.id]) gl.deleteProgram(this.programs[preset.id] ?? null);
 				this.programs[preset.id] = p;
 				this.locs[preset.id] = getSceneLocs(gl, p);
 			} catch (err) {
+				gl.deleteShader(vs);
 				return { diag: toDiagnostic(err, preset.label), skippedDrafts };
 			}
 		}
+		gl.deleteShader(vs);
 		return { diag: null, skippedDrafts };
 	}
 

@@ -1,9 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { ShaderError } from '../src/errors';
 import {
 	BLIT_HEADER_LINES,
+	countLines,
 	FRAG_HEADER_LINES,
+	fragInjectedLines,
 	hasEntryPoint,
+	mapFragErrorLine,
 	patchBlitForWebGL2,
 	patchFragForWebGL2,
 	patchVertForWebGL2,
@@ -92,6 +95,56 @@ describe('patchFragForWebGL2', () => {
 	});
 });
 
+describe('common.glsl 公共库注入', () => {
+	const COMMON = [
+		'// 公共库注释',
+		'#define TAU 6.2831853',
+		'',
+		'float hash11(float n) {',
+		'    return fract(n * 0.1031);',
+		'}',
+	].join('\n');
+	const COMMON_LINES = 6;
+
+	test('注入布局：[头][common][场景源]，行号对齐', () => {
+		const out = patchFragForWebGL2(FRAG_SRC, 'x.frag', COMMON);
+		const lines = out.split('\n');
+		expect(lines).toHaveLength(FRAG_HEADER_LINES + COMMON_LINES + FRAG_SRC.split('\n').length);
+		expect(lines[FRAG_HEADER_LINES + 1]).toBe('#define TAU 6.2831853');
+		expect(lines[FRAG_HEADER_LINES + COMMON_LINES + 11]).toBe('void main() {');
+	});
+
+	test('common 也走同一套置空/替换管线（texture2D → texture）', () => {
+		const common = 'vec3 a(sampler2D t) { return texture2D(t, vec2(0.0)).rgb; }';
+		const out = patchFragForWebGL2(FRAG_SRC, 'x.frag', common);
+		expect(out).toContain('texture(t, vec2(0.0))');
+		expect(out).not.toContain('texture2D');
+	});
+
+	test('common 无尾换行会补齐（行数一致）', () => {
+		const noNl = COMMON.replace(/\n$/, '');
+		expect(countLines(noNl)).toBe(COMMON_LINES);
+		expect(countLines(`${COMMON}\n`)).toBe(COMMON_LINES);
+		expect(fragInjectedLines(COMMON)).toBe(FRAG_HEADER_LINES + COMMON_LINES);
+		expect(fragInjectedLines()).toBe(FRAG_HEADER_LINES);
+	});
+
+	test('mapFragErrorLine：落在 common 区间标注 common.glsl，之后算场景行号', () => {
+		expect(mapFragErrorLine(FRAG_HEADER_LINES + 1, COMMON)).toEqual({
+			line: 1,
+			file: 'common.glsl',
+		});
+		expect(mapFragErrorLine(FRAG_HEADER_LINES + COMMON_LINES, COMMON)).toEqual({
+			line: COMMON_LINES,
+			file: 'common.glsl',
+		});
+		// 场景源第 1 行
+		expect(mapFragErrorLine(FRAG_HEADER_LINES + COMMON_LINES + 1, COMMON)).toEqual({ line: 1 });
+		// 不传 common 时退化为纯头行数映射
+		expect(mapFragErrorLine(FRAG_HEADER_LINES + 3)).toEqual({ line: 3 });
+	});
+});
+
 describe('patchVertForWebGL2 / patchBlitForWebGL2', () => {
 	const VERT_SRC = [
 		'#version 100',
@@ -110,6 +163,17 @@ describe('patchVertForWebGL2 / patchBlitForWebGL2', () => {
 		'uniform sampler2D uTex;',
 		'void main() { gl_FragColor = texture2D(uTex, vUV); }',
 	].join('\n');
+
+	// 注入头自身的行数就是行号换算的基准。头是用字符串拼出来的（改源码排版、
+	// 拆行/合并都会悄悄改变行数），所以这里直接断言"常量 == 头实际行数"，
+	// 防止改了头却忘了改 *_HEADER_LINES，导致错误浮层定位整体错位。
+	test('注入头实际行数与 *_HEADER_LINES 常量一致', () => {
+		const body = 'void main() {}';
+		const headerOf = (out: string) => countLines(out.slice(0, -body.length));
+		expect(headerOf(patchVertForWebGL2(body))).toBe(VERT_HEADER_LINES);
+		expect(headerOf(patchBlitForWebGL2(body))).toBe(BLIT_HEADER_LINES);
+		expect(headerOf(patchFragForWebGL2(body, 'x.frag'))).toBe(FRAG_HEADER_LINES);
+	});
 
 	test('vert：attribute/varying 置空，行号对齐', () => {
 		const out = patchVertForWebGL2(VERT_SRC);

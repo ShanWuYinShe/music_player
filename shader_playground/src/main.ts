@@ -15,7 +15,7 @@ import { AudioSim, seedFromId } from './audioSim';
 import { installDnd, type LoadedFile } from './dnd';
 import { createEditor } from './editor';
 import { type Diagnostic, toDiagnostic } from './errors';
-import { BLIT_FILE, PRESETS, VERT_FILE } from './presets';
+import { BLIT_FILE, COMMON_FILE, PRESETS, VERT_FILE } from './presets';
 import { VizRenderer } from './renderer';
 
 // 与手机端一致的固定常量（不作为可调参数）
@@ -90,7 +90,7 @@ const editor = createEditor($('editor'), {
 function setStatusText(text: string, kind?: 'ok' | 'err' | 'warn'): void {
 	const el = $('status');
 	el.textContent = text;
-	el.className = 'status' + (kind ? ` ${kind}` : '');
+	el.className = kind ? `status ${kind}` : 'status';
 }
 
 function showDiagnostic(diag: Diagnostic): void {
@@ -196,7 +196,7 @@ function setSessionSource(name: string, text: string): void {
 
 async function loadAllShaderFiles(): Promise<void> {
 	setStatusText('加载源文件…');
-	const names = [...PRESETS.map((p) => p.file), BLIT_FILE, VERT_FILE];
+	const names = [...PRESETS.map((p) => p.file), BLIT_FILE, VERT_FILE, COMMON_FILE];
 	const results = await Promise.all(
 		names.map(async (name) => [name, await fetchShaderText(name)] as const),
 	);
@@ -204,12 +204,17 @@ async function loadAllShaderFiles(): Promise<void> {
 	setStatusText('源文件已加载', 'ok');
 }
 
-/** 「重读磁盘」：从磁盘重新读取当前文件（手机端构建用的就是这份） */
+/** 「重读磁盘」：从磁盘重新读取当前文件（手机端构建用的就是这份）。
+ *  公共库 common.glsl 注入所有场景，顺手一并重读。 */
 async function reloadCurrentFromDisk(): Promise<void> {
 	const file = currentFile();
 	try {
-		const text = await fetchShaderText(file);
+		const [text, commonText] = await Promise.all([
+			fetchShaderText(file),
+			fetchShaderText(COMMON_FILE),
+		]);
 		applySource(file, text);
+		applySource(COMMON_FILE, commonText);
 		suppressDocChange = true;
 		editor.setText(text);
 		suppressDocChange = false;
@@ -234,7 +239,8 @@ function resetCurrentToDisk(): void {
 
 /**
  * 拖入文件：替换语义（不是追加）。
- * .vert → 顶点源；blit.frag → blit；其余 → 替换当前选中的场景文件。
+ * .vert → 顶点源；blit.frag → blit；common.glsl → 公共库；
+ * 其余 → 替换当前选中的场景文件。
  */
 function handleDroppedFile(f: LoadedFile): void {
 	const name = f.name.toLowerCase();
@@ -242,6 +248,8 @@ function handleDroppedFile(f: LoadedFile): void {
 		setSessionSource(VERT_FILE, f.text);
 	} else if (name === BLIT_FILE) {
 		setSessionSource(BLIT_FILE, f.text);
+	} else if (name === COMMON_FILE) {
+		setSessionSource(COMMON_FILE, f.text);
 	} else {
 		setSessionSource(currentFile(), f.text);
 		suppressDocChange = true;

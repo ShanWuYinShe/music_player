@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "bun test",
+    "test": "vitest run",
     "lint": "biome check src tests vite.config.ts",
     "format": "biome check --write src tests vite.config.ts"
   },
@@ -19,9 +19,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
-    "@types/bun": "^1.4.0",
     "@types/node": "^26.4.0",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

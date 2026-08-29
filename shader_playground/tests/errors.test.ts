@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { ShaderError, toDiagnostic } from '../src/errors';
 
 describe('toDiagnostic：任何错误输入都不产生 "undefined"', () => {

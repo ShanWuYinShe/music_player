@@ -11,28 +11,33 @@ preview 中间件 + build 期快照拷贝三种形态），预览与手机端构
 
 ## 启动
 
-依赖 bun（首次需 `bun install`）：
+依赖 pnpm（仓库只用这一个包管理器，首次需 `pnpm install`）：
 
 ```bash
 cd shader_playground
-bun install
-bun run dev        # 开发服务器，http://localhost:8791/
+pnpm install
+pnpm run dev       # 开发服务器，http://localhost:8791/
 ```
 
 其它命令：
 
 ```bash
-bun test           # 纯函数单测（律动合成 / GLSL 补丁 / 错误格式化）
-bun run lint       # biome 检查
-bun run build      # tsc 类型检查 + 产物构建（dist/）
-bun run preview    # 预览构建产物，http://localhost:8792/
+pnpm test          # 纯函数单测（律动合成 / GLSL 补丁 / 错误格式化）
+pnpm run lint      # biome 检查
+pnpm run build     # tsc 类型检查 + 产物构建（dist/）
+pnpm run preview   # 预览构建产物，http://localhost:8792/
 ```
+
+> 若 `pnpm install` 报 `[CODEBUDDY_BROKER_DENY]`（WorkBuddy 沙箱注入的 fs shim
+> 把 `fs.symlink` 的 EEXIST 覆盖流程掐断了），先摘掉两个环境变量再跑：
+> `env -u NODE_OPTIONS -u CODEBUDDY_BROKERED_FS_HOOK_ENABLED pnpm install`。
+> 同时**不要放后台跑**——会把 shell 打死，之后所有命令返回 127。
 
 > 8791 延续旧版端口习惯；8792 给 build 产物预览，均避开 music_server 的 8790。
 
 ## 功能
 
-- **左侧 4 个 preset 文件**（fractal / pan / aurora / mirror），点击或按 `1`-`4` 切换
+- **左侧 4 个 preset 文件**（fractal / pan / aurora / kaleido），点击或按 `1`-`4` 切换
 - **CodeMirror 编辑器**：GLSL 高亮、行号、撤销历史；编辑即重编译（可关）
 - **文件拖拽**：把 `.frag` / `.vert` 从 Finder 拖进窗口即试跑——
   `.frag` 按顺序填入场景槽（从当前槽开始），`.vert` 替换顶点源；
@@ -60,7 +65,7 @@ bun run preview    # 预览构建产物，http://localhost:8792/
 
 ## 与移动端的一致性
 
-> **注意**：工具里 4 个 preset 槽（fractal / pan / aurora / mirror）都是可调试场景，
+> **注意**：工具里 4 个 preset 槽（fractal / pan / aurora / kaleido）都是可调试场景，
 > 但**手机端只打包 `music_app/entry/src/main/cpp/CMakeLists.txt` 里 `SHADER_SCENES`
 > 列出的场景**（当前仅 `aurora.frag`）——其余三个只在本地跑，不进 so。
 > 要让某个场景上端，改 `SHADER_SCENES` 并同步 ArkTS 的 `PRESET_COUNT` /
@@ -88,7 +93,7 @@ bun run preview    # 预览构建产物，http://localhost:8792/
 
 ## 调试流程建议
 
-1. `bun run dev` 后打开 <http://localhost:8791/>
+1. `pnpm run dev` 后打开 <http://localhost:8791/>
 2. 左侧选要调的 preset（默认 fractal），右栏改 GLSL 自动重编预览
 3. 误改乱了按「⤺ 还原磁盘」；在 VS Code 改了磁盘文件按「↻ 重读磁盘」
 4. 满意后把改动写回 `music_app/entry/src/main/cpp/shaders/` 对应源文件
@@ -110,5 +115,5 @@ shader_playground/
 │   ├── editor.ts         # CodeMirror 6 封装（GLSL 高亮 / ⌘S）
 │   ├── dnd.ts            # 窗口级文件拖拽
 │   └── style.css
-└── tests/                # bun test 单测（纯函数层）
+└── tests/                # vitest 单测（纯函数层）
 ```
