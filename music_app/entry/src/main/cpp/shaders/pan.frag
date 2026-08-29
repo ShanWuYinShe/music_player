@@ -30,8 +30,8 @@ const vec3 WIN_DIR = vec3(-0.486, 0.549, 0.684);   // 冷白窗（已归一）
 const vec3 BULB_DIR = vec3(0.503, 0.302, 0.809);   // 暖灯泡（已归一）
 const vec3 WIN_COLOR = vec3(0.92, 1.00, 1.18);
 const vec3 BULB_COLOR = vec3(1.30, 0.98, 0.62);
-const vec3 ROOM_SKY = vec3(0.045, 0.052, 0.070);   // 房间上半球（暗蓝灰）
-const vec3 ROOM_FLOOR = vec3(0.020, 0.014, 0.009); // 下半球（炉灶暗暖）
+const vec3 ROOM_SKY = vec3(0.085, 0.095, 0.115);   // 房间上半球（厨壁漫反）
+const vec3 ROOM_FLOOR = vec3(0.040, 0.028, 0.018); // 下半球（炉灶暗暖）
 const float WIN_SHARP = 20.0;      // 窗立体角（pow 锐度；宽一点让更多
                                     //   水珠边缘能挂到窗形高光）
 const float BULB_SHARP = 90.0;     // 灯泡更小
@@ -81,9 +81,12 @@ const float AO_DARKEN = 0.16;
 
 // ---- 水珠材质 -------------------------------------------------------------
 const float REFRACT_LEN = 0.052;   // 折射取样偏移量（球透镜）
-const float FOCUS_GAIN = 0.38;     // 滴心焦点亮斑（窗光被透镜聚到滴底）
-const float ABSORB_R = 1.5;        // 边缘路径吸收（水微吸收红；克制——
-                                    //   内部要亮，暗交给反射混合去做）
+const float FOCUS_GAIN = 0.50;     // 滴心焦点亮斑（窗光被透镜聚到滴底）
+const float LENS_GAIN = 0.45;      // 内部聚光：球透镜把房间环境光聚进
+                                    //   滴心——水珠中心比周围锅面亮，
+                                    //   这是"活水"的观感来源
+const float ABSORB_R = 0.8;        // 边缘路径吸收（克制：内部要亮，
+                                    //   暗部交给反射混合去做）
 const float CRESCENT_GAIN = 0.70;  // 背光侧内反射亮新月（水珠签名特征）
 const float SPARKLE_GAIN = 1.8;    // treble 驱动的闪点
 
@@ -147,7 +150,7 @@ float field(vec2 q, float ts, float sd, out vec2 g) {
         vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
             * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
         pos += trem;
-        float maxR = PAN_R - 2.1 * rad - 0.012;
+        float maxR = PAN_R - 2.3 * rad - 0.035;
         if (maxR > 0.0) {
             float pl = length(pos);
             if (pl > maxR) {
@@ -208,13 +211,12 @@ vec3 bg(vec2 q, float ts) {
     // 大尺度使用痕迹（油渍/水垢，低对比乘性）
     c *= 0.92 + 0.16 * fbm(q * 3.2 + 7.0);
 
-    // 热氧化回火色：稻草黄/琥珀 ↔ 钢蓝斑块（缓慢热漂移；不是发红光）
-    float burner = smoothstep(0.08, 0.16, r) * smoothstep(0.44, 0.30, r);
-    float tp = fbm(vec2(ang * 2.5 + 3.0, r * 9.0 - 2.0 + ts * 0.004));
-    vec3 temper = mix(vec3(0.62, 0.42, 0.16), vec3(0.15, 0.25, 0.52),
-        smoothstep(0.25, 0.75, tp));
-    c = mix(c, temper * (0.35 + 0.65 * fres), burner * 0.50
-        * (0.4 + 0.6 * fbm(q * 5.0 + 11.0)));
+    // 热氧化回火色：淡淡的静态径向环带——中心（最热）偏蓝紫，向外渐冷
+    // 成稻草黄（不锈钢氧化膜色序，真实炒菜锅底的"彩虹晕"，几乎静止）
+    float burner = smoothstep(0.05, 0.14, r) * smoothstep(0.46, 0.30, r);
+    float tK = smoothstep(0.10, 0.40, r);
+    vec3 temper = mix(vec3(0.42, 0.46, 0.62), vec3(0.60, 0.48, 0.26), tK);
+    c = mix(c, temper * (0.35 + 0.65 * fres), burner * 0.22);
 
     // 锅沿：侧壁渐暗 + 卷边高光弧（用环境光，下侧映炉灶更暗）
     c *= 1.0 - 0.30 * smoothstep(0.36, PAN_R, r);
@@ -238,7 +240,9 @@ void main() {
         * vec2(vn(q * 13.0 + ts * 1.1), vn(q * 13.0 + 31.0 - ts * 0.9))
         - (0.0006 + 0.0008 * heat);
 
-    float panMask = smoothstep(PAN_R + 0.02, PAN_R - 0.05, length(qw));
+    // 锅内 mask：用未扭曲坐标判定（场与影都不许溢出锅沿，也不被热浪
+    // 抖动带出锅外）
+    float panMask = smoothstep(PAN_R + 0.02, PAN_R - 0.05, length(q));
 
     vec2 g;
     float F = field(qw, ts, sd, g) * panMask;
@@ -269,11 +273,12 @@ void main() {
     float ndv = max(dot(n, V), 0.0);
     float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
-    // 折射：球透镜放大（偏向滴心；边缘偏移大）；路径吸收（微吸红）
+    // 折射：球透镜放大（偏向滴心；边缘偏移大）；路径吸收（微吸红）；
+    // + 内部聚光：透镜把房间环境光聚进滴心（中心明显亮于周围锅面）
     vec2 ruv = qw + gn0 * (1.0 - n.z) * REFRACT_LEN;
-    vec3 through = bg(ruv, ts) * 1.25;
-    through *= vec3(0.965, 0.982, 0.996);
-    through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.4, 1.0, 0.8));
+    vec3 through = bg(ruv, ts) * 1.45 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
+    through *= vec3(0.970, 0.985, 0.998);
+    through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.35, 1.0, 0.82));
     // 焦点亮斑：窗光被透镜聚到滴底（滴心平顶处最亮）
     through += WIN_COLOR * pow(ndv, 7.0) * FOCUS_GAIN;
 

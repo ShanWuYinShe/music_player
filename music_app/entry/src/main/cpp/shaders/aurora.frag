@@ -29,27 +29,32 @@ const float FB_GAIN = 0.20;         // 反馈增益（>0.35 会拖泥带水盖�
 const float FB_ZOOM = 1.004;        // 采样微胀——余晖微微向外晕开
 const float FB_CHROMA = 0.0009;     // 极轻色散（镜头感）
 
-// ---- 磁天顶（光柱汇聚点，屏幕上方外侧，慢游走）----------------------------
-const vec2 APEX_BASE = vec2(0.02, 0.90);   // 场景坐标（sceneUV 系）；
-                                            //   离屏顶近 → 放射汇聚更明显
-const vec2 APEX_WANDER = vec2(0.13, 0.11);
+// ---- 磁天顶（光柱汇聚点，画面上方远处，慢游走）----------------------------
+// 离屏远一点 → 放射线接近垂直（真实照片里磁天顶通常在画外高处，
+// 太近会造成大角度斜条纹，削弱"帘幕垂直光柱"的观感）
+const vec2 APEX_BASE = vec2(0.02, 1.42);
+const vec2 APEX_WANDER = vec2(0.16, 0.13);
 
 // ---- 帘幕结构 --------------------------------------------------------------
+// 竖屏构图：帘幕是"从天顶垂下的高光幕"——底边（最亮最锐）落在画面
+// 中部 0.02~0.30，帘体向上贯穿到画面顶（H 大）才渐隐。又扁又低的帘
+// 读作"雾带"，是 v3 失败的根源。
 const int CURTAIN_N = 4;
-const float BASE_Y_LO = -0.190;     // 帘幕基线区间（竖屏 q.y ∈ −0.42~0.58）
-const float BASE_Y_HI = 0.360;
-const float ARC_GAIN = 0.30;        // 大尺度弧（帘的整体走势）
-const float WOB_AMP = 0.050;        // 行波褶皱幅度（叠加两波）
-const float BODY_H = 0.145;         // 帘体向上指数衰减高度
-const float BORDER_W = 0.0035;      // 下缘亮线 σ（极锐！且下方不对称更快截止）
-const float RED_LIFT = 0.135;       // 氧红层相对绿层的抬升量
-const float RED_H_K = 2.3;          // 氧红层衰减高度 = BODY_H × K（更宽）
-const float RAY_FREQ = 92.0;        // 光柱角向频率（az 跨度约 0.27 rad）
+const float BASE_Y_LO = 0.020;      // 帘幕底边区间（画面中部）
+const float BASE_Y_HI = 0.300;
+const float TILT_AMP = 0.42;        // 帘幕整体倾斜（每帘不同——大幅斜跨
+                                    //   画面，不是水平带）
+const float ARC_GAIN = 0.34;        // 大尺度 fbm 弧（帘的整体走势）
+const float WOB_AMP = 0.055;        // 行波褶皱幅度（叠加两波）
+const float BODY_H = 0.42;          // 帘体向上衰减高度（贯穿上半屏！）
+const float BORDER_W = 0.0045;      // 下缘亮线 σ（极锐！且下方不对称截止）
+const float RED_LIFT = 0.24;        // 氧红层相对绿层的抬升量
+const float RED_H_K = 1.5;          // 氧红层衰减高度 = BODY_H × K
+const float RAY_FREQ = 82.0;        // 光柱角向频率
 const float RAY_DRIFT = 0.090;      // 光柱沿帘漂移
-const float BODY_GAIN = 0.85;       // 帘体增益
-const float EDGE_GAIN = 4.20;       // 下缘亮线增益（帘幕最亮元素，实拍里
-                                    //   最抢眼的就是这条线——宁亮勿暗）
-const float WIDE_GAIN = 0.16;       // 宽尺度环境光晕（镜头 bloom 的解析近似）
+const float BODY_GAIN = 1.15;       // 帘体增益
+const float EDGE_GAIN = 4.60;       // 下缘亮线增益（帘幕最亮元素）
+const float WIDE_GAIN = 0.14;       // 宽尺度环境光晕（镜头 bloom 解析近似）
 
 // ---- 发射谱色（线性 HDR）----------------------------------------------------
 const vec3 EMIT_GREEN = vec3(0.300, 1.000, 0.450);  // OI 557.7nm（略偏青消霓虹感）
@@ -63,9 +68,10 @@ const float ACT_SCALE = 71.0;       // substorm 慢相位（秒/格）
 const float SURGE_RATE = 0.10;      // 沿帘扫过的增亮波（空间频率系，速度恒定）
 
 // ---- 背景 ------------------------------------------------------------------
-const vec3 SKY_ZENITH = vec3(0.010, 0.016, 0.030);
-const vec3 SKY_HORIZON = vec3(0.030, 0.042, 0.062);
-const float MW_GAIN = 0.55;
+// 背景必须比帘幕暗一档（v3 星空/银河抢戏，帘幕淹没）——锚点要，但要收敛
+const vec3 SKY_ZENITH = vec3(0.007, 0.011, 0.021);
+const vec3 SKY_HORIZON = vec3(0.022, 0.032, 0.048);
+const float MW_GAIN = 0.30;
 const float RIDGE_FAR_Y = -0.335;
 const float RIDGE_NEAR_Y = -0.435;
 const float SEED_SPREAD = 173.0;
@@ -103,21 +109,23 @@ vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
 
     float span = mix(0.62, 1.55, depth);
 
-    // 基线：纵贯分布 + 大尺度 fbm 弧（帘的走势，慢）
+    // 底边曲线：基线 + 每帘独立倾斜（大幅斜跨画面）+ 大尺度 fbm 弧 +
+    // 行波褶皱 + 高频荷叶边——帘幕是大幅弯曲的幕，不是水平带
     float baseY = mix(BASE_Y_LO, BASE_Y_HI, fi / float(CURTAIN_N - 1))
         + 0.04 * sin(ts * 0.05 + fi * 2.2 + h2 * 6.28);
-    float yc = baseY + (fbm(vec2(q.x * (0.7 + 0.5 * h1) + fi * 7.7,
-        ts * 0.014 + sd)) - 0.5) * ARC_GAIN * span;
-    // 行波褶皱（速度恒定；幅度随活跃度抬升——不是速度）+ 高频小荷叶边
-    // （实拍下缘永远有细碎的褶——"帘"的质感来源）
+    float tilt = TILT_AMP * (h1 - 0.5) * 2.0;
+    float yc = baseY + tilt * q.x
+        + (fbm(vec2(q.x * (0.7 + 0.5 * h1) + fi * 7.7,
+            ts * 0.014 + sd)) - 0.5) * ARC_GAIN * span
+        + tilt * 0.35 * q.x * q.x; // 轻微弧形倾斜（帘的弯曲度）
+    // 行波褶皱（速度恒定；幅度随活跃度抬升——不是速度）
     float wobA = WOB_AMP * span * (0.55 + 0.75 * act);
     yc += wobA * sin(q.x * (2.3 + 1.1 * h2) - ts * (0.26 + 0.16 * h3) + fi * 2.1);
     yc += wobA * 0.55 * sin(q.x * (4.9 + 1.6 * h1) + ts * (0.17 + 0.12 * h2) + fi * 4.7);
-    yc += 0.0045 * span * sin(q.x * (16.0 + 5.0 * h1) + ts * 0.55 + fi * 9.0);
+    yc += 0.0060 * span * sin(q.x * (16.0 + 5.0 * h1) + ts * 0.55 + fi * 9.0);
 
-    // 水平存在感：帘有缺口/进退（画面不是均匀被帘铺满；低频 → 大段缺口）
-    // （性能：低频信号用 2 个单倍频 vn 拼而非 4 倍频 fbm）
-    float presence = smoothstep(0.38, 0.62,
+    // 水平存在感：柔化进退（0.55~1，不切碎——v3 的硬缺口把帘拆成了碎雾）
+    float presence = 0.55 + 0.45 * smoothstep(0.35, 0.65,
         0.6 * vn(vec2(q.x * 0.55 + fi * 11.0, ts * 0.010 + sd * 0.7))
         + 0.4 * vn(vec2(q.x * 1.7 + fi * 3.0, ts * 0.017 + sd * 1.9)));
 
@@ -126,11 +134,11 @@ vec3 curtain(vec2 q, float az, float fi, float ts, float sd, float depth,
     // 实拍里帘幕总有几根扎眼的细亮线，其余是刚可辨的背景柱）
     float rf = fbm(vec2(az * RAY_FREQ + ts * RAY_DRIFT * (0.6 + 0.5 * h2)
         + fi * 17.0, fi * 3.1 + sd));
-    float rays = 0.08 + 0.92 * pow(rf, 2.2);
-    float hero = pow(rf, 3.0) * (0.9 + 2.8 * act);
+    float rays = 0.06 + 0.94 * pow(rf, 2.4);
+    float hero = pow(rf, 2.8) * (1.0 + 3.2 * act);
     float needles = pow(fbm(vec2(az * RAY_FREQ * 2.7
-        + ts * RAY_DRIFT * 1.35 + fi * 23.0, fi * 6.7 + sd)), 9.0)
-        * (0.9 + 2.6 * act);
+        + ts * RAY_DRIFT * 1.35 + fi * 23.0, fi * 6.7 + sd)), 8.0)
+        * (0.9 + 2.8 * act);
     float flick = 0.84 + 0.16 * sin(ts * (2.6 + 2.2 * h3) + az * 240.0
         + fi * 5.0 + uTreble * 5.0);
 
