@@ -13,6 +13,12 @@
 //               膜连续变形（脑珊瑚/生物晶格感）；
 //     4 VORONOI 移动 cell 的 F2−F1 边网络——霓虹电路，脉冲沿边行波。
 //
+// v4.1 运动增强（用户："分形运动感更强"）：各形态演化速率 ×~1.4
+//   （DIVE_SPEED 0.58→0.78、GY_PHASE_RATE 0.12→0.17、FORM_RATE 0.021→0.030、
+//   KALI_ROT_RATE 0.020→0.028、VOR_PULSE_RATE 1.6→2.2、WARP_T1/T2 0.045/0.031
+//   →0.062/0.043 等）+ 幅度增强（KIFS_ROT_AMP 0.45→0.55、WARP_AMP 3.2/3.0
+//   →3.7/3.5）。音频量铁律不变（只进亮度，不进速度）。
+//
 // 轮换机制（v4）：22s 形态轮换，**周期末尾 1/3（7s）平滑 crossfade** 进入
 // 下一场——每场前 ~2/3 清晰呈现当前形态、后 1/3 平滑融入下一形态，切换是
 // 持续的流动（用户："希望内置几个效果自己平滑切换"）。v3.1 在周期两侧各有
@@ -36,16 +42,16 @@
 const float LNS = 0.6931472;        // log(2)
 const float OCT_PERIOD = 6.0;
 const float OCT_PERIOD_2 = 9.7082039; // 6φ，与第一层不可通约
-const float DIVE_SPEED = 0.58;      // 八度/秒（恒定！）
-const float LAYER_BLEND_RATE = 0.009;
+const float DIVE_SPEED = 0.78;      // 八度/秒（恒定！）
+const float LAYER_BLEND_RATE = 0.013;
 const float SEED_DIVE_OFFSET = 0.37;
 const float SYM_A = 6.0;
 const float SYM_B = 8.0;
-const float SYM_MORPH_RATE = 0.007;
+const float SYM_MORPH_RATE = 0.010;
 const float ANGLE_DRIFT_AMP = 0.06;
-const float ANGLE_DRIFT_RATE = 0.017;
-const float FORM_RATE = 0.021;
-const float FORM_RATE_2 = 0.034;
+const float ANGLE_DRIFT_RATE = 0.024;
+const float FORM_RATE = 0.030;
+const float FORM_RATE_2 = 0.047;
 
 // ---- Julia / KIFS（DIVE 内部）--------------------------------------------
 const int JULIA_ITER = 12;
@@ -62,7 +68,7 @@ const float KIFS_S_DRIFT = 0.16;
 const float KIFS_S_BASS = 0.04;
 const vec2 KIFS_OFF_BASE = vec2(0.90, 0.65);
 const float KIFS_OFF_DRIFT = 0.30;
-const float KIFS_ROT_AMP = 0.45;
+const float KIFS_ROT_AMP = 0.55;
 const float KIFS_TRAP_SHARP = 5.0;
 const float KIFS_DENS_K = 3.0;
 const float KIFS_ESCAPE_R2 = 36.0;
@@ -71,23 +77,23 @@ const float KIFS_LEV_HUE = 0.55;
 // ---- KALI -----------------------------------------------------------------
 const int KALI_ITER = 10;
 const float KALI_SCALE = 1.12;       // 起始域尺度（不缩放，只慢转）
-const float KALI_ROT_RATE = 0.020;   // 整体缓转（弧度/秒）
+const float KALI_ROT_RATE = 0.028;   // 整体缓转（弧度/秒）
 const float KALI_TRAP_SHARP = 6.0;   // 轨道陷阱丝线锐度
 const float KALI_ACC_DECAY = 0.86;   // 驻留累积的层间衰减
 
 // ---- WARP -----------------------------------------------------------------
 const float WARP_SCALE = 1.6;
-const float WARP_T1 = 0.045;         // 一级 warp 相位速
-const float WARP_T2 = 0.031;         // 二级 warp 相位速（不可通约）
-const float WARP_AMP1 = 3.2;
-const float WARP_AMP2 = 3.0;
+const float WARP_T1 = 0.062;         // 一级 warp 相位速
+const float WARP_T2 = 0.043;         // 二级 warp 相位速（不可通约）
+const float WARP_AMP1 = 3.7;
+const float WARP_AMP2 = 3.5;
 const float WARP_BAND_FREQ = 2.5;    // 等值丝密度
-const float WARP_SCROLL = 0.015;     // 等值丝滚动
+const float WARP_SCROLL = 0.021;     // 等值丝滚动
 
 // ---- GYROID ---------------------------------------------------------------
-const float GY_PHASE_RATE = 0.12;    // 切片沿第三维推进（形态演化主驱动）
+const float GY_PHASE_RATE = 0.17;    // 切片沿第三维推进（形态演化主驱动）
 const float GY_SCALE = 4.2;
-const float GY_ROT_RATE = 0.015;
+const float GY_ROT_RATE = 0.021;
 const float GY_MEMBRANE_K = 10.0;    // 膜面（|G|→0）锐度
 const float GY_MEMBRANE2_K = 16.0;   // 二尺度细膜
 
@@ -95,7 +101,7 @@ const float GY_MEMBRANE2_K = 16.0;   // 二尺度细膜
 const float VOR_SCALE = 5.0;
 const float VOR_ORBIT = 0.38;        // cell 点位轨道幅度（慢速圆轨道）
 const float VOR_EDGE_K = 160.0;      // 边线锐度
-const float VOR_PULSE_RATE = 1.6;    // 沿边脉冲行波速度
+const float VOR_PULSE_RATE = 2.2;    // 沿边脉冲行波速度
 
 // ---- 形态轮换 --------------------------------------------------------------
 // 22s 形态轮换，**周期末尾 1/3（7s）平滑 crossfade** 进入下一场（单侧！

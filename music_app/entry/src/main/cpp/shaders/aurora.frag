@@ -1,5 +1,10 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v14 氛围增强（用户："增强氛围感"）：WIDE_GAIN 0.07→0.10（光带周围弥散
+// 光晕）、GROUND_GLOW 0.10→0.16（雪原被极光照亮）、STAR_GAIN 1.25→1.45
+// （星空氛围）、SKY_HORIZON 微提（地景衔接）、新增低空大气绿弥散 AIRGLOW
+// （极光漫射点亮低空一层淡绿余晖）。暗天空纪律保持（sky_top ≈10.9 仍暗）。
+//
 // v13 绸带重构（用户："真实的极光不是竖直射线光幕，是多变的像绸带一样"）：
 //   v12 把"薄带"改成"光幕"（大片竖直射线）又错了——真实极光是**绸带**：
 //   细长柔软、持续蛇形游动的丝带。核心改动：
@@ -233,7 +238,7 @@ const float RAY_BEND = 0.10;        // 射线随带边波的弯曲（真实射�
                                     //   0.38 的大弯曲 = 布料褶皱感）
 const float BODY_GAIN = 0.80;        // 带体增益（v13 绸带：光幕 0.75 基础上微调
                                     //   ——绸带更集中，柔和不洗屏）
-const float WIDE_GAIN = 0.07;       // 宽尺度环境光晕（收敛：光带周围只有
+const float WIDE_GAIN = 0.10;       // 宽尺度环境光晕（收敛：光带周围只有
                                     //   一丝弥散，不能被光晕糊成一片）
 
 // ---- v8 射线解耦（v13 弱化：射线是绸带内部的柔和纹理，不是主导）-----------
@@ -260,13 +265,14 @@ const float RED_ACT = 0.30;         // 活跃时氧红增强量
 const float ACT_SCALE = 71.0;       // substorm 慢相位（秒/格）
 const float SURGE_WAVE_FREQ = 1.8;  // v8 传播波空间频率（沿带波长）
 const float SURGE_SPEED = 0.9;      // v8 传播波速度（rad/s，恒定方向）
-const float GROUND_GLOW = 0.10;     // v8 地平线低空辉光增益（雪原被照亮）
-const float STAR_GAIN = 1.25;       // v8 星空亮度增益（照片里星更明显）
+const float GROUND_GLOW = 0.16;     // v8 地平线低空辉光增益（雪原被照亮）
+const float AIRGLOW = 0.10;        // v14 低空大气绿弥散（极光漫射点亮低空）
+const float STAR_GAIN = 1.45;       // v8 星空亮度增益（照片里星更明显）
 
 // ---- 背景 ------------------------------------------------------------------
 // 背景必须比帘幕暗一档（v3 星空/银河抢戏，帘幕淹没）——锚点要，但要收敛
 const vec3 SKY_ZENITH = vec3(0.007, 0.011, 0.021);
-const vec3 SKY_HORIZON = vec3(0.022, 0.032, 0.048);
+const vec3 SKY_HORIZON = vec3(0.030, 0.043, 0.062);
 const float MW_GAIN = 0.30;
 const float RIDGE_FAR_Y = -0.335;
 const float RIDGE_NEAR_Y = -0.435;
@@ -542,10 +548,14 @@ void main() {
         + starLayer(q, 19.0, 0.94, ts, sd) * 2.4;
     sky += stars * veil * transA * STAR_GAIN;
 
-    // ---- 合成：直绘 + 宽光晕 + 反馈余晖 ----
+    // ---- 合成：直绘 + 宽光晕 + 低空大气绿 + 反馈余晖 ----
     // 宽光晕偏蓝：散射光把绿拉向青蓝（夜空里帘幕周围的弥散光就是这样）
     vec3 col = sky + emis
-        + mix(EMIT_GREEN, vec3(0.40, 0.70, 1.00), 0.35) * wide * WIDE_GAIN;
+        + mix(EMIT_GREEN, vec3(0.40, 0.70, 1.00), 0.35) * wide * WIDE_GAIN
+        // v14 氛围：极光漫射在空气中的淡绿余晖，贴地平线一层（像极光把
+        // 低空大气点亮），很淡不抢戏
+        + EMIT_GREEN * exp(-pow((q.y - RIDGE_FAR_Y) * 5.0, 2.0))
+            * AIRGLOW * transA;
 
     // 反馈余晖：微胀采样 + 轻色散（镜头感），只做柔光不参与结构
     vec2 fuv = (vUV - 0.5) * FB_ZOOM + 0.5;
