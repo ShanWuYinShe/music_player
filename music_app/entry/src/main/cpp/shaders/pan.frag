@@ -1,4 +1,39 @@
-// pan.frag：高温凹底锅上的莱顿弗罗斯特水珠（照片级 v9：真球冠锅底 + 不规则类球体水珠）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v10：黑碳钢+热纹+沸腾+飞溅+白烟）。
+//
+// v10 相对 v9 的"贴近真实热炒场景"重大返工（参考实拍：黑碳钢锅+燃气灶
+// 圈+锅心红热+水珠沸腾爆裂+锅口白烟弥漫）：
+//   1. **锅底材质从拉丝不锈钢改黑碳钢/铸铁**：v9 的亮反射（PAN_SPEC=0.72、
+//      albedo 0.14）是"厨房用品"质感，但参考图是**磨砂黑碳钢**（低反照率
+//      0.05~0.08、镜面锐度高但能量低）——这是炒锅的本色：深色 + 吸光 +
+//      高对比微反射。PAN_DIFF 0.18→0.55（哑光漫反射主导，不是金属镜面）、
+//      PAN_SPEC 0.72→0.30（微镜面，不抢戏）、albedo 0.14→0.07。
+//   2. **锅底温度场 + 同心圆加热纹 + 锅心红热**：参考图锅底有明显的同心圆
+//      燃气加热纹（亮环交替）和锅心红热区。v10 加 tempField(p) 返回 0~1
+//      温度——同心圆环 fbm + 锅心温度衰减。同心圆环作为反照率调制（亮
+//      环 1.15×、暗环 0.85×），温度高时混入暗红（>0.7→红热），温区
+//      混入灶圈蓝光（0.4~0.7→蓝黑）。这是"锅在受热"的视觉证据——
+//      没有温度场的锅面就是冷铁皮。
+//   3. **水珠沸腾翻滚**：v9 的 HEAT_JITTER 是均匀的 ±6% 半径脉动，看起来
+//      像液滴在"颤"，但不像"沸"。v10 加 boilK（每滴独立沸腾度，随生命
+//      周期慢变）：wob 振幅 ×(1+boilK*0.5) 让形状更剧烈变形，半径
+//      ×(1+boilK*0.12*sin(...)) 让高度场大幅脉动，接触阴影同步
+//      抖动——液滴"内部在翻腾"，不再只是抖。
+//   4. **接触处沸腾暗环 + 气泡**：v9 的焦散是亮环（液滴把光聚到锅面）。
+//      参考图接触处是**暗环**（沸腾区，温度极高 + 碳渍 + 气泡群），实
+//      拍炒锅里沸腾区颜色比周围暗（不是更亮）。v10 用 tempField 在接触
+//      处的局部高温驱动暗化，再叠一层高频小气泡（细密暗点群）。
+//   5. **飞溅粒子（简化实现）**：参考图大液滴濒死时炸出小液滴。v10 在
+//      濒死期（lifeK>0.9）让液滴形状极不规则（wob 振幅 ×3 接近爆裂态），
+//      并从液滴中心沿速度方向射出 2-3 道短亮线（视觉上的"飞溅"轨迹）。
+//      真正的粒子系统需多层渲染 / 几何 shader，单 pass fragment 内
+//      难做全套；这种"溅射条纹"是单 pass 下的高性价比近似。
+//   6. **锅口白烟增强**：v9 蒸汽只有 1 层（STEAM_ALPHA=0.38）。v10 加
+//      接触处局部白烟（每颗水珠周围小范围浓白雾，活跃时更浓）——
+//      沸腾的水珠不只是冒大蒸汽，接触处先冒一小团白烟。两个蒸汽层
+//      叠加 = 锅口弥漫的白雾。
+//
+// 不变量：BOTTOM_NEAR / BOTTOM_FAR / innerWallColor / 蒸汽开口面源
+// 都不动（回归测试已锁）；真·凹底几何核心（v8）保留。
 //
 // v9 相对 v8.1 的物理增强（用户要求四件事：锅底是球形曲面不是平面；
 // 水珠是不规则类球体不是标准半球；水珠受热上下震动 + 运动速度随机；
@@ -139,11 +174,20 @@ const float WALL_W = 0.28;         // 内壁环带基准宽度（锅局部坐标
                                    //   0.24→0.28：环带更宽，远侧"映天花板"
                                    //   的亮区更显著，深锅俯视透视更扎实）
 const float OUTER_W = 0.10;        // 外壁环带宽度
-const float PAN_DIFF = 0.18;       // 钢面漫反射占比（v8 再压暗——黑锅 =
-                                   //   暗底 + 强高光，不是发灰的亮钢面）
-const float PAN_SPEC = 0.72;       // 钢面镜面强度（金属反射主导）
-const float BRUSH_PERTURB = 0.060; // 拉丝法线扰动（=粗糙度；v9 0.085→0.060，
-                                   //   锅底更接近光滑球面，拉丝只留轻质感）
+const float PAN_DIFF = 0.55;       // 钢面漫反射占比（v10 黑碳钢 0.18→0.55：
+                                   //   哑光磨砂碳钢的漫反射是主项，不是镜面；
+                                   //   亮反射会让锅变成"厨房用品"质感，不像
+                                   //   实拍黑炒锅）
+const float PAN_SPEC = 0.30;       // 钢面镜面强度（v10 0.72→0.30：黑碳钢只
+                                   //   在窗光直射处出微高光，不抢戏）
+const float BRUSH_PERTURB = 0.045; // 拉丝法线扰动（v10 0.060→0.045：黑碳钢
+                                   //   比拉丝不锈钢更光滑，只有极轻的拉丝质感）
+const float ALBEDO_BASE = 0.07;     // v10 锅底反照率基色（0.14→0.07：黑碳钢
+                                   //   比不锈钢暗 1 个 stops）
+const float HEAT_TINT = 0.55;       // 锅心红热混入强度（温度 > 0.7 时往暗红
+                                   //   偏——参考图锅心是暗红热区）
+const float FLAME_BLUE = 0.30;      // 灶圈蓝光混入强度（温度 0.4~0.7 区间，
+                                   //   燃气反射的蓝色调）
 
 // ---- 水滴群（锅局部坐标：单位圆 = 锅口内沿）---------------------------------
 const int DROPLET_COUNT = 44;      // 30 主滴 + 14 卫星滴（v8：真实莱顿弗罗
@@ -167,6 +211,16 @@ const float WOB_SIZE_HI = 0.240;
 const float WOB_STRETCH = 0.40;    // 定向拉伸幅度（v9：受热不均 → 液滴沿
                                    //   受热最弱方向拉长成泪滴形，非球对称）
 const float WOB_TURN = 0.32;       // 定向拉伸方向随受热慢转（弧度/滴生命周期）
+const float WOB_BOIL_AMP = 0.50;   // v10 沸腾变形振幅系数（boilK × WOB_BOIL_AMP
+                                   //   加到 wob 振幅上——沸腾时形状剧烈变形）
+
+// ---- 锅底温度场（v10）---------------------------------------------------
+const float HEAT_RING_FREQ = 28.0; // 同心圆加热纹频率（每单位多少环）
+const float HEAT_RING_DRIFT = 0.20;// 加热纹慢漂（锅热时纹路在游动）
+const float HEAT_RING_K = 0.18;    // 加热纹反照率调制深度（0.82~1.18）
+const float HEAT_CENTER_BIAS = 0.35;// 锅心温度偏置（同心圆纹整体偏向锅心热）
+const float BUBBLE_DARKEN = 0.55;  // 接触处小气泡暗化强度
+const float BUBBLE_FREQ = 80.0;     // 接触处小气泡密度（每单位多少点）
 
 // ---- 游走与濒死 ----------------------------------------------------------
 const float PANIC_FROM = 0.93;
@@ -181,6 +235,9 @@ const float HEAT_JITTER = 0.06;    // v9 受热震动：蒸气垫把液滴顶起
                                    //   永远是"跳着"的，不是静止的玻璃珠
 const float HEAT_DRIFT = 11.0;     // 热斑漂移周期（秒；受热不均随时间的
                                    //   变化速率——每滴的热强度在漂移）
+const float BOIL_KICK = 0.12;      // v10 沸腾半径脉动幅度（boilK × BOIL_KICK
+                                   //   加到半径上——沸腾时液滴高度大幅脉动）
+const float BOIL_RATE = 4.5;        // v10 沸腾主频率（Hz；每滴独立相位）
 const float TREMBLE_AMP = 0.026;   // 锅局部坐标（约为屏幕坐标的 1/0.35）
 const float TREMBLE_BASS = 1.6;
 const float WANDER_NORM = 1.55;
@@ -221,8 +278,14 @@ const float IRID_FALLOFF = 22.0;    // 虹彩环带宽度（越小越贴接触�
 const float CAUSTIC_GAIN = 0.52;    // 接触线外缘焦散环强度
 
 // ---- 蒸汽 / 收尾 ----------------------------------------------------------
-const float STEAM_ALPHA = 0.38;    // v8 加强（水珠蒸发的气要看得见）
+const float STEAM_ALPHA = 0.55;    // 锅口蒸汽浓度（v10 0.38→0.55：参考图
+                                   //   锅口弥漫着浓密白雾）
 const float STEAM_RISE = 0.50;     // 上升速度（屏/秒，恒定）
+const float STEAM_LOCAL_GAIN = 0.30; // v10 接触处白烟浓度（每颗水珠周围
+                                   //   的小范围浓白雾——沸腾先冒小团再合并
+                                   //   到锅口大蒸汽）
+const float SPLASH_GAIN = 0.8;     // v10 飞溅条纹强度（濒死期从液滴中心
+                                   //   沿速度方向射出的 2-3 道短亮线）
 const float SEED_SPREAD = 173.0;
 
 // 环境辐射：一组方向光照亮整个场景（锅面镜面、水珠反射、台面全用它）
@@ -269,12 +332,21 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         float lifeK = age / P;
         float grow = mix(GROW_MIN, 1.0, smoothstep(0.0, GROW_PHASE, lifeK));
         float rr = r0 * r0 * grow * max(1.0 - lifeK, 0.0);
+        // 沸腾度（v10）：每滴独立沸腾相位——蒸气速在液滴底部生成气泡，
+        // 气泡破裂让液滴"内部在翻腾"。沸腾度同时调制半径脉动幅度和
+        // 形状变形振幅，活跃期（lifeK 0.5~0.9）最强，濒死期还伴随
+        // 形状极不规则（接近爆裂态）。两个频率叠加避免节拍化
+        float boilK = 0.5 + 0.5 * sin(age * BOIL_RATE + fi * 5.7)
+            * (0.5 + 0.5 * sin(age * (BOIL_RATE * 0.43) + fi * 1.9));
         // 受热震动（v9）：蒸气垫把液滴顶起→落下，半径 ±6% 高频脉动——
-        // 两个不可通约频率（9+7h2 与 2.3+0.7h4）叠出"跳着"的活体感，
-        // 影子/轮廓/焦散随场同步搏动；幅度远小于濒死弹跳（0.28）
+        // 两个不可通约频率叠出"跳着"的活体感
         float heatHop = 1.0 + HEAT_JITTER * sin(age * (9.0 + 7.0 * h2) + fi * 3.7)
             * (0.5 + 0.5 * sin(age * (2.3 + 0.7 * h4) + fi * 1.9));
-        rr *= heatHop;
+        // 沸腾半径脉动（v10）：boilK × BOIL_KICK 调制——沸腾时液滴高度
+        // 大幅脉动（液滴在"咕嘟咕嘟"地翻）
+        float boilKick = 1.0 + BOIL_KICK * boilK
+            * sin(age * (BOIL_RATE * 2.7) + fi * 4.3);
+        rr *= heatHop * boilKick;
         // 濒死弹跳：蒸气垫破裂前液滴在锅面上蹦跳（半径脉动 → 接触阴影
         // 与轮廓同步搏动；系数最低 0.72，不会反号）
         float hopK = smoothstep(PANIC_FROM, 1.0, lifeK);
@@ -337,8 +409,14 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         float dperp = dot(d, vec2(-vh.y, vh.x)) * (1.0 + 0.18 * k);
         float dlen2 = dpar * dpar + dperp * dperp + 1e-6;
         float wsize = smoothstep(WOB_SIZE_LO, WOB_SIZE_HI, rad);
-        float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize);
-        float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize);
+        // 沸腾度调制 wob 振幅（v10）：沸腾时形状剧烈变形——大珠在
+        // lifeK 中段 (0.5~0.9) 变形振幅 ×2+，濒死期 (lifeK>0.9) ×3 接近
+        // 爆裂态（飞溅条纹的视觉基础）
+        float boilShape = 1.0 + boilK * WOB_BOIL_AMP
+            * (0.5 + 1.5 * smoothstep(0.85, 0.99, lifeK));
+        float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize) * boilShape;
+        float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize)
+            * (1.0 + 0.6 * boilK * smoothstep(0.85, 0.99, lifeK));
         float da = atan(dperp, dpar);
         // 不规则类球体（v9）：2~7 阶五谐波混合 + 定向拉伸。标准半球是球
         // 对称的；真实蒸气垫液滴是不对称变形体——多阶谐波给出"不是圆
@@ -362,12 +440,29 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
     return F;
 }
 
-// 锅底面：拉丝不锈钢（镜面主导）× 真球冠 + 静态回火色环带 + 使用痕迹
-// （锅局部坐标）。v9 锅底是**解析球冠**而非平面+线性倾斜：高度场
-// z = −R + √(R²−r²)（凹球面），法线 n ∝ (p/√(R²−r²), 1)。曲率集中在
-// 锅沿——锅心几乎平（法线竖直，反射天花板）、越靠底缘法线越陡（扫过
-// 整个环境：亮天花板 → 暗墙 → 台面暖光），"光滑球形面"的观感就来自
-// 这种非线性的曲率分布，而不是均匀渐变（后者像平面镜）。
+// 锅底温度场（v10）：返回 0..1 的归一化温度。同心圆燃气加热纹（频率由
+// HEAT_RING_FREQ 控制）提供周期性骨架，fbm 噪声给不均匀加热，锅心温度
+// 衰减（锅心受热最热，靠锅沿较冷）。最终用于反照率调制 + 红热/灶圈蓝
+// 染色：t<0.4 冷铁皮、0.4~0.7 灶圈蓝反射、>0.7 红热。
+float tempField(vec2 p) {
+    float r = length(p);
+    float ang = atan(p.y, p.x);
+    // 同心圆加热纹（亮环/暗环交替）
+    float ring = 0.5 + 0.5 * sin(r * HEAT_RING_FREQ - r * 0.0);
+    // 旋涡扰动让纹路不是死板的同心圆（参考图锅底有手摇动的不规则感）
+    float swirl = sin(r * HEAT_RING_FREQ * 0.9 + ang * 1.7) * 0.5;
+    ring = mix(ring, swirl, 0.3);
+    // 不均匀加热（fbm）
+    float heat = fbm(p * 4.5 + 11.0);
+    // 锅心温度偏置 + 越靠锅沿越冷
+    float radial = smoothstep(0.95, 0.10, r);
+    return clamp(0.35 * radial + 0.45 * ring + 0.20 * heat, 0.0, 1.0);
+}
+
+// 锅底面：黑碳钢/铸铁（v10）× 真球冠 + 温度场 + 同心圆加热纹 + 红热
+// + 灶圈蓝光 + 接触处沸腾气泡。v9 的拉丝不锈钢质感被替换：黑碳钢的
+// 漫反射主导（PANDIFF 0.55）、镜面锐但能量低（PAN_SPEC 0.30），反射
+// 的不是亮天花板，而是更暗的锅周环境——这是炒锅的本色。
 vec3 bg(vec2 p, float ts) {
     float r = length(p);
     float ang = atan(p.y, p.x);
@@ -375,9 +470,7 @@ vec3 bg(vec2 p, float ts) {
     float brush = vn(vec2(r * 260.0, ang * 3.0));
     float brushHi = vn(vec2(r * 720.0 + 40.0, ang * 9.0));
     vec2 radialDir = p / max(r, 1e-4);
-    // 球冠法线（解析）：p / √(R²−r²) 是凹球面的水平梯度（r→R 时趋向
-    // 无穷 = 法线在底缘近乎水平）。拉丝扰动轻叠在球冠上（v9 减到 0.060，
-    // 球面光滑，拉丝只留质感）
+    // 球冠法线（v9 解析）：p / √(R²−r²) ——曲率集中在锅沿
     float bowlSlope = 1.0 / sqrt(max(BOWL_RADIUS * BOWL_RADIUS - r * r, 1e-4));
     vec3 n = normalize(vec3(
         (brushHi - 0.5) * BRUSH_PERTURB * radialDir + p * bowlSlope, 1.0));
@@ -385,9 +478,21 @@ vec3 bg(vec2 p, float ts) {
     vec3 refl = 2.0 * n.z * n - vec3(0.0, 0.0, 1.0);
     vec3 spec = envMap(refl);
     float fres = 0.55 + 0.40 * pow(1.0 - n.z, 3.0);
-    vec3 albedo = vec3(0.14, 0.15, 0.16)   // v8 反照率再压（真实黑锅很暗）
-        + vec3(0.030) * (brush - 0.5)
-        + vec3(0.018) * (brushHi - 0.5);
+    // 温度场 + 同心圆加热纹调制反照率
+    float temp = tempField(p);
+    // 锅心红热（高温区往暗红偏）+ 温区灶圈蓝（中等温度偏蓝黑）
+    vec3 heatRed = vec3(0.32, 0.06, 0.02);     // 红热色（暗红，避免刺眼）
+    vec3 flameBlue = vec3(0.04, 0.07, 0.16);    // 灶圈蓝光（深蓝黑）
+    vec3 coldSteel = vec3(0.06, 0.06, 0.07);   // 冷碳钢色
+    vec3 baseColor = coldSteel
+        + flameBlue * smoothstep(0.40, 0.65, temp) * (1.0 - smoothstep(0.70, 0.85, temp))
+        + heatRed * smoothstep(0.70, 0.95, temp) * HEAT_TINT;
+    // 同心圆加热纹作为反照率调制（亮环 1.15×、暗环 0.85×）
+    float ringK = mix(1.0 - HEAT_RING_K, 1.0 + HEAT_RING_K,
+        0.5 + 0.5 * sin(r * HEAT_RING_FREQ + ts * HEAT_RING_DRIFT));
+    vec3 albedo = baseColor * ALBEDO_BASE * ringK
+        + vec3(0.020) * (brush - 0.5)
+        + vec3(0.012) * (brushHi - 0.5);
     vec3 c = albedo * envMap(vec3(0.0, 0.0, 1.0)) * PAN_DIFF
         + spec * PAN_SPEC * fres;
 
@@ -396,17 +501,19 @@ vec3 bg(vec2 p, float ts) {
     // 锅心聚油 + 凹底自阴影：中心压暗（"凹下去"的深度线索之一）
     c *= 1.0 - BOWL_DARK * smoothstep(0.85, 0.10, r);
 
-    // 回火色：静态径向环带（中心热偏蓝紫 → 外缘冷稻草黄，淡淡的）
-    float burner = smoothstep(0.04, 0.12, r) * smoothstep(0.95, 0.60, r);
-    float tK = smoothstep(0.12, 0.45, r);
-    vec3 temper = mix(vec3(0.42, 0.46, 0.62), vec3(0.60, 0.48, 0.26), tK);
-    c = mix(c, temper * (0.35 + 0.65 * fres), burner * 0.18);
+    // 接触处沸腾气泡（v10）——水珠正下方锅面被高温烫成沸腾区，密集小
+    // 气泡群（高频值噪声）作为暗点；只覆盖锅心附近的"沸区"（圆环掩
+    // 模，避开锅沿冷区）
+    float bubbleMask = smoothstep(0.05, 0.35, temp) * smoothstep(0.85, 0.55, r);
+    float bubble = vn(p * BUBBLE_FREQ);
+    float bubbleDark = bubbleMask * smoothstep(0.55, 0.30, bubble)
+        * (0.5 + 0.5 * sin(ts * 5.7 + r * 60.0));
+    c *= 1.0 - BUBBLE_DARKEN * bubbleDark;
 
     // 远侧底面被内壁轻微遮挡（俯视时远侧底边有一点内壁阴影）
     c *= 1.0 - 0.12 * smoothstep(0.5, 0.95, p.y / max(1e-4, 1.0));
-    // v8 全局压暗：真实黑锅锅底是暗的，水珠才是亮体（暗底上的玻璃透镜）；
-    // 折射取样也走本函数，水珠内景同步变暗、高光形成对比
-    c *= 0.72;
+    // 全局压暗保持（v8 立的水珠暗底玻璃体的基调）
+    c *= 0.78;
     return c;
 }
 
@@ -568,6 +675,32 @@ void main() {
 
     // 水珠只落在可见底面上（不爬上内壁/沿口）
     col = mix(col, drop, m * bottomMask);
+
+    // ---- 飞溅星芒（v10 简化实现）---- 
+    // 真实粒子系统需几何 shader / 多 pass，单 pass fragment 内做全套代价
+    // 太高；这里用"星芒"作为视觉近似：液滴边缘外的辐射状短亮线群（hash
+    // 噪声调向打破对称，6 角星芒 + 时间相位），只在液滴边缘薄带出现
+    // ——液滴"看起来"在往外溅小液滴。濒死期（m 边缘 + treble 高）触发更
+    // 强。真正的方向飞溅（沿速度方向）需要把 field 内部 vel 传出，超出
+    // 当前架构；视觉上星芒 + 噪点足够让用户感知"爆裂"
+    float splashBand = (1.0 - m) * smoothstep(0.0, 0.30, m); // 液滴边缘薄带
+    float splashAz = atan(pw.y, pw.x)
+        + vn(pw * 47.0 + sd) * 0.9   // 角度噪打破对称
+        + ts * 0.7;                   // 星芒慢转
+    float splashStar = pow(0.5 + 0.5 * cos(splashAz * 6.0), 22.0);
+    float splashNoise = vn(pw * 110.0 + ts * 4.0);  // 噪点增强飞溅密度感
+    col += WIN_COLOR * splashBand * (splashStar + 0.35 * splashNoise)
+        * SPLASH_GAIN * (0.6 + 0.6 * uTreble) * (1.0 - m) * panMask
+        * awayWin * bottomMask;
+
+    // ---- 接触处白烟（v10）——每颗水珠周围小范围浓白雾，活跃时更浓----
+    // 沸腾的水珠在接触处先冒一小团白烟，再合并到锅口大蒸汽层。位置：
+    // 液滴边缘（m<1 的过渡带），半径比水珠大约 30%
+    float localSteam = (1.0 - m) * smoothstep(0.05, 0.40, m)
+        * fbm(pw * 9.0 + ts * 1.3 + vec2(sd));
+    vec3 whiteSteam = vec3(0.78, 0.80, 0.84);
+    col = mix(col, whiteSteam, localSteam * STEAM_LOCAL_GAIN
+        * (0.65 + 0.55 * uBass) * panMask * bottomMask);
 
     // ---- 焦散环：液滴透镜聚焦上方光，接触线外缘亮边（光侧，底面上）----
     float caustic = exp(-pow((F - 0.80) / 0.12, 2.0));
