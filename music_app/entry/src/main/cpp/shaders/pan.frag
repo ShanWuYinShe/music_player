@@ -1,4 +1,16 @@
-// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v11：球体锅身+随机运动+强化水珠材质）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v12：性能优化——软渲染不再卡死）。
+//
+// v12 相对 v11 的性能优化（用户反馈：运行很卡，网页快卡死——根因是
+// field() 逐像素 × 逐滴循环太重 + bg() 每像素 3 次调用，在 playground 的
+// SwiftShader 软渲染（无 GPU 加速）下尤其爆炸。逐项降计算量，视觉尽量不变）：
+//   1. DROPLET_COUNT 44→28（-36% field 循环；22 主滴 + 6 卫星，保留大小珠层次）
+//   2. bg(ruv) 合并：折射 + 薄缘透光原本各调一次完整 bg（tempField+fbm+
+//      envMap 各两遍），合并为一次复用——bg 总调用 3→2 次
+//   3. 温度场 fbm→vn（4 倍频→1 阶，×2 次 bg 调用）
+//   4. wob 角向谐波 5→3 项（每滴少 2 次 sin）
+//   5. sizzle 噪声 vn(per-pixel 4 hash)→hash11(每滴 1 hash)
+//   6. 白烟 fbm→vn、锅底使用痕迹 fbm→vn
+//   视觉等价：这些噪声的降阶在液滴/锅底的小尺度上肉眼难辨，只省计算。
 //
 // v11 相对 v10 的四项修正（用户反馈四点：锅底还是平的、水珠材质差、
 // 运动单调、像一滩积水）：
@@ -207,9 +219,10 @@ const float FLAME_BLUE = 0.30;      // 灶圈蓝光混入强度（温度 0.4~0.7
                                    //   燃气反射的蓝色调）
 
 // ---- 水滴群（锅局部坐标：单位圆 = 锅口内沿）---------------------------------
-const int DROPLET_COUNT = 44;      // 30 主滴 + 14 卫星滴（v8：真实莱顿弗罗
-                                   //   斯特是"一锅密密麻麻的小珠"+ 少数大珠）
-const float SATELLITE_FROM = 30.0;
+const int DROPLET_COUNT = 28;      // v12 性能：44→28（22 主滴 + 6 卫星）——
+                                   //   field() 循环是逐像素 × 逐滴的，44 滴在
+                                   //   软渲染下卡死；降 36% 保留大小珠层次
+const float SATELLITE_FROM = 22.0;
 const float R_MAIN_MIN = 0.014;    // 主滴半径区间（帕累托；真实液滴约锅径 1~4%）
 const float R_MAIN_MAX = 0.075;
 const float R_SAT_MIN = 0.010;
@@ -456,22 +469,23 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize)
             * (1.0 + 0.6 * boilK * smoothstep(0.85, 0.99, lifeK));
         float da = atan(dperp, dpar);
-        // 不规则类球体（v9）：2~7 阶五谐波混合 + 定向拉伸。标准半球是球
-        // 对称的；真实蒸气垫液滴是不对称变形体——多阶谐波给出"不是圆
-        // 不是椭圆"的随机轮廓，定向拉伸让液滴沿受热最弱方向拉长成泪滴
-        // 形，且拉伸方向随受热慢转（每滴在缓慢变形，不是静态轮廓）
+        // 不规则类球体（v9，v12 性能：5 项谐波 → 3 项——保留 2/3/5 阶的
+        //   "非圆非椭圆"轮廓，砍掉 4/7 阶高频细节；每滴少 2 次 sin，在
+        //   逐像素 × 逐滴循环里是实打实的成本）+ 定向拉伸（泪滴形）
         float wob = 1.0 + wamp * (
-            0.40 * sin(2.0 * da + h1 * TAU + age * wrate)
-            + 0.28 * sin(3.0 * da + h4 * TAU - age * wrate * 1.31)
-            + 0.18 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83)
-            + 0.12 * sin(4.0 * da + h2 * TAU + age * wrate * 2.11)
-            + 0.08 * sin(7.0 * da + h1 * TAU * 3.7 - age * wrate * 0.61));
+            0.46 * sin(2.0 * da + h1 * TAU + age * wrate)
+            + 0.32 * sin(3.0 * da + h4 * TAU - age * wrate * 1.31)
+            + 0.22 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83));
         float dirA = h2 * TAU + age * (WOB_TURN * 0.5 + 0.12 * heatK);
         wob *= 1.0 + wamp * WOB_STRETCH * (0.5 + 0.5 * cos(da - dirA));
         float d2 = dlen2 * wob * wob;
         float w = rr / d2;
         float sizzle = smoothstep(SIZZLE_FROM, 1.0, lifeK);
-        w *= 1.0 + sizzle * (vn(p * 150.0 + age * 7.0) - 0.5) * SIZZLE_AMP;
+        // v12 性能：sizzle 噪声从 vn(p*150)（per-pixel 4 次 hash）改为
+        // hash11（每滴 1 次，不依赖像素坐标）——濒死期液滴边缘沸腾抖动的
+        // 观感等价，成本降 4 倍（逐像素 × 逐滴循环里是主要热点之一）
+        w *= 1.0 + sizzle * (hash11(age * 7.0 + fi * 3.0 + sd * 0.01) - 0.5)
+            * SIZZLE_AMP;
         F += w;
         g += -2.0 * w * d / d2;
     }
@@ -490,8 +504,9 @@ float tempField(vec2 p) {
     // 旋涡扰动让纹路不是死板的同心圆（参考图锅底有手摇动的不规则感）
     float swirl = sin(r * HEAT_RING_FREQ * 0.9 + ang * 1.7) * 0.5;
     ring = mix(ring, swirl, 0.3);
-    // 不均匀加热（fbm）
-    float heat = fbm(p * 4.5 + 11.0);
+    // 不均匀加热（v12 性能：fbm 4 倍频 → vn 1 次——温度场的"不均匀"只需
+    //   一阶噪声，4 倍频在锅底每像素 ×3 次 bg 调用下是纯浪费）
+    float heat = vn(p * 4.5 + 11.0);
     // 锅心温度偏置 + 越靠锅沿越冷
     float radial = smoothstep(0.95, 0.10, r);
     return clamp(0.35 * radial + 0.45 * ring + 0.20 * heat, 0.0, 1.0);
@@ -534,7 +549,7 @@ vec3 bg(vec2 p, float ts) {
     vec3 c = albedo * envMap(vec3(0.0, 0.0, 1.0)) * PAN_DIFF
         + spec * PAN_SPEC * fres;
 
-    c *= 0.92 + 0.16 * fbm(p * 3.2 + 7.0);
+    c *= 0.92 + 0.16 * vn(p * 3.2 + 7.0);   // v12 性能：fbm → vn（锅底使用痕迹一阶噪声够）
 
     // 锅心聚油 + 凹底自阴影：中心压暗（"凹下去"的深度线索之一）
     c *= 1.0 - BOWL_DARK * smoothstep(0.85, 0.10, r);
@@ -667,7 +682,10 @@ void main() {
     float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
 
     vec2 ruv = pw + gn0 * (1.0 - n.z) * REFRACT_LEN;
-    vec3 through = bg(ruv, ts) * 1.35 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
+    // v12 性能优化：bg(ruv) 只算一次（原来折射 + 薄缘透光各调一次 = 2 次
+    // 完整 bg，含 tempField+fbm+envMap 各两遍）——合并为一次复用
+    vec3 bgRuv = bg(ruv, ts);
+    vec3 through = bgRuv * 1.35 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
     through *= vec3(0.970, 0.985, 0.998);
     through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.35, 1.0, 0.82));
     // 折射体边缘压暗：接触线附近全反射 + 贴合阴影把光"关"在滴内，
@@ -677,7 +695,7 @@ void main() {
     // 薄缘透光（v9）：接触线最外缘一圈背景透亮——真实液滴边缘薄如透镜，
     // 背景光从薄处穿过来。RIM_DARK 压暗的是 0.06~0.45 的内缘反射区（暗边），
     // 这层亮线只贴 <0.06 的最外沿（n.z 越低越靠边缘），叠加出"暗边 + 亮线"
-    through += bg(ruv, ts) * RIM_LIGHT
+    through += bgRuv * RIM_LIGHT
         * (1.0 - smoothstep(0.06, 0.18, n.z));
 
     vec3 refl = 2.0 * ndv * n - V;
@@ -739,8 +757,9 @@ void main() {
     // ---- 接触处白烟（v10）——每颗水珠周围小范围浓白雾，活跃时更浓----
     // 沸腾的水珠在接触处先冒一小团白烟，再合并到锅口大蒸汽层。位置：
     // 液滴边缘（m<1 的过渡带），半径比水珠大约 30%
+    // v12 性能：fbm → vn（白烟只需一阶噪声，fbm 4 倍频在此过度）
     float localSteam = (1.0 - m) * smoothstep(0.05, 0.40, m)
-        * fbm(pw * 9.0 + ts * 1.3 + vec2(sd));
+        * vn(pw * 9.0 + ts * 1.3 + vec2(sd));
     vec3 whiteSteam = vec3(0.78, 0.80, 0.84);
     col = mix(col, whiteSteam, localSteam * STEAM_LOCAL_GAIN
         * (0.65 + 0.55 * uBass) * panMask * bottomMask);
