@@ -133,7 +133,9 @@ const float CORE_GLOW = 700.0;
 const float VIGNETTE = 0.22;
 const float TRAIL_ZOOM = 0.9867;     // = 2^(−0.58/30)，对齐 DIVE 恒定流速
 const float TRAIL_ZOOM_SOFT = 0.996; // 非深潜形态的轻运动模糊（近恒等）
-const float TRAIL_GAIN = 0.30;
+const float TRAIL_GAIN = 0.30;       // 平时反馈权重（余晖）
+const float TRAIL_SWITCH_GAIN = 0.38;// v5 切换期额外反馈：fb 峰值 0.30+0.38
+                                     //   =0.68——上一帧残影主导，形态"长"过去
 const float SHADOW_LIFT = 0.76;
 const float SEED_SPREAD = 211.0;
 
@@ -448,15 +450,22 @@ void main() {
     col *= 0.95 + 0.18 * uBeat;
     col *= 1.0 - VIGNETTE * dot(q, q);
 
-    // 反馈拖尾：深潜形态用对齐流速的缩放率，其余用近恒等轻模糊；
-    // 末尾 crossfade 期间如下一场是深潜就按比例混入深潜缩放率
+    // ---- 反馈循环：每一帧都用上一帧的 fragment 数据生成新 fragment ----
+    // v5（用户核心诉求）：切换平滑不只是 crossfade（两场 dissolve），而是
+    // **feedback**——新帧 = 本帧新计算 ×(1−fb) + 上一帧残影 ×fb。平时
+    // fb=TRAIL_GAIN（0.30，余晖）；**切换期间 fb 线性升到 0.68**——形态
+    // 通过残影"流动"过去（旧形态残影演化出新形态），比 dissolve 柔滑得多。
+    // 深潜形态用对齐流速的缩放率，其余用近恒等轻模糊；crossfade 期间如果
+    // 下一场是深潜就按比例混入深潜缩放率
     vec3 prevS = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
     vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
     float diveW = modeIdx == 0 ? 1.0 : 0.0;
     if (ph > 1.0 - xf && modeForShow(showIdx + 1.0, sd) == 0.0) {
         diveW = max(diveW, smoothstep(1.0 - xf, 1.0, ph));
     }
-    col += mix(prevS, prevD, diveW) * TRAIL_GAIN;
+    vec3 prev = mix(prevS, prevD, diveW);
+    float fb = TRAIL_GAIN + TRAIL_SWITCH_GAIN * smoothstep(1.0 - xf, 1.0, ph);
+    col = col * (1.0 - fb) + prev * fb;
 
     col = toneExp(col, 1.0);
     // 抬暗部压缩"周期性忽明忽暗"的观感幅度
