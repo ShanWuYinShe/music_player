@@ -1,5 +1,14 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v9 相对 v8 的补充（方案 docs/AURORA_V8_PLAN.md 中列为下轮的 G4）：
+//   **涡旋 curl**（图3 签名形态——弧带局部打结旋转，最有生命感的形态）：
+//   底缘线在涡旋影响区叠加"角向螺旋波"（2 臂 + 随距离缠绕 + 时间旋转），
+//   射线坐标同步扭转（同一份影响场，卷曲处射线绕涡旋弯而不是直柱硬插），
+//   涡旋区存在感/发射抬升（卷曲处更亮更实）。防假关键：中心位置与生命
+//   周期都由 wander 慢漂——每次出现的位置不同、出现→增强→消散有完整
+//   生命周期；幅度 0.22 是"打结"级（远大于 WOB 0.075 的波浪），旋转速度
+//   恒定（音频永不进速度）。
+//
 // v8 相对 v7.1 的"贴实拍"改进（参考 4 张实拍照片，方案全文见
 // docs/AURORA_V8_PLAN.md；差距清单 G1~G8）：
 //   1. **带内四段色阶（G1）**：v7.1 是"底绿→中青→顶红"单调渐变，实拍是
@@ -144,6 +153,21 @@ const float WOB_AMP = 0.075;        // 底缘波浪褶皱（v8 0.030→0.075：�
 const float S_AMP = 0.14;           // S 弯幅度（跨屏 0.9 波长，图1/图3 观感）
 const float S_FREQ = 1.1;           // S 弯空间频率（波长 ≈ 0.9 屏宽）
 const float S_SWAY = 91.0;          // S 弯相位慢游走时标（秒/格；极光变位很慢）
+
+// ---- v9 涡旋 curl（图3 签名形态：弧带局部打结旋转）-------------------------
+// 极光涡旋 = 底缘线在某段绕一个缓慢旋转的中心卷 1.5~2 圈——最有生命感
+// 的形态。实现：底缘线在涡旋影响区内叠加"角向螺旋波"（极角多臂 + 随
+// 距离缠绕 + 时间旋转），射线坐标同步扭曲（跟着带子转），涡旋区发射
+// 增强（卷曲处发射更密）。防假关键：中心位置/生命周期都由 wander 慢漂
+// （出现→增强→消散，每次位置不同），且幅度大（0.22，"打结"级，不是波浪）。
+const float CURL_SIGMA = 0.17;      // 涡旋空间尺度（影响半径，屏坐标）
+const float CURL_AMP = 0.22;        // 涡旋幅度（底缘卷曲深度；"打结"级）
+const float CURL_ARMS = 2.0;        // 螺旋臂数（2 臂 = 最常见的单涡观感）
+const float CURL_WIND = 26.0;       // 缠绕密度（随距离的相位增速，越大圈多）
+const float CURL_SPIN = 0.85;       // 旋转速度（rad/s，恒定——速度不进音频）
+const float CURL_TWIST = 0.55;      // 射线跟随扭曲幅度（射线跟着带子转）
+const float CURL_LIFE = 37.0;       // 涡旋生命周期时标（秒/格；出现→消散）
+const float CURL_BOOST = 0.45;      // 涡旋区发射增强（卷曲处更亮）
 const float BODY_H = 0.13;          // 带体向上衰减高度（薄带！向上快速渐隐）
 const float BORDER_W = 0.010;       // 底缘亮线 σ（锐利但柔软）
 const float RED_LIFT = 0.10;        // 氧红层相对绿层的抬升量（薄带里贴近带顶）
@@ -252,17 +276,45 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     yc += wobA * sin(q.x * (2.3 + 1.1 * h2) - ts * (0.20 + 0.12 * h3) + fi * 2.1);
     yc += wobA * 0.6 * sin(q.x * (4.9 + 1.6 * h1) + ts * (0.13 + 0.09 * h2) + fi * 4.7);
 
+    // 涡旋 curl（v9，图3 签名形态）：底缘线在涡旋影响区内叠加角向螺旋
+    // 波——中心沿带慢漂（wander），生命周期慢起慢落（出现→增强→消散），
+    // 爆发期更频繁更强。atan 的多值性由 sin 截断成 2 臂螺旋的"卷曲"
+    // 观感；缠绕密度 CURL_WIND 让底缘在涡旋区卷 1.5~2 圈。out 出
+    // curlK 供射线扭曲与发射增强复用（同一份影响场，保证三者同相）
+    float curlPhase = wander2(ts, 43.0, sd + fi * 17.0);
+    float curlX = mix(-0.55, 0.55, curlPhase);
+    float curlAct = smoothstep(0.55, 0.85, wander2(ts, CURL_LIFE, sd + fi * 23.0))
+        * (0.30 + 0.70 * act);
+    float toCx = q.x - curlX;
+    float distC = abs(toCx);
+    float influ = exp(-distC * distC / (CURL_SIGMA * CURL_SIGMA)) * curlAct;
+    float curlK = 0.0;
+    if (influ > 0.004) {
+        float ang = atan(q.y - (yc + CURL_AMP * span * 0.6), toCx);
+        float spiral = sin(ang * CURL_ARMS + distC * CURL_WIND - ts * CURL_SPIN);
+        yc += influ * CURL_AMP * span * spiral;
+        curlK = influ;
+    }
+
     // 水平存在感：弧带要有明暗断点（光带强弱起伏），下限 0.25——暗处
-    // 接近消失，光带就不是"一条贴上去的带子"
+    // 接近消失，光带就不是"一条贴上去的带子"。涡旋区存在感抬升（卷曲
+    // 处发射更密 → 更亮更实）
     float presence = 0.25 + 0.75 * smoothstep(0.35, 0.65,
         0.6 * vn(vec2(q.x * 0.55 + fi * 11.0, ts * 0.010 + sd * 0.7))
         + 0.4 * vn(vec2(q.x * 1.7 + fi * 3.0, ts * 0.017 + sd * 1.9)));
+    presence = min(1.0, presence + curlK * CURL_BOOST);
 
     // 射线（v8 解耦三层）：细直软柱沿磁场线近乎笔直。条纹相位沿高度
     // 倾斜（RAY_TILT_H × dd）——射线上端相位滞后 = 视觉"扫动/跳舞"。
     // 大尺度 fbm 褶皱（少数几道亮褶）+ 中频值噪声。treble 驱动闪烁。
+    // v9：射线坐标在涡旋区跟着带子扭转（与底缘同一份影响场 curlK 同相
+    // ——卷曲处射线绕涡旋弯曲，不是直柱插进涡旋）
     float ddRay = max(q.y - yc, 0.0);   // 带内高度（供射线相位倾斜用）
     float rayX = azx + RAY_BEND * (yc - baseY - tilt * q.x);
+    if (curlK > 0.004) {
+        rayX += curlK * CURL_TWIST
+            * sin(distC * CURL_WIND * 0.7 - ts * CURL_SPIN + ddRay * 1.3);
+    }
     float fold = fbm(vec2(rayX * 9.0 + fi * 7.0, sd * 0.31 + ts * 0.010));
     float sA = vn(vec2(rayX * STRIPE_FREQ_A + ts * STRIPE_DRIFT + fi * 31.0
         + ddRay * RAY_TILT_H * STRIPE_FREQ_A * 0.02,
