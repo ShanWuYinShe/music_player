@@ -1,4 +1,11 @@
-// fractal.frag：MilkDrop 式混沌引擎 v9——"一个主体持续变形 + 附加效果"
+// fractal.frag：MilkDrop 式混沌引擎 v10——"主体往屏幕里钻 + 附加效果"
+//
+// v10 纵深位移（用户："希望有位移，让主体看着像在往屏幕里钻，但大小保持
+//   不变"）——三件套只动内部结构，外轮廓（BODY_SCALE/R clamp）完全不动：
+//   · 纵深环带：主体内部同心环向中心收缩（波峰 rr 随 ts 递减），像隧道
+//     内壁后退；频率随半径递减（中心密外疏）= 透视；sin 周期 → 无限循环
+//   · 内部 flow 径向收缩呼吸：采样坐标 ±10% 循环缩放（内部纹理一进一出）
+//   · 形状角向螺纹：形状相位沿角度走行波（钻头感）+ 旋转 0.10→0.20
 //
 // v9 彻底重做（用户："v8 刚开始一段黑屏+少量色点，效果更差了；原来主要是
 //   没有主体。千千静听 milkdrop 是有一个主体一直在各种变化，再叠加其他
@@ -36,7 +43,7 @@
 
 // ---- 主体（超公式 supershape）参数 -----------------------------------------
 const float BODY_SCALE = 0.32;      // 主体半尺寸（屏高单位）——中心大块、四周露暗背景
-const float BODY_ROT_RATE = 0.10;   // 主体整体旋转（rad/s，缓慢）
+const float BODY_ROT_RATE = 0.20;   // 主体整体旋转（rad/s；v10 0.10→0.20，配合钻感）
 const float BODY_M_BASE = 3.0;      // 对称数下限（3 瓣）
 const float BODY_M_RANGE = 6.5;     // 对称数游走范围（3 ~ 9.5 演变）
 const float BODY_N1_MIN = 0.30;     // 形态指数下限（Gielis 扫描：n1∈[0.3,0.85]
@@ -50,6 +57,9 @@ const float BODY_EDGE_GLOW = 1.05;  // 边缘发光（主体轮廓最亮）
 const float BODY_HALO = 0.10;       // 外部光晕（贴主体的窄光晕——宽光晕会把
                                    //   整个画面垫亮，暗背景衬托才像 MilkDrop）
 const float BODY_FLOW_K = 0.45;     // 内部流动强度（fbm 驱动亮度）
+const float TUNNEL_FREQ = 10.0;     // 纵深环带径向频率（中心密、外疏——隧道透视）
+const float TUNNEL_SPEED = 1.6;     // 环带向中心收缩速度（"往屏幕里钻"的速度）
+const float TUNNEL_GAIN = 0.22;     // 环带明暗调制幅度（±22% 内部亮度）
 
 // ---- 附加效果参数 ----------------------------------------------------------
 const int SPARK_COUNT = 8;          // 环绕碎片数（点缀，非主体）
@@ -105,7 +115,9 @@ float mainBody(vec2 p, float ts, float sd, out vec3 bcol) {
     float n2 = 2.0 + 1.5 * (0.5 + 0.5 * sin(ts * 0.043 + sd * 3.1));
     float n3 = 2.0 + 1.5 * (0.5 + 0.5 * sin(ts * 0.037 + sd * 4.3 + 0.9));
     float rot = ts * BODY_ROT_RATE + 0.4 * sin(ts * 0.027 + sd);
-    float a = ang - rot;
+    // 角向螺纹（v10 钻头感）：形状相位沿角度走行波——主体像螺纹钻头一样
+    // 旋进；幅度 0.3 rad 不破坏形状，只给"往里拧"的动势
+    float a = ang - rot + 0.30 * sin(ts * 0.45 + ang * 3.0 + sd);
     // 边缘 fbm 扰动（熔岩涌动）；fbm 输入用单位圆上的点，扰动随角度连续
     float wob = 1.0 + BODY_WAVE_K
         * (fbm(vec2(cos(a) * 2.3, sin(a) * 2.3) + vec2(ts * 0.05, sd * 0.3)) - 0.5) * 2.0;
@@ -118,12 +130,25 @@ float mainBody(vec2 p, float ts, float sd, out vec3 bcol) {
     float edge = exp(-(d - 1.0) * (d - 1.0) * 26.0) * BODY_EDGE_GLOW;
     float halo = smoothstep(1.25, 1.03, d) * BODY_HALO;
     // 内部流动颜色（熔岩感：fbm 驱动亮度 + 色相）
-    float flow = fbm(p * 5.0 + vec2(ts * 0.22, ts * 0.13) + sd * 0.5);
+    // v10 径向收缩呼吸：内部纹理采样坐标轻微缩放（0.9~1.1 循环）——内部
+    // 结构像在纵深处一进一出，但主体外轮廓完全不动（大小保持不变）
+    float zoomK = 1.0 + 0.10 * sin(ts * 0.35 + sd);
+    float flow = fbm(p * 5.0 * zoomK + vec2(ts * 0.22, ts * 0.13) + sd * 0.5);
     float hue = 0.60 + 0.16 * sin(ts * 0.05 + sd)       // 全局色轮慢漂
         + 0.12 * sin(a * 2.0 + ts * 0.09)                // 角度色带（旋转彩虹）
         + 0.08 * flow;                                   // 内部流动
+    // 纵深环带（v10 往屏幕里钻的核心）：主体内部同心环向中心收缩——波峰
+    // 位置 rr=(π/2+2πn−ts·SPEED)/freq 随 ts 减小 = 环带向内收缩，像隧道内壁
+    // 在后退；频率随半径递减（中心密、外疏）= 透视。sin 周期性 → 无限循环
+    // 永不崩坏。环带只作用于主体内部（×inner），外轮廓不动。
+    float rf = length(p);
+    float tFreq = TUNNEL_FREQ * (1.6 - rf);
+    float tPhase = 2.0 * fbm(p * 4.0 + vec2(ts * 0.2, sd));  // 环带有机起伏
+    float tunnel = 0.5 + 0.5 * sin(rf * tFreq + ts * TUNNEL_SPEED + tPhase);
     float lum = 0.32 + 0.24 * (0.5 + 0.5 * sin(ts * 0.31 + sd * 1.1))
         + BODY_FLOW_K * flow * inner + 0.28 * inner;
+    lum *= 1.0 + TUNNEL_GAIN * (tunnel - 0.5) * 2.0 * inner;  // ±22% 明暗环
+    hue += 0.05 * tunnel * inner;                             // 环带带色（隧道渐变色）
     bcol = hue2rgb(fract(hue)) * lum;
     return inner + edge + halo;
 }
