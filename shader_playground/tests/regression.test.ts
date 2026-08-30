@@ -73,22 +73,65 @@ describe('aurora v7.1 底边下方帘体断崖（回归保护）', () => {
 	});
 });
 
-describe('pan v8 真·凹底构图（回归保护）', () => {
-	// 历史 bug：v7 锅底铺满整个椭圆、底缘 = 椭圆外圈、内壁只在椭圆外——
-	// 俯视图里就是平底锅。v8 把底缘收进椭圆内部（远侧 0.58 / 近侧 0.92），
-	// 底缘与沿口之间是可见的内壁环带。锁定：
+describe('pan v15 真 3D 锅几何（回归保护）', () => {
+	// 历史 bug 链：
+	//   v7  锅底铺满整个椭圆 = 平底锅
+	//   v8  改用"底缘常量"bRAt（近侧 0.92 / 远侧 0.58）——仍是伪 3D：把锅口
+	//       椭圆的中心当成了锅心。真实球冠 + 斜视投影下，锅心必须落在椭圆
+	//       中心**下方** D·sinα，这个错位把远侧内壁撑成锅半径的 42%，再被
+	//       innerWallColor 涂成比锅底还亮的均匀灰（0.24~0.34 vs 锅底 0.227）
+	//       → 用户看到的"锅里装了 1/3 高的水"（v8~v14 一直存在）。
+	//   v15 几何全部由光线-球面求交给出，内壁宽度/底缘/法线都是算出来的。
 	const pan = readShader('pan.frag');
 
-	test('底缘半径随方位变化：近侧 ≈ 0.92、远侧 ≤ 0.65', () => {
-		const near = Number((pan.match(/BOTTOM_NEAR\s*=\s*([\d.]+)/) ?? [])[1] ?? NaN);
-		const far = Number((pan.match(/BOTTOM_FAR\s*=\s*([\d.]+)/) ?? [])[1] ?? NaN);
-		expect(near).toBeGreaterThanOrEqual(0.85);
-		expect(far).toBeLessThanOrEqual(0.65);
+	test('锅几何由光线-球面求交给出（panHit 存在且做 z≤D 的可见性裁剪）', () => {
+		expect(pan).toMatch(/bool\s+panHit\s*\(/);
+		// 取"锅口平面以下的最大根"：远侧取小根（大根在球上半部不存在）、
+		// 近侧取大根（锅沿遮挡内壁）
+		expect(pan).toMatch(/zHi\s*<=\s*D\s*\)\s*\?\s*zHi\s*:\s*zLo/);
+		expect(pan).toMatch(/if\s*\(\s*z\s*>\s*D/);
 	});
 
-	test('内壁环带函数存在且有"远亮近暗"的 shade 调制', () => {
-		expect(pan).toContain('innerWallColor');
-		expect(pan).toMatch(/shade\s*=\s*mix\(\s*[\d.]+\s*,\s*1\.\d+/);
+	test('锅心在原点、锅深与球半径自洽（D=Rs−√(Rs²−1)）', () => {
+		const depth = Number((pan.match(/PAN_DEPTH\s*=\s*([\d.]+)/) ?? [])[1] ?? NaN);
+		const rsExpr = pan.match(/PAN_SPHERE_R\s*=\s*\([^;]+;/);
+		expect(rsExpr).not.toBeNull();
+		// 公式必须是 (1+D²)/(2D)
+		expect(rsExpr![0]).toMatch(/\(1\.0\s*\+\s*PAN_DEPTH\s*\*\s*PAN_DEPTH\)\s*\/\s*\(2\.0\s*\*\s*PAN_DEPTH\)/);
+		// 由 D 反算 Rs，校验球冠自洽（锅心 z=0、锅口 z=D）
+		const Rs = (1 + depth * depth) / (2 * depth);
+		expect(Math.abs(Rs - Math.sqrt(Rs * Rs - 1) - depth)).toBeLessThan(1e-6);
+	});
+
+	test('法线指向锅内表面（锅心处为 +z），不能写成球面外法线', () => {
+		// 外法线 normalize(P − 球心) 指向下方（锅面是球的下半部），取反才是
+		// 我们看到的那一面。写成外法线会让锅渲染成凸面、光照全反。
+		expect(pan).toMatch(/N\s*=\s*normalize\(vec3\(\s*-P\.x\s*,\s*-P\.y\s*,\s*Rs\s*-\s*z\s*\)\)/);
+		expect(pan).not.toMatch(/normalize\(vec3\(P\.x, P\.y, z - Rs\)\)/);
+	});
+
+	test('水滴最高点 ≈ 1/3 锅高（θmax 由 z=D/3 反解，非拍脑袋常量）', () => {
+		const depth = Number((pan.match(/PAN_DEPTH\s*=\s*([\d.]+)/) ?? [])[1] ?? NaN);
+		const thMax = Number((pan.match(/DROP_THETA_MAX\s*=\s*([\d.]+)/) ?? [])[1] ?? NaN);
+		const Rs = (1 + depth * depth) / (2 * depth);
+		const zTop = Rs * (1 - Math.cos(thMax));
+		const ratio = zTop / depth;
+		expect(ratio).toBeGreaterThan(0.25);   // 不能贴着锅底不动
+		expect(ratio).toBeLessThan(0.42);      // 不能超过 1/3 太多（会读作"水"）
+	});
+
+	test('水滴极角是摆动（重力滑梯），不是绕心匀速盘旋', () => {
+		// 必须有 θ = θmax·|sin(ωt+φ)|^p 形态：锅心速度最大、θmax 处折返
+		expect(pan).toMatch(/th\s*=\s*DROP_THETA_MAX[\s\S]{0,400}sin\(/);
+		// 反向断言：ORBIT 绕心旋转已被移除（v11 的螺旋圆 = 用户明确反对）
+		expect(pan).not.toMatch(/pos\s*=\s*rot\(oa\)\s*\*\s*pos/);
+	});
+
+	test('不再用伪底缘常量驱动构图（bRAt 不得参与 main 的合成）', () => {
+		// bRAt / innerWallColor 仅作为历史函数保留（回归测试自身会引用），
+		// 但 main 里不能再拿它们做内壁合成——那是"水"的来源
+		expect(pan).not.toMatch(/col\s*=\s*mix\(col,\s*innerWallColor/);
+		expect(pan).not.toMatch(/float\s+maxR\s*=\s*mix\(bR/);
 	});
 
 	test('蒸汽从锅口开口面升起（v7 的"远侧一条线"位置错已修）', () => {

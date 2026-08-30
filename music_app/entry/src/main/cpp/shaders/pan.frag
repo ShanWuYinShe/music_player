@@ -214,50 +214,51 @@ const float BULB_SHARP = 90.0;
 
 // ---- 锅（椭圆透视 × 凹底球冠 × 收进的内壁环带）------------------------------
 const float PAN_FILL = 0.42;       // 锅半宽 = FILL × aspect（锅占屏宽 84%）
-const float PAN_SQUASH = 0.75;     // y 压扁（俯视透视）
-const vec2 PAN_CENTER = vec2(0.0, -0.03);
-const float BOWL_RADIUS = 1.10;    // 锅底球冠半径（锅局部坐标；v11 1.30→1.10）。
+// ---- v15 真 3D 锅几何（光线-球面求交，替代伪 2D 椭圆构图）----------------
+// v8~v14 的 p 空间是伪 3D：把"锅口椭圆的中心"当成了锅心（PAN_CENTER=(
+// 0,-0.03)）。真实球冠 + 正交斜视投影下，锅心必须落在锅口椭圆中心**下方**
+//   0.157（q 单位，= 锅深 D × sinα / 尺度）；锅口椭圆中心才在上方。
+// 这个错位让"锅底"被人为抬高，远侧内壁环带被撑成锅半径的 42%（BOTTOM_FAR
+// =0.58 是拍脑袋常量），再被 innerWallColor 涂成比锅底还亮的均匀灰
+// （0.24~0.34 vs 锅底 0.227）——于是一大片连续亮区从假底缘线铺到锅口，
+// 这就是用户看到的"锅里装了 1/3 高的水"。
+// 现在几何全部由真实球面求交给出：锅 = 球冠（锅口半径 1、锅深 PAN_DEPTH）、
+// 相机正交斜视（俯视角 α，cosα = TILT_COS）。内壁宽度、底缘位置、法线、
+// 水滴的透视缩短全部是算出来的，不再有可调的"假底缘"。
+const float PAN_DEPTH = 0.50;      // 锅深 / 锅口半径（真实炒锅 ≈0.5：
+                                   //   口径 30cm、深 9cm → 9/15 = 0.6，取 0.5）
+const float TILT_COS = 0.75;       // 俯视角 cosα（= 原 PAN_SQUASH；α≈41°）
+const float TILT_SIN = 0.6614;     // sinα = √(1−cos²α)
+// 球冠半径（锅口半径归一化为 1）：D = Rs − √(Rs²−1) ⟹ Rs = (1+D²)/(2D)
+const float PAN_SPHERE_R = (1.0 + PAN_DEPTH * PAN_DEPTH) / (2.0 * PAN_DEPTH);
                                    //   球面曲率 = 1/R：1.30 时锅心曲率太小（视觉
                                    //   "平"——用户反馈"锅最底部为什么是平的"）。
                                    //   1.10 让锅心明显弯曲（深炒锅），底缘处法线
                                    //   ~57°——真正的"球体锅身"观感。
 const float BOWL_DARK = 0.38;      // 锅心聚油/自阴影压暗（v11 0.30→0.38：
-                                   //   压掉"一滩水"的亮锅心——水珠才是亮体，
-                                   //   锅心聚油区应该暗）
-const float BOTTOM_NEAR = 0.92;    // 底缘半径（近侧）：近侧内壁被沿口遮住，
-                                   //   只留一条缝——v8 真·凹底的几何核心
-const float BOTTOM_FAR = 0.58;     // 底缘半径（远侧）：远侧内壁宽，底缘
                                    //   收进椭圆内部一大圈
 const float WALL_W = 0.32;         // 内壁环带基准宽度（v11 0.28→0.32：球面
                                    //   锅身 + 更宽内壁 = 深炒锅的"看进去"
                                    //   透视更扎实）
 const float OUTER_W = 0.10;        // 外壁环带宽度
 
-// ---- v14 球面 3D 滑行（水珠贴着锅内侧运动，不是在锅底某个"高度平面"上滑）----
-// v13 的病根：pos 是纯 2D 平面坐标，水珠全在底缘椭圆内平移——视觉上读作
-// "悬浮在锅底上方一个平面上的球"。真实莱顿弗罗斯特水珠是**贴着球面滑行**
-// 的：位置由球面极角 θ 决定，θ 越大爬得越高（越靠内壁），投影到屏幕时因
-// 高度产生视差（内壁上的珠在屏幕上更靠外、远侧更靠上）。
-const float SLIDE_THETA = 1.35;    // 球面最大极角（rad，≈77°）。重力滑梯：
-                                   //   水平投影 s=sin(θ)，ds/dθ=cos(θ) → 锅心
-                                   //   (θ≈0) 快、内壁 (θ=θmax) 慢，快慢比
-                                   //   1/cos(θmax)≈4.6×——这正是重力驱动的
-                                   //   "滑下去加速、冲上去减速"
-const float PARALLAX_R = 0.30;     // 高度视差（径向）：内壁上的珠在屏幕上
-                                   //   向外偏移（锅口椭圆 > 锅底椭圆，爬高的
-                                   //   珠越过底缘进入内壁环带）
-const float PARALLAX_Y = 0.22;     // 高度视差（纵向）：远侧内壁的珠更靠画面
-                                   //   上方（俯视视差，+y = 远侧）
-const float WALL_CLIMB = 0.55;     // 允许爬上内壁的比例（0=只许在底面，
                                    //   1=可爬到锅口沿）。0.55 让受热乱窜的
                                    //   珠能贴着内侧壁滑上一截——"贴壁 3D"的
                                    //   主要视觉证据
 const float DROP_FLAT = 0.62;      // 水珠扁平度（v14：锅底只有水珠、没有"那么
-                                   //   高的水"——元球穹顶压扁成贴地扁饼，中间
-                                   //   平（反射整个环境）、边缘一圈陡接触角）
-const float PERSP_SIZE = 0.18;     // 高度透视缩放：爬上近侧内壁的珠离相机近
                                    //   → 略大；远侧内壁的珠离相机远 → 略小
                                    //   （近大远小是最强的 3D 深度线索）
+
+// ---- v15 真 3D 水滴运动（球面极角 θ + 重力）--------------------------------
+// 用户：水滴不可能长时间维持在锅内侧的同一高度，重力会让它很快下来。
+// 所以极角 θ 必须是**摆动**而非自由游走：θ = θ_max·|sin(ωt+φ)|^p
+//   · θ=0（锅心）时 dθ/dt 最大 → 穿过锅心一掠而过
+//   · θ=θ_max 时 dθ/dt=0 → 在最高点折返（滑梯转折点，符合能量守恒）
+//   · p>1 让水滴更多时间待在锅底（势能低处）——"重力让它待在下面"
+// θ_max 由"最高 ≈1/3 锅高"定：z = Rs(1−cos θ) = D/3 = 0.167
+//   ⟹ cos θ = 1 − 0.167/1.25 = 0.867 ⟹ θ_max ≈ 0.524 rad (30°)
+const float DROP_THETA_MAX = 0.524;
+const float GRAV_P = 1.6;          // 重力偏置指数（1=纯摆动，2=更多时间在锅底）
 const float PAN_DIFF = 0.42;       // 钢面漫反射占比（v13 0.55→0.42：让位给镜面
                                    //   ——黑碳钢仍哑光为主，但要给球冠法线的镜面
                                    //   反射留出可见度）
@@ -342,8 +343,6 @@ const float DRIFT_AMP = 0.22;      // v11 随机漂移幅度：每滴一个慢�
                                    //   ——水珠被不同区域的热流推着乱窜，轨迹
                                    //   不再是一条规则绕圈
 const float DRIFT_SCALE = 9.0;     // 漂移方向变化时标（秒/格；热流变化）
-const float ORBIT_RATE = 0.18;     // 绕锅心盘旋基础角速度（rad/s，缓慢）
-const float ORBIT_RATE_K = 0.30;   // 每滴角速度差异系数
 
 // ---- 场到表面的判定 -------------------------------------------------------
 const float ISO_LO = 0.85;
@@ -407,12 +406,49 @@ vec3 thinFilm(float optPath) {
     return 0.5 + 0.5 * cos(TAU * (optPath / vec3(645.0, 510.0, 440.0) + 0.5));
 }
 
-// 可见底面边缘半径（随方位变化）——v8 真·凹底的几何核心：
-// 远侧（画面上方）底缘收到 0.58（露出一大圈内壁），近侧 0.92（内壁
-// 被沿口遮住只剩一条缝）。锅底因此是"比锅口小的椭圆"，俯视透视成立。
-float bRAt(vec2 p) {
-    float ny = p.y / max(length(p), 1e-4);
-    return mix(BOTTOM_NEAR, BOTTOM_FAR, smoothstep(-0.9, 0.9, ny));
+// ---- 真 3D：屏幕 → 锅面（光线-球面求交）----------------------------------
+// 输入 s：屏幕坐标，单位 = 锅口半径（1.0 = 锅口），原点 = 锅心的投影。
+// 锅面 = 球面 x²+y²+(z−Rs)² = Rs² 上 z ≤ D 的部分（球心 (0,0,Rs)，锅心在原点）。
+// 正交斜视投影：sy = y·cosα + z·sinα，sx = x。
+// 把 y = (sy − z·sinα)/cosα 代入球面，整理得 z 的二次方程：
+//     z² − 2(sy·sinα + Rs·cos²α)·z + (sx²·cos²α + sy²) = 0
+// 可见性取 **z ≤ D 的最大根**：远侧大根落在球的上半部（z>D，不存在）→ 取
+// 小根；近侧大根是锅沿（z=D）→ 取大根，内壁被锅沿遮住。这正是俯视深锅该
+// 有的样子（近侧内壁压成极窄一条，远侧内壁舒展）。
+bool panHit(vec2 s, out vec3 P, out vec3 N) {
+    float Rs = PAN_SPHERE_R;
+    float D = PAN_DEPTH;
+    float ca = TILT_COS, sa = TILT_SIN;
+    float b = s.y * sa + Rs * ca * ca;
+    float c = s.x * s.x * ca * ca + s.y * s.y;
+    float disc = b * b - c;
+    P = vec3(s.x, 0.0, 0.0);
+    N = vec3(0.0, 0.0, 1.0);
+    if (disc < 0.0) return false;              // 视线不与锅面相交
+    float sq = sqrt(disc);
+    float zHi = b + sq;                        // 大根（离相机近的一侧）
+    float zLo = b - sq;                        // 小根
+    float z = (zHi <= D) ? zHi : zLo;          // 取锅口平面以下的最大根
+    if (z > D || z < -1e-3) return false;
+    float y = (s.y - z * sa) / ca;
+    P = vec3(s.x, y, z);
+    // 法线指向**锅内表面**（朝上）。注意：球面外法线 normalize(P − 球心)
+    // 指向下方（锅面是球的下半部，球心在上方 Rs 处），取反才是我们看到
+    // 的那一面——锅心处应为 (0,0,1)，写成外法线会让锅渲染成凸面、光照全反
+    N = normalize(vec3(-P.x, -P.y, Rs - z));
+    return true;
+}
+
+// 球面点（极角 θ、方位 φ）→ 3D 坐标。θ=0 是锅心，θ=θ_rim 是锅口
+vec3 bowlPoint(float th, float ph) {
+    float Rs = PAN_SPHERE_R;
+    float st = sin(th), ct = cos(th);
+    return vec3(Rs * st * cos(ph), Rs * st * sin(ph), Rs * (1.0 - ct));
+}
+
+// 3D 点 → 屏幕坐标（正交斜视；单位同 panHit 的输入 s）
+vec2 bowlProject(vec3 Pw) {
+    return vec2(Pw.x, Pw.y * TILT_COS + Pw.z * TILT_SIN);
 }
 
 // 水滴元球场（锅局部单位圆坐标）：F = Σ r²/d_eff²，g = ∇F。
@@ -492,40 +528,35 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
             sd * 0.7 + h2 * 3.0);
         float driftY = wanderBi(age / DRIFT_SCALE + fi * 3.1, 1.0,
             sd * 1.3 + h1 * 5.0);
-        pos += vec2(driftX, driftY) * dr * range;
-        vel += vec2(driftX, driftY) * dr * range * 0.4;
-        float oa = age * (ORBIT_RATE + ORBIT_RATE_K * h2)
-            * (h4 < 0.5 ? -1.0 : 1.0);
-        pos = rot(oa) * pos;
-        vel = rot(oa) * vel;
+        // ---- v15 真 3D 球面运动（替代 v11 的绕心盘旋 + v14 的伪球面）----
+        // ① **删掉绕心盘旋**：ORBIT_RATE 让每滴以恒定角速度绕锅心转，珠群
+        //    一旦靠近就融合成一团跟着转 = 用户看到的"螺旋圆一直在转"。
+        //    真实锅里没有这种整体环流。
+        // ② 热流推挤改为驱动**球面方位角 φ**（左右乱窜）+ 小幅极角扰动
+        //    （上下起伏）——上上下下左左右右，不是绕圈。
+        float phi = atan(pos.y, pos.x)
+            + driftX * dr * 5.0                       // 左右：绕着锅心换方位
+            + 0.55 * sin(age * (w1 * 0.7 + 0.4) + p2); // 持续横向游走
+        // ③ 极角 θ = 重力滑梯（GRAV_P 让水滴更多时间待在锅底）
+        float wR = 0.55 + 0.75 * h3 * mix(0.72, 1.35, heatK);
+        float th = DROP_THETA_MAX
+            // pow(x,y) 在 x=0 时是 GLSL 未定义行为（SwiftShader 返回 NaN 会
+            // 让整帧崩掉），必须夹一个下限
+            * pow(max(abs(sin(age * wR + fi * 2.7)), 1e-4), GRAV_P);
+        th += driftY * dr * 0.55;                     // 上下：热流顶起来的起伏
+        th = clamp(th, 0.0, DROP_THETA_MAX);
+        vec3 Pd = bowlPoint(th, phi);
+        pos = bowlProject(Pd);
+        // ④ 透视缩短：贴在球面上的水滴沿屏幕 y 被斜视投影压缩（真 3D 的
+        //    自然结果，不是 v14 那套拍脑袋的 PARALLAX 常数）
+        vec3 Nw = normalize(vec3(-Pd.x, -Pd.y, PAN_SPHERE_R - Pd.z));  // 锅内表面法线（朝上）
+        float fores = clamp(dot(Nw, vec3(0.0, -TILT_SIN, TILT_COS)), 0.35, 1.0);
+        vel = vec2(vel.x, vel.y * fores);
         vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
             * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
         pos += trem;
-        // ---- v14 球面滑行：平面游走量 → 球面极角 θ → 3D 投影回屏幕 ----
-        // 这是"贴着锅内侧的 3D 运动"的核心。v13 的 pos 是纯 2D 平面坐标，
-        // 水珠全在底缘椭圆内平移 → 读作"悬空平面上的球"。现在：
-        //   ① 极角 θ 由径向游走量驱动（θ=0 锅心、θ=θmax 内壁）
-        //   ② 水平投影 s = sin(θ)：ds/dθ = cos(θ) → 锅心一掠而过、内壁
-        //      徘徊（重力滑梯，快慢比 1/cos(θmax) ≈ 4.6×）
-        //   ③ 球面高度 bowlZ 产生屏幕视差：爬高的珠向外（内壁在锅口椭圆
-        //      上，比锅底椭圆大）+ 向远侧上方偏——这两项是"贴壁"的判别
-        //      特征，平面运动永远做不出来
-        float pl0 = length(pos);
-        vec2 sdir = pl0 > 1e-5 ? pos / pl0 : vec2(1.0, 0.0);
-        float rr01 = clamp(pl0 / max(range, 1e-4), 0.0, 1.0);
-        float th = rr01 * SLIDE_THETA;
-        float bowlZ = (1.0 - cos(th)) / (1.0 - cos(SLIDE_THETA));  // 0..1
-        pos = sdir * (sin(th) / sin(SLIDE_THETA) * range)
-            * (1.0 + bowlZ * PARALLAX_R)                 // 径向视差（向外）
-            + vec2(0.0, bowlZ * PARALLAX_Y * range);      // 纵向视差（远侧向上）
-        // 近大远小：爬上近侧内壁的珠离相机近 → 略大；远侧内壁 → 略小
-        float perspK = 1.0 + PERSP_SIZE * bowlZ * (0.6 - 0.9 * sdir.y);
-        rr *= perspK * perspK;
-        rad *= perspK;
-        // 等值面可贴着球面爬上内壁（WALL_CLIMB），但不越过锅口内沿；
-        // 底面边缘随方位收拢（远侧 0.58 / 近侧 0.92）仍与 v8 构图一致
-        float bR = bRAt(pos);
-        float maxR = mix(bR, 1.0, WALL_CLIMB) - 2.3 * rad - 0.05;
+        // 等值面不越过锅口内沿（真实几何：水平半径 ≤ 1）
+        float maxR = 1.0 - 2.3 * rad - 0.05;
         if (maxR > 0.0) {
             float pl = length(pos);
             if (pl > maxR) {
@@ -534,7 +565,9 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         } else {
             continue;
         }
-        vec2 d = p - pos;
+        // 各向异性距离：y 方向除以 fores → 等值面在屏幕上是 x 半径 r、
+        // y 半径 r×fores 的椭圆（贴壁的水滴被斜视压扁，真 3D 的必然结果）
+        vec2 d = vec2(p.x - pos.x, (p.y - pos.y) / fores);
         float spd = length(vel);
         float k = clamp(spd * SPEED_STRETCH, 0.0, 0.6);
         vec2 vh = vel / max(spd, 1e-4);
@@ -602,17 +635,19 @@ float tempField(vec2 p) {
 // + 灶圈蓝光 + 接触处沸腾气泡。v9 的拉丝不锈钢质感被替换：黑碳钢的
 // 漫反射主导（PANDIFF 0.55）、镜面锐但能量低（PAN_SPEC 0.30），反射
 // 的不是亮天花板，而是更暗的锅周环境——这是炒锅的本色。
-vec3 bg(vec2 p, float ts) {
+// v15：法线由 ray-sphere 求交给出（真 3D），不再用 p 空间的伪球冠解析式。
+// Pw = 锅面上的 3D 点（单位：锅口半径=1），Nw = 该点球面法线。
+vec3 bg(vec3 Pw, vec3 Nw, float ts) {
+    vec2 p = Pw.xy;                 // 水平投影（温度场/拉丝纹仍按水平坐标取）
     float r = length(p);
     float ang = atan(p.y, p.x);
 
     float brush = vn(vec2(r * 260.0, ang * 3.0));
     float brushHi = vn(vec2(r * 720.0 + 40.0, ang * 9.0));
     vec2 radialDir = p / max(r, 1e-4);
-    // 球冠法线（v9 解析）：p / √(R²−r²) ——曲率集中在锅沿
-    float bowlSlope = 1.0 / sqrt(max(BOWL_RADIUS * BOWL_RADIUS - r * r, 1e-4));
-    vec3 n = normalize(vec3(
-        (brushHi - 0.5) * BRUSH_PERTURB * radialDir + p * bowlSlope, 1.0));
+    // 真球面法线 + 拉丝微扰动（v15：曲率不再是常量近似，是几何算出来的）
+    vec3 n = normalize(Nw + vec3(
+        (brushHi - 0.5) * BRUSH_PERTURB * radialDir, 0.0));
 
     vec3 refl = 2.0 * n.z * n - vec3(0.0, 0.0, 1.0);
     vec3 spec = envMap(refl);
@@ -669,20 +704,6 @@ float wallTopR(vec2 p, float pr) {
     return 1.0 + WALL_W * mix(0.55, 1.50, smoothstep(-0.9, 0.9, ny));
 }
 
-// 可见内壁环带（底缘 → 沿口之间）：远侧宽且映天花板（亮）、近侧窄暗；
-// 沿壁面从底缘（暗）到沿口（亮）渐变。这一圈是"看进锅里"的深度证据。
-vec3 innerWallColor(vec2 p, float pr, float bR) {
-    float ny = p.y / max(pr, 1e-4);
-    float shade = mix(0.50, 1.40, smoothstep(-0.9, 0.9, ny));
-    float along = mix(0.55, 1.25, smoothstep(bR, 1.0, pr));
-    float winSide = 0.80 + 0.35 * clamp(
-        dot(normalize(p + 1e-5), normalize(WIN_DIR.xy)), 0.0, 1.0);
-    float ang = atan(p.y, p.x);
-    vec3 c = vec3(0.17, 0.18, 0.20) * shade * along * winSide;
-    c *= 0.92 + 0.16 * vn(vec2(pr * 300.0, ang * 3.0));
-    return c;
-}
-
 // 内壁环带着色：近侧（画面下方）迎光亮、远侧背光暗 + 沿口卷边高光
 vec3 wallColor(vec2 p, float pr, float wTop) {
     vec3 c = vec3(0.30, 0.31, 0.33);
@@ -725,19 +746,30 @@ void main() {
     vec2 q = sceneUV(vec2(0.5, 0.47));
     float aspect = aspectRatio();
 
-    // ---- 锅局部坐标（椭圆透视；单位圆 = 锅口内沿）----
+    // ---- v15 真 3D：屏幕 → 锅面（光线-球面求交）----
+    // s 空间：单位 = 锅口半径（1.0 = 锅口），原点 = 锅心的投影位置。
+    // 注意**不再减 PAN_CENTER**——v8~v14 把锅心放在锅口椭圆中心是错的，
+    // 真实几何里锅心在椭圆中心下方 D·sinα（q 单位 = D·sa·RX）。
     float RX = PAN_FILL * aspect;
-    float RY = RX * PAN_SQUASH;
-    vec2 pc = q - PAN_CENTER;
-    vec2 p = pc / vec2(RX, RY);
-    float pr = length(p);
+    float RY = RX * TILT_COS;
+    vec2 s = q / RX;
+    vec3 Ph, Nh;
+    bool onPan = panHit(s, Ph, Nh);
+    float pr = length(Ph.xy);          // 水平半径（0=锅心，1=锅口）
+    float depthZ = Ph.z;               // 深度（0=锅心，PAN_DEPTH=锅口）
+    vec2 p = Ph.xy;                    // 水平投影（温度场/方位角仍按它取）
 
-    // 热空气扭曲（底面全域）
+    // 热空气扭曲（锅面全域）
     float heat = smoothstep(1.0, 0.1, pr);
-    vec2 pw = p + (0.004 + 0.005 * heat)
-        * vec2(vn(p * 13.0 + ts * 1.1), vn(p * 13.0 + 31.0 - ts * 0.9));
+    vec2 sw = s + (0.004 + 0.005 * heat)
+        * vec2(vn(s * 13.0 + ts * 1.1), vn(s * 13.0 + 31.0 - ts * 0.9));
+    vec3 Ph2, Nh2;
+    if (!panHit(sw, Ph2, Nh2)) { Ph2 = Ph; Nh2 = Nh; }
+    vec2 pw = sw;
 
-    float panMask = smoothstep(1.02, 0.96, length(pw));
+    // 锅口椭圆（半径 1 的圆在斜视下的投影：半轴 (1, cosα)，中心 (0, D·sinα)）
+    float rimE = length(vec2(s.x, (s.y - PAN_DEPTH * TILT_SIN) / TILT_COS));
+    float panMask = onPan ? smoothstep(1.015, 0.985, rimE) : 0.0;
 
     vec2 g;
     float F = field(pw, ts, sd, g) * panMask;
@@ -762,19 +794,15 @@ void main() {
         * (0.75 + 0.5 * awayWin);
     float ao = smoothstep(0.06, 0.30, F) * (1.0 - m) * panMask;
 
-    vec3 col = bg(pw, ts);
+    // v15：锅面（锅底 + 内壁，连续的球冠）由**真 3D 法线统一着色**。
+    // 删掉 v8~v14 的 innerWallColor 内壁环带合成——那是一大片被涂得比锅底
+    // 还亮的均匀灰（0.24~0.34 vs 锅底 0.227），宽度还是拍脑袋的 BOTTOM_FAR
+    // =0.58 撑出来的 42% 锅半径，视觉上就是"锅里装了 1/3 高的水"。真实几
+    // 何下内壁是背光面，法线朝内上方，反射暗环境 → 自然比锅底暗。
+    vec3 col = bg(Ph2, Nh2, ts);
     col *= 1.0 - CONTACT_DARKEN * ringSh - AO_DARKEN * ao;
-
-    // ---- 凹底构图：可见底缘随方位收拢，底缘与沿口之间是内壁环带 ----
-    float bR = bRAt(p);
-    float bottomMask = smoothstep(bR + 0.015, bR, pr);
-    // v14：水珠可贴着球面爬上内壁，绘制范围同样放宽到内壁环带
-    // （bottomMask 仍用于内壁环带底色合成；dropMask 才是水珠的可见域）
-    float dropMask = smoothstep(mix(bR, 1.0, WALL_CLIMB) + 0.015,
-        mix(bR, 1.0, WALL_CLIMB), pr);
-    float innerWallMask = (1.0 - bottomMask)
-        * smoothstep(1.02, 1.0, pr);
-    col = mix(col, innerWallColor(p, pr, bR), innerWallMask);
+    // 水珠可见域 = 整个命中锅面的区域（是否爬太高由 field() 的 θ_max 限制）
+    float dropMask = panMask;
 
     // ---- 水珠：折射/反射能量混合 ----
     vec3 V = vec3(0.0, 0.0, 1.0);
@@ -784,7 +812,9 @@ void main() {
     vec2 ruv = pw + gn0 * (1.0 - n.z) * REFRACT_LEN;
     // v12 性能优化：bg(ruv) 只算一次（原来折射 + 薄缘透光各调一次 = 2 次
     // 完整 bg，含 tempField+fbm+envMap 各两遍）——合并为一次复用
-    vec3 bgRuv = bg(ruv, ts);
+    // 折射取样复用主锅面几何（panHit 每像素调用 2 次已足够；软渲染下第 3
+    // 次调用会让 SwiftShader 崩，且折射取样点的深度差异肉眼不可辨）
+    vec3 bgRuv = bg(Ph2, Nh2, ts);
     vec3 through = bgRuv * 1.35 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
     through *= vec3(0.970, 0.985, 0.998);
     through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.35, 1.0, 0.82));
@@ -869,26 +899,23 @@ void main() {
     col += WIN_COLOR * caustic * CAUSTIC_GAIN * (1.0 - m) * panMask
         * awayWin * dropMask;
 
-    // ---- 内壁 / 外壁+台面（底面之外环带，按 pr 混合，无缝）----
-    // 沿口半径随方位变化：远侧内壁高、近侧只剩卷边（深锅俯视透视）
-    float wTop = wallTopR(p, pr);
-    float wallMask = smoothstep(1.0, 1.03, pr)
-        * smoothstep(wTop + 0.025, wTop, pr);
-    float outerMask = smoothstep(wTop, wTop + 0.03, pr);
-    vec3 wallC = wallColor(p, pr, wTop)
-        * (1.0 - 0.10 * heat * smoothstep(1.0, 1.18, pr));
+    // ---- 锅沿卷边 / 外壁+台面（锅口之外环带；v15 用真实锅口椭圆 rimE）----
+    // 锅沿：rimE≈1 的一圈卷边高光；再外面是锅外壁 + 台面
+    float wallMask = (1.0 - panMask) * smoothstep(1.12, 1.0, rimE);
+    float outerMask = smoothstep(1.0, 1.04, rimE);
+    vec3 wallC = wallColor(p, rimE, 1.0)
+        * (1.0 - 0.10 * heat * smoothstep(1.0, 1.18, rimE));
     col = mix(col, wallC, wallMask);
-    col = mix(col, outerColor(p, pr, sd, wTop), outerMask);
+    col = mix(col, outerColor(p, rimE, sd, 1.0), outerMask);
 
     // ---- 蒸汽：从锅口整个开口面升起（v8 修正位置）----
     // 源强 = 锅口椭圆内部（锅心最强、沿口衰减、锅外为零——蒸汽是从锅里
     // 冒出来的，不是从远侧沿一条线喷）；高度越高越散、越淡。
-    vec2 openN = pc / vec2(RX, RY);                 // 锅口归一化坐标
-    float openR = length(openN);
+    float openR = rimE;                             // 锅口归一化坐标（v15 真椭圆）
     float src = smoothstep(1.10, 0.45, openR);      // 开口面内部为源（锅心最强）
-    float baseY = PAN_CENTER.y + RY * 0.55;         // 源起点：锅口中部高度
+    float baseY = PAN_DEPTH * TILT_SIN + RY * 0.20; // 源起点：锅口平面高度
     float hA = clamp((q.y - baseY) / (0.68 - baseY), 0.0, 1.0);
-    float sx = pc.x / RX;
+    float sx = s.x;
     float spread = exp(-sx * sx * mix(3.0, 1.2, hA));  // 越高越散开
     // 竖缕纹理随时间上移 + 域扭曲（蒸汽不是竖直细条，是扭动的气柱）
     vec2 wq = vec2(q.x * 8.0 + sd, q.y * 3.0 - ts * STEAM_RISE);
@@ -903,7 +930,7 @@ void main() {
 
     // ---- 照片后期链 ----
     col = filmic(col);
-    col *= 1.0 - 0.22 * dot(pc * 1.1, pc * 1.1);
+    col *= 1.0 - 0.22 * dot(q * 1.1, q * 1.1);
     float L = dot(col, vec3(0.299, 0.587, 0.114));
     col += vec3((hash21(vUV * uRes + fract(ts) * 13.0) - 0.5)
         * mix(0.014, 0.004, smoothstep(0.0, 0.5, L)));
