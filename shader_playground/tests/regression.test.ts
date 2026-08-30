@@ -10,30 +10,43 @@ function readShader(name: string): string {
 	return readFileSync(resolve(SHADER_ROOT, name), 'utf8');
 }
 
-describe('fractal v3.2 形态轮换连续性（回归保护）', () => {
-	// 历史 bug：v3.1 在周期两端各做一段 crossfade，末尾侧已 100% 新场、开头侧
-	// 又从旧场 0% 淡起——边界处画面从新场硬跳回旧场再淡一遍，每 22s 必跳变；
-	// 冷启动 ts=0 还先显示幻影"上一场"。v3.2 修复：开头不混合，末尾单段淡入
-	// 下一场——边界两侧严格连续。下述两条断言锁定该修复不被回退。
+describe('fractal v7 碎片混沌引擎（回归保护）', () => {
+	// v7 彻底重构（用户："不再采用固定分形结构，改为碎片持续演变的动态
+	// 可视化；每帧基于上一帧状态迭代变形；碎片独立漂移/旋转/缩放/聚散"）：
+	// 分形五形态（DIVE/KALI/WARP/GYROID/VORONOI）与 22s 轮换调度全部删除。
+	// 以下断言锁定新结构不变量，防止后续返工把旧分形结构带回来。
 	const fractal = readShader('fractal.frag');
 
-	test('周期内不在"开头"对旧场做混合（v3.1 头尾双 crossfade 已废弃）', () => {
-		// 任何 `ph < xf` / `ph < FORM_XF_SEC / FORM_PERIOD` 形式都是旧场开头混合
-		expect(fractal).not.toMatch(/if\s*\(\s*ph\s*<\s*xf\b/);
-		expect(fractal).not.toMatch(/if\s*\(\s*ph\s*<\s*FORM_XF_SEC/);
+	test('碎片引擎存在：fragShape（多边形/星形形状）+ fragField（碎片场）', () => {
+		expect(fractal).toMatch(/float\s+fragShape\s*\(/);
+		expect(fractal).toMatch(/float\s+fragField\s*\(/);
+		expect(fractal).toMatch(/FRAG_COUNT\s*=/);
 	});
 
-	test('反馈拖尾 diveW 不再按"ph < xf"混入前向缩放率（v3.1 bug）', () => {
-		// v3.1 在 ph < xf 期间把 diveW 提到 1-k，让旧场拖尾用深潜缩放率；
-		// 这正是开头侧"硬跳回旧场再淡一遍"的视觉来源之一。注意 modeForShow
-		// 内部仍合法地使用 showIdx - 1.0 来"避免形态重复"——那是另一回事。
-		expect(fractal).not.toMatch(/if\s*\(\s*ph\s*<\s*xf\b/);
-		expect(fractal).not.toMatch(/ph\s*<\s*xf[\s\S]{0,80}diveW/);
+	test('形状持续演变：边数 3~9 + 星形度参数（不是固定几何）', () => {
+		expect(fractal).toMatch(/sides\s*=\s*3\.0\s*\+\s*floor\(/);
+		expect(fractal).toMatch(/spike\s*=/);
+		expect(fractal).toMatch(/fragShape\(/);
 	});
 
-	test('周期末尾仍向下一场 crossfade（防止反向回退到 v3.0 无混合）', () => {
-		// 单侧混合逻辑是 v3.2 的正向修复；删掉它就回到 v3.0 的硬切。
-		expect(fractal).toMatch(/ph\s*>\s*1\.0\s*-\s*xf/);
+	test('精灵运动：聚散 / 呼吸缩放 / 自旋 / 混沌漂移全部参数化', () => {
+		expect(fractal).toMatch(/gather\s*=/);        // 聚散
+		expect(fractal).toMatch(/FRAG_BREATH/);       // 呼吸缩放
+		expect(fractal).toMatch(/rot\s*=\s*ts/);      // 自旋
+		expect(fractal).toMatch(/wanderBi/);          // 混沌漂移（无周期）
+	});
+
+	test('反馈循环保留：col = col×(1−fb) + prev×fb（每帧用上一帧生成）', () => {
+		expect(fractal).toMatch(/col\s*=\s*col\s*\*\s*\(1\.0\s*-\s*TRAIL_GAIN\)/);
+		expect(fractal).toMatch(/texture2D\(\s*uPrev/);
+	});
+
+	test('旧分形结构已彻底移除（无形态函数/轮换调度/变量）', () => {
+		// 匹配函数定义形式，避免头注释里的历史名词误命中
+		expect(fractal).not.toMatch(/vec3\s+modeDive|vec3\s+modeKali|vec3\s+modeWarp|vec3\s+modeGyroid|vec3\s+modeVoronoi/);
+		expect(fractal).not.toMatch(/vec3\s+evalMode|float\s+modeForShow/);
+		expect(fractal).not.toMatch(/FORM_PERIOD|showIdx|fract\(cyc\)/);
+		expect(fractal).not.toMatch(/ph\s*>\s*1\.0\s*-\s*xf/);
 	});
 });
 
