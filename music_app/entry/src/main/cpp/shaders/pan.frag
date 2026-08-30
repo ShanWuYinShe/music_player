@@ -1,4 +1,20 @@
-// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v14：贴壁球面滑行 + 扁平水珠）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v16：真 3D 几何 + 真实莱顿
+// 弗罗斯特物理）。
+//
+// v16 相对 v15（用户反馈：锅里还有一圈一圈的螺旋圆环；莱顿弗罗斯特有物理
+//   公式，不该用经验系数）：
+//   1. **删螺旋圆环**：v10 的加热纹 = 规则同心圆（sin(r·28)，4.5 圈）+
+//      角度项（sin(r·f + ang·1.7) 把同心圆拧成螺旋）+ 时间项（ts·DRIFT 让
+//      纹路一直游动）三样叠加。改：温度场用各向异性噪声（真实热斑），只留
+//      燃气火焰环的一圈**静态**灶痕（BURNER_R=0.52 单环、不带角度项、不带
+//      时间项）；反照率调制也从 ts·DRIFT 的同心圆改成静态使用痕迹噪声。
+//   2. **毛细长度 / Bond number 扁平化**：液滴形态由 Bo=(R/l_c)² 决定，
+//      l_c=√(σ/ρg)≈2.7mm（水）。小珠（R<l_c）表面张力主导 → 球形；大珠
+//      （R>>l_c）重力主导 → 摊成**厚度恒定**的扁饼 h≈2·l_c（与体积无关）。
+//      ⟹ hDome 上限 = min(1, 2·l_c/R)，替代 v14 的固定 DROP_FLAT。
+//   3. **Rayleigh 液滴振荡**：n=2 基模 f=(1/2π)·√(σ/ρR³)·√8 ⟹ f∝R^-3/2，
+//      小珠颤得快（~20Hz）、大珠颤得慢（~1.6Hz），替代与半径无关的 9+7h2。
+//   4. 保留 v15 的真 3D 光线-球面求交（删伪内壁环带 = 删"锅里的水"）。
 //
 // v14 相对 v13 的运动/形态重构（用户反馈：水滴是在"锅底悬空的高度平面"上
 //   移动，应该贴着锅内侧做 3D 运动；而且"锅底只有水珠，不是有那么高的水"）：
@@ -245,6 +261,20 @@ const float OUTER_W = 0.10;        // 外壁环带宽度
                                    //   1=可爬到锅口沿）。0.55 让受热乱窜的
                                    //   珠能贴着内侧壁滑上一截——"贴壁 3D"的
                                    //   主要视觉证据
+// ---- v16 真实莱顿弗罗斯特物理（替代拍脑袋的经验系数）---------------------
+// 【毛细长度 / Bond number】液滴形态由 Bo = ρgR²/σ = (R/l_c)² 决定：
+//   l_c = √(σ/(ρg)) —— 水的毛细长度 ≈ 2.7mm。锅口半径 150mm（30cm 口径）
+//   ⟹ l_c ≈ 0.018（锅局部单位，锅口半径归一化为 1）
+//   · R < l_c ：表面张力主导 → 近似球形（R=1mm 的小珠就是一颗小球）
+//   · R >> l_c：重力主导 → 摊成**厚度恒定**的扁饼 h ≈ 2·l_c（与体积无关！）
+//     这是莱顿弗罗斯特大液滴的真实形态，不是半球。R=11mm 的珠厚度只有
+//     5.4mm，h/R ≈ 0.49 —— 看起来就是贴着锅面的一摊，不是立起来的球。
+//   ⟹ hDome 上限 = min(1, 2·l_c / R)（1 = 半球，<1 = 摊平的饼）
+// 【Rayleigh 液滴振荡】n=2 基模频率 f = (1/2π)·√(σ/(ρR³))·√(n(n-1)(n+2))
+//   ⟹ f ∝ R^-3/2：小珠颤得快（~20Hz）、大珠颤得慢（~1.6Hz）。原来用的
+//   "9 + 7·h2" 与半径无关，大珠小珠颤得一样快，是错的。
+const float CAPILLARY = 0.018;     // 毛细长度 l_c（锅局部单位；= 2.7mm/150mm）
+const float RAYLEIGH_K = 0.033;    // Rayleigh 振荡系数（f = K·R^-3/2 Hz）
 const float DROP_FLAT = 0.62;      // 水珠扁平度（v14：锅底只有水珠、没有"那么
                                    //   → 略大；远侧内壁的珠离相机远 → 略小
                                    //   （近大远小是最强的 3D 深度线索）
@@ -306,11 +336,20 @@ const float WOB_TURN = 0.32;       // 定向拉伸方向随受热慢转（弧度
 const float WOB_BOIL_AMP = 0.85;   // v13 0.50→0.85：沸腾时形状剧烈翻腾变形
                                     //   （受热液滴是"活"的，不是静态不规则轮廓）
 
-// ---- 锅底温度场（v10）---------------------------------------------------
-const float HEAT_RING_FREQ = 28.0; // 同心圆加热纹频率（每单位多少环）
-const float HEAT_RING_DRIFT = 0.20;// 加热纹慢漂（锅热时纹路在游动）
-const float HEAT_RING_K = 0.18;    // 加热纹反照率调制深度（0.82~1.18）
-const float HEAT_CENTER_BIAS = 0.35;// 锅心温度偏置（同心圆纹整体偏向锅心热）
+// ---- 锅底温度场（v16：删掉螺旋圆环）---------------------------------------
+// v10~v15 的加热纹是三样东西叠出来的，用户看到的就是"一圈一圈的螺旋圆环，
+// 一直在转"：
+//   ① ring  = 0.5+0.5·sin(r·28)        —— 4.5 圈规则同心圆
+//   ② swirl = sin(r·28·0.9 + ang·1.7)  —— 角度项把同心圆拧成螺旋
+//   ③ ringK = sin(r·28 + ts·0.20)      —— 时间项让纹路一直游动
+// 真实锅底：燃气火焰环只在锅底留**一圈**淡淡的灶痕（静态、不转），加热的
+// 不均匀来自材质/油膜差异 → 用各向异性噪声表达，不用规则周期函数。
+const float BURNER_R = 0.52;       // 燃气火焰环半径 / 锅口半径（家用灶火焰
+                                   //   环直径 ≈ 8cm，锅口 30cm → 0.53）
+const float BURNER_W = 0.22;       // 火焰环宽度（很宽的一圈灶痕，不是细环）
+const float BURNER_K = 0.16;       // 灶痕强度（弱——被油膜/食物残渣盖住了）
+const float HEAT_RING_K = 0.18;    // 静态使用痕迹的反照率调制深度（0.82~1.18）
+const float HEAT_CENTER_BIAS = 0.35;// 锅心温度偏置（燃气集中在中心）
 const float BUBBLE_DARKEN = 0.55;  // 接触处小气泡暗化强度
 const float BUBBLE_FREQ = 80.0;     // 接触处小气泡密度（每单位多少点）
 
@@ -453,9 +492,14 @@ vec2 bowlProject(vec3 Pw) {
 
 // 水滴元球场（锅局部单位圆坐标）：F = Σ r²/d_eff²，g = ∇F。
 // d_eff 含运动方向拉伸 + 角向谐波轮廓（不规则类球体）+ 受热震动 + 濒死泡沫化。
-float field(vec2 p, float ts, float sd, out vec2 g) {
+float field(vec2 p, float ts, float sd, out vec2 g, out float dropRad) {
     g = vec2(0.0);
     float F = 0.0;
+    // v16：主导水滴半径（按 w 加权的场贡献半径）——供毛细长度扁平化用。
+    // 大液滴（R >> l_c）摊成恒定厚度的扁饼，小液滴保持球形，需要知道
+    // "当前像素主要属于哪一滴、它多大"
+    float wRadSum = 0.0;
+    float wSum = 0.0;
     for (int i = 0; i < DROPLET_COUNT; i++) {
         float fi = float(i);
         float small = step(SATELLITE_FROM, fi);
@@ -476,10 +520,13 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         // 形状极不规则（接近爆裂态）。两个频率叠加避免节拍化
         float boilK = 0.5 + 0.5 * sin(age * BOIL_RATE + fi * 5.7)
             * (0.5 + 0.5 * sin(age * (BOIL_RATE * 0.43) + fi * 1.9));
-        // 受热震动（v9）：蒸气垫把液滴顶起→落下，半径 ±6% 高频脉动——
-        // 两个不可通约频率叠出"跳着"的活体感
-        float heatHop = 1.0 + HEAT_JITTER * sin(age * (9.0 + 7.0 * h2) + fi * 3.7)
-            * (0.5 + 0.5 * sin(age * (2.3 + 0.7 * h4) + fi * 1.9));
+        // 受热震动（v16 Rayleigh 液滴振荡）：蒸气垫把液滴顶起→落下。
+        // n=2 基模 f = (1/2π)·√(σ/(ρR³))·√8 ⟹ f ∝ R^-3/2——小珠颤得快
+        // （~20Hz）、大珠颤得慢（~1.6Hz）。v9 用的"9+7·h2"与半径无关，
+        // 大珠小珠颤得一样快，不符合真实物理。
+        float oscF = clamp(RAYLEIGH_K / pow(max(r0, 6e-3), 1.5), 1.2, 30.0);
+        float heatHop = 1.0 + HEAT_JITTER * sin(age * oscF + fi * 3.7)
+            * (0.5 + 0.5 * sin(age * oscF * 0.31 + fi * 1.9));
         // 沸腾半径脉动（v10）：boilK × BOIL_KICK 调制——沸腾时液滴高度
         // 大幅脉动（液滴在"咕嘟咕嘟"地翻）
         float boilKick = 1.0 + BOIL_KICK * boilK
@@ -607,7 +654,10 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
             * SIZZLE_AMP;
         F += w;
         g += -2.0 * w * d / d2;
+        wRadSum += w * rad;
+        wSum += w;
     }
+    dropRad = wSum > 1e-5 ? wRadSum / wSum : R_MAIN_MIN;
     return F;
 }
 
@@ -619,16 +669,17 @@ float tempField(vec2 p) {
     float r = length(p);
     float ang = atan(p.y, p.x);
     // 同心圆加热纹（亮环/暗环交替）
-    float ring = 0.5 + 0.5 * sin(r * HEAT_RING_FREQ - r * 0.0);
-    // 旋涡扰动让纹路不是死板的同心圆（参考图锅底有手摇动的不规则感）
-    float swirl = sin(r * HEAT_RING_FREQ * 0.9 + ang * 1.7) * 0.5;
-    ring = mix(ring, swirl, 0.3);
-    // 不均匀加热（v12 性能：fbm 4 倍频 → vn 1 次——温度场的"不均匀"只需
-    //   一阶噪声，4 倍频在锅底每像素 ×3 次 bg 调用下是纯浪费）
-    float heat = vn(p * 4.5 + 11.0);
-    // 锅心温度偏置 + 越靠锅沿越冷
+    // 不均匀加热：两个尺度的各向异性噪声（v16：这是热斑的真实来源——材质
+    // 差异、油膜厚薄、残渣，都是随机的，不是规则同心圆）
+    // v12 性能：fbm 4 倍频 → vn（温度场只需一阶噪声）
+    float heat = vn(p * 4.5 + 11.0) * 0.65 + vn(p * 13.0 - 5.0) * 0.35;
+    // 锅心温度偏置 + 越靠锅沿越冷（燃气火焰集中在中心）
     float radial = smoothstep(0.95, 0.10, r);
-    return clamp(0.35 * radial + 0.45 * ring + 0.20 * heat, 0.0, 1.0);
+    // 燃气火焰环留下的一圈灶痕：**单环、静态、不带角度项**（v16 的关键——
+    // 加 ang 项就变成螺旋，加 ts 项就变成"一直在转"）
+    float burner = exp(-pow((r - BURNER_R) / BURNER_W, 2.0));
+    return clamp(HEAT_CENTER_BIAS * radial + 0.50 * heat
+        + BURNER_K * burner, 0.0, 1.0);
 }
 
 // 锅底面：黑碳钢/铸铁（v10）× 真球冠 + 温度场 + 同心圆加热纹 + 红热
@@ -661,9 +712,10 @@ vec3 bg(vec3 Pw, vec3 Nw, float ts) {
     vec3 baseColor = coldSteel
         + flameBlue * smoothstep(0.40, 0.65, temp) * (1.0 - smoothstep(0.70, 0.85, temp))
         + heatRed * smoothstep(0.70, 0.95, temp) * HEAT_TINT;
-    // 同心圆加热纹作为反照率调制（亮环 1.15×、暗环 0.85×）
-    float ringK = mix(1.0 - HEAT_RING_K, 1.0 + HEAT_RING_K,
-        0.5 + 0.5 * sin(r * HEAT_RING_FREQ + ts * HEAT_RING_DRIFT));
+    // v16：删掉随时间漂移的同心圆反照率调制（那个 ts·DRIFT 项就是锅底"一
+    // 直在转"的东西）。改成**静态**的使用痕迹噪声——真实锅底的划痕/油膜是
+    // 固定的，不会自己游动。
+    float ringK = 1.0 + HEAT_RING_K * (vn(p * 9.0 + 31.0) - 0.5) * 2.0;
     vec3 albedo = baseColor * ALBEDO_BASE * ringK
         + vec3(0.020) * (brush - 0.5)
         + vec3(0.012) * (brushHi - 0.5);
@@ -772,18 +824,22 @@ void main() {
     float panMask = onPan ? smoothstep(1.015, 0.985, rimE) : 0.0;
 
     vec2 g;
-    float F = field(pw, ts, sd, g) * panMask;
+    float dropRad;
+    float F = field(pw, ts, sd, g, dropRad) * panMask;
     F *= 1.0 + BEAT_BOIL * uBeat * sin(ts * 31.0);
     float m = smoothstep(ISO_LO, ISO_HI, F);
 
     // ---- 高度场法线：h = √(1−1/F)（球冠解析解）----
     float Fin = max(F, 1.0);
-    // v14 扁平化：锅底只有水珠、没有"那么高的水"——元球穹顶压扁成贴地扁
-    // 饼（中间平 → 反射整个环境，边缘一圈陡接触角）。法线梯度同步缩小 →
-    // 中央区 n.z 更接近 1（平），只有边缘陡——贴在锅面上的液滴，不是立
-    // 起来的玻璃球
-    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0)) * DROP_FLAT;
-    float dh = 0.5 * DROP_FLAT / (Fin * Fin * max(hDome, 0.035));
+    // v16 扁平化 = 毛细长度（Bond number）物理，替代 v14 的固定 DROP_FLAT：
+    //   液滴厚度 h ≈ 2·l_c（与体积无关），球形上限 h=R
+    //   ⟹ hDome 上限 = min(1, 2·l_c / R)
+    //   · 小珠（R < l_c）→ 1（半球，表面张力主导）
+    //   · 大珠（R = 11mm）→ 0.48（摊成厚度恒定的扁饼，重力主导）
+    //   这就是莱顿弗罗斯特大液滴的真实形态——"锅底的一摊"，不是立起来的球
+    float flatK = min(1.0, 2.0 * CAPILLARY / max(dropRad, 2e-3));
+    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0)) * flatK;
+    float dh = 0.5 * flatK / (Fin * Fin * max(hDome, 0.035));
     vec3 n = normalize(vec3(-g * dh, 1.0));
 
     // ---- 贴合阴影（同一份场推出；背光侧更深）----
