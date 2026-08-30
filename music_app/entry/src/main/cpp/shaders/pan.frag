@@ -733,13 +733,16 @@ vec3 bg(vec3 Pw, vec3 Nw, float ts) {
     // 锅心聚油 + 凹底自阴影：中心压暗（"凹下去"的深度线索之一）
     c *= 1.0 - BOWL_DARK * smoothstep(0.85, 0.10, r);
 
-    // 接触处沸腾气泡（v10）——水珠正下方锅面被高温烫成沸腾区，密集小
-    // 气泡群（高频值噪声）作为暗点；只覆盖锅心附近的"沸区"（圆环掩
-    // 模，避开锅沿冷区）
+    // 接触处沸腾气泡（v16：删 r·60 那项）——水珠正下方锅面被高温烫成沸
+    // 腾区，密集小气泡群（高频值噪声）作为暗点；只覆盖锅心附近的"沸
+    // 区"（圆环掩模，避开锅沿冷区）。**v10 这里写的
+    // sin(ts·5.7 + r·60) 是 bug**——r·60 在 sin 里就是 9.5 圈规则同心圆，
+    // 被 BUBBLE_DARKEN=0.55 压暗成黑锅上最显眼的暗环（用户连续两次反馈
+    // "还有圈圈在转" 的真凶之一）。改成纯时间项，气泡只是随时间闪。
     float bubbleMask = smoothstep(0.05, 0.35, temp) * smoothstep(0.85, 0.55, r);
     float bubble = vn(p * BUBBLE_FREQ);
     float bubbleDark = bubbleMask * smoothstep(0.55, 0.30, bubble)
-        * (0.5 + 0.5 * sin(ts * 5.7 + r * 60.0));
+        * (0.5 + 0.5 * sin(ts * 5.7));
     c *= 1.0 - BUBBLE_DARKEN * bubbleDark;
 
     // 远侧底面被内壁轻微遮挡（俯视时远侧底边有一点内壁阴影）
