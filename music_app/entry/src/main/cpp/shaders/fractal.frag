@@ -1,4 +1,9 @@
-// fractal.frag：多形态分形引擎（五套结构互异场 × 出场轮换调度）。
+// fractal.frag：多形态分形引擎（四套结构互异场 × 出场轮换调度）。
+//
+// v6：**KALI 形态移除**（原索引 1，渲染全黑）。实测其迭代
+// z=|z|/|z|²−c 轨道全部稳定在 −c 附近（d2=|c|²≈0.64，fil=exp(−0.64×6)≈0.02），
+// 从不接近原点——Python 复现 30+ 参数组合均无法出花网，是数学性黑屏不是
+// 渲染 bug。轮换改为 4 形态：DIVE / WARP / GYROID / VORONOI。
 //
 // 设计目标——"风格多变，不只是旋转和放大"（MilkDrop 的观感来自每个 preset
 // 结构完全不同）：
@@ -416,15 +421,19 @@ vec3 evalMode(int idx, vec2 q, float ts, float sd) {
     return modeVoronoi(q, ts, sd);
 }
 
-// 出场序号 → 形态（与上一出场不同）
+// 出场序号 → 形态（与上一出场不同）。
+// v6：**KALI（索引 1）已移除**——实测其迭代 z=|z|/|z|²−c 的轨道全部稳定在
+// −c 附近（d2=|c|²≈0.64，fil=exp(−0.64×6)≈0.02），从不接近原点，渲染全黑
+// （Python 复现 30+ 参数组合均无法出花网）。轮换改为 4 形态：
+//   0=DIVE  1=WARP  2=GYROID  3=VORONOI（映射 sel<1 → sel，否则 sel+1）
 float modeForShow(float showIdx, float sd) {
     float key = mod(showIdx, FORM_KEY_MOD);
-    float sel = floor(hash11(key * 0.913 + sd) * 5.0);
-    float prev = floor(hash11(mod(showIdx - 1.0, FORM_KEY_MOD) * 0.913 + sd) * 5.0);
+    float sel = floor(hash11(key * 0.913 + sd) * 4.0);
+    float prev = floor(hash11(mod(showIdx - 1.0, FORM_KEY_MOD) * 0.913 + sd) * 4.0);
     if (sel == prev) {
-        sel = mod(sel + 1.0 + floor(hash11(key * 3.31 + sd * 1.7) * 4.0), 5.0);
+        sel = mod(sel + 1.0 + floor(hash11(key * 3.31 + sd * 1.7) * 3.0), 4.0);
     }
-    return sel;
+    return sel < 1.0 ? sel : sel + 1.0;   // 跳过 KALI=1
 }
 
 void main() {
