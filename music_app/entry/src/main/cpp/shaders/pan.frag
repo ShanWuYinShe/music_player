@@ -1,4 +1,30 @@
-// pan.frag：高温凹底锅上的莱顿弗罗斯特水珠（照片级 v8.1：真·凹底构图 + 深度感增强）。
+// pan.frag：高温凹底锅上的莱顿弗罗斯特水珠（照片级 v9：真球冠锅底 + 不规则类球体水珠）。
+//
+// v9 相对 v8.1 的物理增强（用户要求四件事：锅底是球形曲面不是平面；
+// 水珠是不规则类球体不是标准半球；水珠受热上下震动 + 运动速度随机；
+// 材质更贴近真实受热水珠）：
+//   1. **锅底真球冠**：v8 的法线是线性的（−p·BOWL_TILT = 抛物面近似，
+//      曲率均匀铺开，视觉上锅心仍像平面）。v9 用解析球冠法线
+//      n ∝ (p / √(R²−r²), 1)——曲率**集中在锅沿**：锅心几乎平（反射
+//      天花板），越靠底缘法线越陡（扫过整个环境），光滑球形面的观感
+//      来自这种"锅心平、锅沿快速弯下去"的曲率分布。BRUSH_PERTURB
+//      0.085→0.060（拉丝扰动减轻，球面更光滑）。
+//   2. **水珠不规则类球体**：d_eff 的角向谐波从 3 项加到 5 项（2/3/4/5/7
+//      阶混合），并叠一道**定向拉伸**（受热不均 → 液滴沿受热最弱方向
+//      拉长成泪滴形）——标准半球是球对称的，真实蒸气垫液滴是不对称的
+//      变形球体。
+//   3. **受热震动**：蒸气垫把液滴顶起→落下，全场叠加小幅高度振荡
+//      （HEAT_JITTER=±6% 半径脉动，两个不可通约频率），影子/轮廓/焦散
+//      同步搏动——不是只有濒死期才跳，整个生命周期都在微颤。
+//   4. **速度随机化**：每滴运动速度不再是固定公式，而是乘一个受热强度
+//      因子 heatK = vn 慢漂（每滴的热斑随时间漂移，速度在 0.72×~1.35×
+//      之间随机波动）——受热不均 → 有的珠急转、有的珠缓移。
+//   5. **材质增强**：① 水珠补漫反射项（天空光 diffuse，不纯镜面）；
+//      ② 灯泡泛光高光（pow 60 中锐）与窗光针尖（pow 320）双层高光；
+//      ③ 薄缘透光（接触线外缘一圈背景透亮，与 RIM_DARK 压暗的内缘
+//      形成"暗边 + 亮线"的真实液滴边缘）。
+//   不变量：BOTTOM_NEAR / BOTTOM_FAR / innerWallColor / 蒸汽开口面源
+//   都不动（回归测试已锁）；暗锅基调、水珠"暗底玻璃体"方向不动。
 //
 // v8.1 相对 v8 的观感微调（v8 的结构性修复都已 commit；本轮纯粹把"看进
 // 锅里"的视觉权重再放大一点——v8 的剖面验证发现锅心 / 内壁亮度差偏小，
@@ -97,7 +123,10 @@ const float BULB_SHARP = 90.0;
 const float PAN_FILL = 0.42;       // 锅半宽 = FILL × aspect（锅占屏宽 84%）
 const float PAN_SQUASH = 0.75;     // y 压扁（俯视透视）
 const vec2 PAN_CENTER = vec2(0.0, -0.03);
-const float BOWL_TILT = 0.62;      // 凹底球冠法线倾角系数（锅沿处 ~32°）
+const float BOWL_RADIUS = 1.30;    // 锅底球冠半径（锅局部坐标；v9 真球冠法线）。
+                                   //   曲率集中在锅沿：锅心近平（反射天花板）、
+                                   //   底缘处法线 ~45° 快速弯下去——光滑球形面
+                                   //   的深度线索；越小锅越深。
 const float BOWL_DARK = 0.30;      // 锅心聚油/自阴影压暗（深度线索的一部分；
                                    //   v8.1 0.22→0.30：锅心反射天花板仍然亮，
                                    //   但聚油压暗增强后锅心-锅沿的明暗差更大，
@@ -113,7 +142,8 @@ const float OUTER_W = 0.10;        // 外壁环带宽度
 const float PAN_DIFF = 0.18;       // 钢面漫反射占比（v8 再压暗——黑锅 =
                                    //   暗底 + 强高光，不是发灰的亮钢面）
 const float PAN_SPEC = 0.72;       // 钢面镜面强度（金属反射主导）
-const float BRUSH_PERTURB = 0.085; // 拉丝法线扰动（=粗糙度）
+const float BRUSH_PERTURB = 0.060; // 拉丝法线扰动（=粗糙度；v9 0.085→0.060，
+                                   //   锅底更接近光滑球面，拉丝只留轻质感）
 
 // ---- 水滴群（锅局部坐标：单位圆 = 锅口内沿）---------------------------------
 const int DROPLET_COUNT = 44;      // 30 主滴 + 14 卫星滴（v8：真实莱顿弗罗
@@ -129,11 +159,14 @@ const float GROW_PHASE = 0.025;
 const float GROW_MIN = 0.10;
 const float FIELD_EPS = 1e-7;
 
-// ---- 形状不规则（角向谐波）-------------------------------------------------
+// ---- 形状不规则（角向谐波 + 定向拉伸 = 不规则类球体）----------------------
 const float WOB_SMALL_AMP = 0.05;
 const float WOB_BIG_AMP = 0.20;
 const float WOB_SIZE_LO = 0.060;
 const float WOB_SIZE_HI = 0.240;
+const float WOB_STRETCH = 0.40;    // 定向拉伸幅度（v9：受热不均 → 液滴沿
+                                   //   受热最弱方向拉长成泪滴形，非球对称）
+const float WOB_TURN = 0.32;       // 定向拉伸方向随受热慢转（弧度/滴生命周期）
 
 // ---- 游走与濒死 ----------------------------------------------------------
 const float PANIC_FROM = 0.93;
@@ -142,6 +175,12 @@ const float PANIC_HOP = 0.28;      // 濒死弹跳：半径脉动幅度（蒸气
                                    //   液滴在锅面上蹦跳——影子随场同步脉动）
 const float SIZZLE_FROM = 0.90;
 const float SIZZLE_AMP = 3.0;      // v7 加强（受热沸腾翻滚的观感）
+const float HEAT_JITTER = 0.06;    // v9 受热震动：蒸气垫把液滴顶起→落下，
+                                   //   半径 ±6% 高频脉动（比濒死弹跳小得多，
+                                   //   整个生命周期持续）——水珠在热锅上
+                                   //   永远是"跳着"的，不是静止的玻璃珠
+const float HEAT_DRIFT = 11.0;     // 热斑漂移周期（秒；受热不均随时间的
+                                   //   变化速率——每滴的热强度在漂移）
 const float TREMBLE_AMP = 0.026;   // 锅局部坐标（约为屏幕坐标的 1/0.35）
 const float TREMBLE_BASS = 1.6;
 const float WANDER_NORM = 1.55;
@@ -167,6 +206,15 @@ const float GLINT_GAIN = 2.0;      // 窗光针尖高光（每颗水珠一枚—
 const float ABSORB_R = 0.8;
 const float CRESCENT_GAIN = 0.70;
 const float SPARKLE_GAIN = 1.8;
+const float DROP_DIFF = 0.10;      // v9 水珠漫反射（天空光 diffuse 项——纯镜面
+                                   //   的玻璃球是不存在的，表面有微漫反射，
+                                   //   暗侧才不至于死黑）
+const float BULB_GLOW = 0.35;      // v9 灯泡泛光高光（pow 60 中锐——与窗光
+                                   //   针尖 pow 320 形成双层高光，真实水珠
+                                   //   有多枚反射高光而非一枚）
+const float RIM_LIGHT = 0.22;      // v9 薄缘透光：接触线外缘一圈背景透亮
+                                   //   （薄处透光强），与 RIM_DARK 压暗的内缘
+                                   //   形成"暗边 + 亮线"的真实液滴边缘
 const float IRID_PATH_NM = 1500.0;  // 薄膜干涉光程差上限（nm；接触线 0 → 向内增）
 const float IRID_GAIN = 0.55;       // 牛顿环虹彩强度（实拍里这是"标识性"特征，不能太弱）
 const float IRID_FALLOFF = 22.0;    // 虹彩环带宽度（越小越贴接触线；太大扩散成色斑）
@@ -203,7 +251,7 @@ float bRAt(vec2 p) {
 }
 
 // 水滴元球场（锅局部单位圆坐标）：F = Σ r²/d_eff²，g = ∇F。
-// d_eff 含运动方向拉伸 + 角向谐波轮廓 + 濒死泡沫化。
+// d_eff 含运动方向拉伸 + 角向谐波轮廓（不规则类球体）+ 受热震动 + 濒死泡沫化。
 float field(vec2 p, float ts, float sd, out vec2 g) {
     g = vec2(0.0);
     float F = 0.0;
@@ -221,14 +269,26 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         float lifeK = age / P;
         float grow = mix(GROW_MIN, 1.0, smoothstep(0.0, GROW_PHASE, lifeK));
         float rr = r0 * r0 * grow * max(1.0 - lifeK, 0.0);
+        // 受热震动（v9）：蒸气垫把液滴顶起→落下，半径 ±6% 高频脉动——
+        // 两个不可通约频率（9+7h2 与 2.3+0.7h4）叠出"跳着"的活体感，
+        // 影子/轮廓/焦散随场同步搏动；幅度远小于濒死弹跳（0.28）
+        float heatHop = 1.0 + HEAT_JITTER * sin(age * (9.0 + 7.0 * h2) + fi * 3.7)
+            * (0.5 + 0.5 * sin(age * (2.3 + 0.7 * h4) + fi * 1.9));
+        rr *= heatHop;
         // 濒死弹跳：蒸气垫破裂前液滴在锅面上蹦跳（半径脉动 → 接触阴影
         // 与轮廓同步搏动；系数最低 0.72，不会反号）
         float hopK = smoothstep(PANIC_FROM, 1.0, lifeK);
         rr *= 1.0 + PANIC_HOP * hopK * sin(age * 36.0 + fi * 7.0);
         if (rr < FIELD_EPS) continue;
         float rad = sqrt(rr);
-        float sp = (0.9 + 0.5 * h4) * pow(0.12 / max(r0, 0.018), 0.35);
-        sp = clamp(sp, 0.6, 2.8);
+        // 受热强度（v9）：每滴的热斑随时间慢漂——受热不均 → 运动速度
+        // 不是固定公式，而在 0.72×~1.35× 之间随机波动（急转的珠会缓下
+        // 来、缓移的珠会窜出去，像真实锅里被不同区域热流推着走）
+        float heatK = 0.28 + 0.72 * vn(vec2(age / HEAT_DRIFT + fi * 2.7,
+            sd * 0.011 + h1 * 4.0));
+        float sp = (0.9 + 0.5 * h4) * pow(0.12 / max(r0, 0.018), 0.35)
+            * mix(0.72, 1.35, heatK);
+        sp = clamp(sp, 0.6, 3.2);
         float panic = 1.0 + PANIC_BOOST * smoothstep(PANIC_FROM, 1.0, lifeK);
         float w1 = 1.35 * h4 * sp;
         float w2 = 3.10 * h1 * sp;
@@ -280,10 +340,18 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize);
         float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize);
         float da = atan(dperp, dpar);
+        // 不规则类球体（v9）：2~7 阶五谐波混合 + 定向拉伸。标准半球是球
+        // 对称的；真实蒸气垫液滴是不对称变形体——多阶谐波给出"不是圆
+        // 不是椭圆"的随机轮廓，定向拉伸让液滴沿受热最弱方向拉长成泪滴
+        // 形，且拉伸方向随受热慢转（每滴在缓慢变形，不是静态轮廓）
         float wob = 1.0 + wamp * (
-            0.55 * sin(2.0 * da + h1 * TAU + age * wrate)
-            + 0.30 * sin(3.0 * da + h4 * TAU - age * wrate * 1.37)
-            + 0.20 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83));
+            0.40 * sin(2.0 * da + h1 * TAU + age * wrate)
+            + 0.28 * sin(3.0 * da + h4 * TAU - age * wrate * 1.31)
+            + 0.18 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83)
+            + 0.12 * sin(4.0 * da + h2 * TAU + age * wrate * 2.11)
+            + 0.08 * sin(7.0 * da + h1 * TAU * 3.7 - age * wrate * 0.61));
+        float dirA = h2 * TAU + age * (WOB_TURN * 0.5 + 0.12 * heatK);
+        wob *= 1.0 + wamp * WOB_STRETCH * (0.5 + 0.5 * cos(da - dirA));
         float d2 = dlen2 * wob * wob;
         float w = rr / d2;
         float sizzle = smoothstep(SIZZLE_FROM, 1.0, lifeK);
@@ -294,9 +362,12 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
     return F;
 }
 
-// 锅底面：拉丝不锈钢（镜面主导）× 凹底球冠 + 静态回火色环带 + 使用痕迹
-// （锅局部坐标）。凹底的深度线索来自球冠法线：法线随半径向锅心倾斜，
-// 反射环境从锅心的亮天花板扫到中环的低处暗墙面——径向明暗渐变。
+// 锅底面：拉丝不锈钢（镜面主导）× 真球冠 + 静态回火色环带 + 使用痕迹
+// （锅局部坐标）。v9 锅底是**解析球冠**而非平面+线性倾斜：高度场
+// z = −R + √(R²−r²)（凹球面），法线 n ∝ (p/√(R²−r²), 1)。曲率集中在
+// 锅沿——锅心几乎平（法线竖直，反射天花板）、越靠底缘法线越陡（扫过
+// 整个环境：亮天花板 → 暗墙 → 台面暖光），"光滑球形面"的观感就来自
+// 这种非线性的曲率分布，而不是均匀渐变（后者像平面镜）。
 vec3 bg(vec2 p, float ts) {
     float r = length(p);
     float ang = atan(p.y, p.x);
@@ -304,10 +375,12 @@ vec3 bg(vec2 p, float ts) {
     float brush = vn(vec2(r * 260.0, ang * 3.0));
     float brushHi = vn(vec2(r * 720.0 + 40.0, ang * 9.0));
     vec2 radialDir = p / max(r, 1e-4);
-    // 球冠法线：-p*BOWL_TILT 项让法线向锅心倾斜（凹面内侧），锅沿处
-    // 倾角 ~29°；拉丝扰动叠加在同一份法线上
+    // 球冠法线（解析）：p / √(R²−r²) 是凹球面的水平梯度（r→R 时趋向
+    // 无穷 = 法线在底缘近乎水平）。拉丝扰动轻叠在球冠上（v9 减到 0.060，
+    // 球面光滑，拉丝只留质感）
+    float bowlSlope = 1.0 / sqrt(max(BOWL_RADIUS * BOWL_RADIUS - r * r, 1e-4));
     vec3 n = normalize(vec3(
-        (brushHi - 0.5) * BRUSH_PERTURB * radialDir - p * BOWL_TILT, 1.0));
+        (brushHi - 0.5) * BRUSH_PERTURB * radialDir + p * bowlSlope, 1.0));
 
     vec3 refl = 2.0 * n.z * n - vec3(0.0, 0.0, 1.0);
     vec3 spec = envMap(refl);
@@ -456,22 +529,37 @@ void main() {
     // 轮廓因此清晰（v6 通体均匀亮 = 哑光玻璃珠的病根）
     through *= 1.0 - RIM_DARK * smoothstep(0.45, 0.15, n.z);
     through += WIN_COLOR * pow(ndv, 7.0) * FOCUS_GAIN;
+    // 薄缘透光（v9）：接触线最外缘一圈背景透亮——真实液滴边缘薄如透镜，
+    // 背景光从薄处穿过来。RIM_DARK 压暗的是 0.06~0.45 的内缘反射区（暗边），
+    // 这层亮线只贴 <0.06 的最外沿（n.z 越低越靠边缘），叠加出"暗边 + 亮线"
+    through += bg(ruv, ts) * RIM_LIGHT
+        * (1.0 - smoothstep(0.06, 0.18, n.z));
 
     vec3 refl = 2.0 * ndv * n - V;
     vec3 mirrored = envMap(refl);
+
+    // 水珠漫反射（v9）：天空光 diffuse——纯镜面球不存在，表面有微漫
+    // 反射，暗侧不至于死黑（ndv 越朝上越亮，像湿润的水面被天光点亮）
+    vec3 dropDiff = envMap(vec3(0.0, 0.0, 1.0)) * ndv * DROP_DIFF;
 
     float crescent = smoothstep(0.35, 0.10, n.z)
         * pow(max(-dot(gn0, normalize(WIN_DIR.xy)), 0.0), 1.6);
     float sparkle = pow(max(dot(refl, BULB_DIR), 0.0), 220.0)
         * (0.6 + 0.4 * vn(pw * 180.0 + ts * 5.0));
+    // 灯泡泛光高光（v9）：中锐（pow 60）暖色高光——窗光针尖（pow 320）
+    // 之外的真实水珠还有一枚灯泡泛光，双层高光更接近实拍
+    float bulbGlow = pow(max(dot(refl, BULB_DIR), 0.0), 60.0)
+        * (0.65 + 0.35 * vn(pw * 60.0 + ts * 2.3));
     // 窗光针尖高光：每颗水珠一枚（真实照片里水珠的"湿润感"几乎全在
     // 这枚高光上；位置由法线决定，随形状游动自然滑移）
     float glint = pow(max(dot(refl, WIN_DIR), 0.0), 320.0);
 
     vec3 drop = mix(through, mirrored, fres);
+    drop += dropDiff;
     drop += WIN_COLOR * crescent * CRESCENT_GAIN;
     drop += WIN_COLOR * glint * GLINT_GAIN;
-    drop += BULB_COLOR * sparkle * SPARKLE_GAIN * (0.7 + 0.6 * uTreble);
+    drop += BULB_COLOR * (sparkle * SPARKLE_GAIN + bulbGlow * BULB_GLOW)
+        * (0.7 + 0.6 * uTreble);
 
     // ---- 接触线薄膜干涉：蒸气垫 + 液滴薄缘的牛顿环虹彩 ----
     float optPath = hDome * IRID_PATH_NM;
