@@ -1,4 +1,21 @@
-// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v10：黑碳钢+热纹+沸腾+飞溅+白烟）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v11：球体锅身+随机运动+强化水珠材质）。
+//
+// v11 相对 v10 的四项修正（用户反馈四点：锅底还是平的、水珠材质差、
+// 运动单调、像一滩积水）：
+//   1. **球体锅身**：BOWL_RADIUS 1.30→1.10——球面曲率 1/R 变大（锅心从
+//      "近平"变成明显弯曲，底缘法线 ~57°），WALL_W 0.28→0.32 内壁更宽
+//      = 深炒锅的"看进去"透视。锅心不再是一块平镜面。
+//   2. **水珠材质强化**：GLINT 2.0→2.6（窗光针尖更锐更亮，湿润感本体）、
+//      DROP_DIFF 0.10→0.16（微漫反射更亮）、BULB_GLOW 0.35→0.50（暖色泛
+//      光更明显）、REFRACT_LEN 0.28→0.34（透镜放大更强 = 水珠更"实心"）、
+//      新增 SKY_GLINT=0.45 天光高光（pow 12 中锐顶部泛光，湿润水面的
+//      光泽过渡档）。
+//   3. **运动随机化**：BOWL_GATHER 0.58→0.85（活动范围大幅放开——真实
+//      物理里水珠被蒸气垫托着在球面上滑行/翻滚，重力只是弱引导不会钉
+//      死在锅心）+ 每滴一个慢变方向的随机"热流推挤"漂移（wander 混沌驱
+//      动，DRIFT_AMP=0.22）——轨迹从"规则绕圈"变成"被热流推着乱窜"。
+//   4. **消除积水感**：BOWL_DARK 0.30→0.38（锅心聚油更暗——水珠是亮体，
+//      锅心不该亮成水面）+ 水珠分散后不再"聚成一滩"。
 //
 // v10 相对 v9 的"贴近真实热炒场景"重大返工（参考实拍：黑碳钢锅+燃气灶
 // 圈+锅心红热+水珠沸腾爆裂+锅口白烟弥漫）：
@@ -158,21 +175,21 @@ const float BULB_SHARP = 90.0;
 const float PAN_FILL = 0.42;       // 锅半宽 = FILL × aspect（锅占屏宽 84%）
 const float PAN_SQUASH = 0.75;     // y 压扁（俯视透视）
 const vec2 PAN_CENTER = vec2(0.0, -0.03);
-const float BOWL_RADIUS = 1.30;    // 锅底球冠半径（锅局部坐标；v9 真球冠法线）。
-                                   //   曲率集中在锅沿：锅心近平（反射天花板）、
-                                   //   底缘处法线 ~45° 快速弯下去——光滑球形面
-                                   //   的深度线索；越小锅越深。
-const float BOWL_DARK = 0.30;      // 锅心聚油/自阴影压暗（深度线索的一部分；
-                                   //   v8.1 0.22→0.30：锅心反射天花板仍然亮，
-                                   //   但聚油压暗增强后锅心-锅沿的明暗差更大，
-                                   //   "凹下去"的视觉权重更明显）
+const float BOWL_RADIUS = 1.10;    // 锅底球冠半径（锅局部坐标；v11 1.30→1.10）。
+                                   //   球面曲率 = 1/R：1.30 时锅心曲率太小（视觉
+                                   //   "平"——用户反馈"锅最底部为什么是平的"）。
+                                   //   1.10 让锅心明显弯曲（深炒锅），底缘处法线
+                                   //   ~57°——真正的"球体锅身"观感。
+const float BOWL_DARK = 0.38;      // 锅心聚油/自阴影压暗（v11 0.30→0.38：
+                                   //   压掉"一滩水"的亮锅心——水珠才是亮体，
+                                   //   锅心聚油区应该暗）
 const float BOTTOM_NEAR = 0.92;    // 底缘半径（近侧）：近侧内壁被沿口遮住，
                                    //   只留一条缝——v8 真·凹底的几何核心
 const float BOTTOM_FAR = 0.58;     // 底缘半径（远侧）：远侧内壁宽，底缘
                                    //   收进椭圆内部一大圈
-const float WALL_W = 0.28;         // 内壁环带基准宽度（锅局部坐标；v8.1
-                                   //   0.24→0.28：环带更宽，远侧"映天花板"
-                                   //   的亮区更显著，深锅俯视透视更扎实）
+const float WALL_W = 0.32;         // 内壁环带基准宽度（v11 0.28→0.32：球面
+                                   //   锅身 + 更宽内壁 = 深炒锅的"看进去"
+                                   //   透视更扎实）
 const float OUTER_W = 0.10;        // 外壁环带宽度
 const float PAN_DIFF = 0.55;       // 钢面漫反射占比（v10 黑碳钢 0.18→0.55：
                                    //   哑光磨砂碳钢的漫反射是主项，不是镜面；
@@ -242,7 +259,15 @@ const float TREMBLE_AMP = 0.026;   // 锅局部坐标（约为屏幕坐标的 1/
 const float TREMBLE_BASS = 1.6;
 const float WANDER_NORM = 1.55;
 const float SPEED_STRETCH = 0.22;
-const float BOWL_GATHER = 0.58;    // 凹底收拢：活动范围向锅心聚拢的比例
+const float BOWL_GATHER = 0.85;    // 凹底收拢（v11 0.58→0.85：用户反馈水珠
+                                   //   "只停在锅底最低处"太单调——真实物理里
+                                   //   水珠被蒸气垫托着在球面上滑行/翻滚，活动
+                                   //   范围大得多；只微弱地向锅心偏置即可）
+const float DRIFT_AMP = 0.22;      // v11 随机漂移幅度：每滴一个慢变方向的
+                                   //   "热流推挤"（wander 驱动）叠加到轨道上
+                                   //   ——水珠被不同区域的热流推着乱窜，轨迹
+                                   //   不再是一条规则绕圈
+const float DRIFT_SCALE = 9.0;     // 漂移方向变化时标（秒/格；热流变化）
 const float ORBIT_RATE = 0.18;     // 绕锅心盘旋基础角速度（rad/s，缓慢）
 const float ORBIT_RATE_K = 0.30;   // 每滴角速度差异系数
 
@@ -254,21 +279,24 @@ const float CONTACT_DARKEN = 0.50;
 const float AO_DARKEN = 0.16;
 
 // ---- 水珠材质 -------------------------------------------------------------
-const float REFRACT_LEN = 0.28;    // 折射取样偏移（锅局部坐标）
+const float REFRACT_LEN = 0.34;    // 折射取样偏移（v11 0.28→0.34：透镜放大
+                                   //   更强——水珠"实心"感，背景在滴内被
+                                   //   放大更明显）
 const float FOCUS_GAIN = 0.60;
 const float LENS_GAIN = 0.70;      // 内部聚光（v8 收敛：压住"水银球"感——
                                    //   水珠是暗背景上的透明透镜，不是自发光球）
 const float RIM_DARK = 0.30;       // 折射体边缘压暗（接触线全反射+阴影，勾轮廓）
-const float GLINT_GAIN = 2.0;      // 窗光针尖高光（每颗水珠一枚——"湿润感"关键）
+const float GLINT_GAIN = 2.6;      // 窗光针尖高光（v11 2.0→2.6：水珠的"湿润
+                                   //   感"几乎全在这枚高光上，更锐更亮）
+const float SKY_GLINT = 0.45;      // v11 天光高光（pow 12 中锐的顶部泛光——
+                                   //   湿润水面被天光整体点亮的那层光泽）
 const float ABSORB_R = 0.8;
 const float CRESCENT_GAIN = 0.70;
 const float SPARKLE_GAIN = 1.8;
-const float DROP_DIFF = 0.10;      // v9 水珠漫反射（天空光 diffuse 项——纯镜面
-                                   //   的玻璃球是不存在的，表面有微漫反射，
-                                   //   暗侧才不至于死黑）
-const float BULB_GLOW = 0.35;      // v9 灯泡泛光高光（pow 60 中锐——与窗光
-                                   //   针尖 pow 320 形成双层高光，真实水珠
-                                   //   有多枚反射高光而非一枚）
+const float DROP_DIFF = 0.16;      // v11 水珠漫反射 0.10→0.16（微漫反射更亮，
+                                   //   暗侧不死黑、整体更"实"）
+const float BULB_GLOW = 0.50;      // v11 灯泡泛光高光 0.35→0.50（暖色泛光
+                                   //   更明显——双层高光的第二枚）
 const float RIM_LIGHT = 0.22;      // v9 薄缘透光：接触线外缘一圈背景透亮
                                    //   （薄处透光强），与 RIM_DARK 压暗的内缘
                                    //   形成"暗边 + 亮线"的真实液滴边缘
@@ -376,12 +404,22 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         vec2 vel = vec2(
             w1 * cos(age * w1 + p1) + 0.55 * w2 * cos(age * w2 + p2),
             -w3 * sin(age * w3 + p3) - 0.55 * w4 * sin(age * w4 + p4));
-        // 凹底行为：活动范围向锅心收拢（滑向最低点），并绕锅心缓慢盘旋
-        // （凹面上蒸气垫近乎无摩擦，液滴沿等势面打转——真实炒锅里水珠
-        // 就是在锅心附近绕圈，而不是全域均匀乱跑）
+        // 凹底行为：活动范围只微弱向锅心偏置（v11 0.85——球面上水珠被
+        // 蒸气垫托着四处滑行，重力只是弱引导，不会钉死在锅心）
         float range = (1.0 - rad - 0.05) * BOWL_GATHER;
         pos *= range / WANDER_NORM;
         vel *= range / WANDER_NORM;
+        // v11 随机漂移（热流推挤）：每滴一个慢变方向的随机力叠加到轨道
+        // 上——真实锅里水珠被不同区域的热流/气流推着乱窜，轨迹不是规则
+        // 绕圈。wander 混沌驱动方向（每 DRIFT_SCALE 秒换向），幅度随受热
+        // 强度波动
+        float dr = DRIFT_AMP * (0.7 + 0.6 * heatK);
+        float driftX = wanderBi(age / DRIFT_SCALE + fi * 1.7, 1.0,
+            sd * 0.7 + h2 * 3.0);
+        float driftY = wanderBi(age / DRIFT_SCALE + fi * 3.1, 1.0,
+            sd * 1.3 + h1 * 5.0);
+        pos += vec2(driftX, driftY) * dr * range;
+        vel += vec2(driftX, driftY) * dr * range * 0.4;
         float oa = age * (ORBIT_RATE + ORBIT_RATE_K * h2)
             * (h4 < 0.5 ? -1.0 : 1.0);
         pos = rot(oa) * pos;
@@ -660,11 +698,16 @@ void main() {
     // 窗光针尖高光：每颗水珠一枚（真实照片里水珠的"湿润感"几乎全在
     // 这枚高光上；位置由法线决定，随形状游动自然滑移）
     float glint = pow(max(dot(refl, WIN_DIR), 0.0), 320.0);
+    // 天光高光（v11）：中锐（pow 12）的顶部泛光——湿润水面被天光整体
+    // 点亮的那层光泽，弥补"纯镜面针尖 + 漫反射"之间的过渡档
+    float skyGlint = pow(max(dot(refl, vec3(0.0, 0.0, 1.0)), 0.0), 12.0)
+        * (0.7 + 0.3 * vn(pw * 90.0 + ts * 1.7));
 
     vec3 drop = mix(through, mirrored, fres);
     drop += dropDiff;
     drop += WIN_COLOR * crescent * CRESCENT_GAIN;
     drop += WIN_COLOR * glint * GLINT_GAIN;
+    drop += ROOM_SKY * skyGlint * SKY_GLINT;
     drop += BULB_COLOR * (sparkle * SPARKLE_GAIN + bulbGlow * BULB_GLOW)
         * (0.7 + 0.6 * uTreble);
 
