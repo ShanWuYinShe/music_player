@@ -1,5 +1,18 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v12 完全重构（用户反馈："你还是放不下这个破线——极光需要完全重构"）：
+//   病根是 v7 以来的"薄弧带 + 底缘锐利亮线"——BORDER_W 那条下缘亮线
+//   （EDGE_GAIN=2.6 的"刀刃"）是 v5 就反馈过的"画上去的线"，之后不但没删
+//   反而一路强化，让极光读作"一条细带子 + 一条画线"，而非真实极光。重构：
+//   1. **删底缘锐利亮线**：去掉 border / eI / EDGE_GAIN / BORDER_W / 粉紫下
+//      缘线——极光的底缘是光幕 body 的自然亮度边界（presence² 让底缘有明
+//      暗断续，实拍里亮段/暗段自然过渡），不是画上去的线。
+//   2. **薄带 → 光幕**：BODY_H 0.13→0.34（带体向上渐隐更缓）——真实极光是
+//      "大片竖直射线光幕"，不是细带子。峰值改由英雄褶 + 竖直射线承担
+//      （BODY_GAIN 1.0→0.75 光幕更柔，不洗屏）。
+//   3. 射线仍解耦、S 弯/涡旋/方向随机/四段色阶/品红爆发/传播波/水面倒影
+//      全部保留——这些是对的，重构只动"线"和"带体高度"。
+//
 // v11 相对 v10 的水面倒影（方案遗留项：图2/3 的水面反射是沉浸感大杀器）：
 //   **水面**：近侧山脊改为水岸（远山脊保留为剪影），水面区域（水岸线以下）
 //   用**镜像坐标重算同一场极光**（把帘幕循环包成 auroraEmission 函数，主
@@ -184,8 +197,10 @@ const float CURL_SPIN = 0.85;       // 旋转速度（rad/s，恒定——速度
 const float CURL_TWIST = 0.55;      // 射线跟随扭曲幅度（射线跟着带子转）
 const float CURL_LIFE = 37.0;       // 涡旋生命周期时标（秒/格；出现→消散）
 const float CURL_BOOST = 0.45;      // 涡旋区发射增强（卷曲处更亮）
-const float BODY_H = 0.13;          // 带体向上衰减高度（薄带！向上快速渐隐）
-const float BORDER_W = 0.010;       // 底缘亮线 σ（锐利但柔软）
+const float BODY_H = 0.34;          // 带体向上衰减高度（v12 完全重构：0.13 薄带
+                                    //   → 0.34 光幕——真实极光是"大片竖直射线光幕"
+                                    //   不是"细带子+线"；向上渐隐更缓，底缘是自然
+                                    //   的亮度边界而非锐利亮线）
 const float RED_LIFT = 0.10;        // 氧红层相对绿层的抬升量（薄带里贴近带顶）
 const float RED_H_K = 1.0;          // 氧红层衰减高度 = BODY_H × K
 const float STRIPE_FREQ_A = 110.0;  // 射线频率 A（细直射线——弧带内沿磁场
@@ -197,9 +212,9 @@ const float RAY_TILT_H = 0.50;      // v8 射线相位沿高度倾斜（上端�
                                     //   = 射线上端滞后扫动，"跳舞"观感）
 const float RAY_BEND = 0.10;        // 射线随带边波的弯曲（真实射线近乎笔直；
                                     //   0.38 的大弯曲 = 布料褶皱感）
-const float BODY_GAIN = 1.0;        // 带体增益（薄带不会洗屏；下缘亮线才是
-                                    //   画面最亮的元素）
-const float EDGE_GAIN = 2.60;       // 底缘增益（下缘亮线 = 弧带的"刀刃"）
+const float BODY_GAIN = 0.75;        // 带体增益（v12 光幕化：1.0→0.75——光幕
+                                    //   更柔，峰值来自英雄褶与竖直射线，不是
+                                    //   细带子；避免光幕变高后洗屏）
 const float WIDE_GAIN = 0.07;       // 宽尺度环境光晕（收敛：光带周围只有
                                     //   一丝弥散，不能被光晕糊成一片）
 
@@ -207,8 +222,9 @@ const float WIDE_GAIN = 0.07;       // 宽尺度环境光晕（收敛：光带�
 const float BODY_RAY_W = 0.45;      // 帘体基础里的射线权重（弱，只做纹理）
 const float HERO_GAIN = 0.90;       // 英雄褶独立亮层增益（大尺度亮褶）
 const float RAY_GAIN = 1.60;        // 独立射线层增益（射线可以比帘体亮）
-const float RAY_H_K = 3.5;          // 射线衰减高度 = H × K（穿过带顶延伸到
-                                    //   暗天空——图4 观感的几何来源）
+const float RAY_H_K = 2.5;          // 射线衰减高度 = H × K（v12 光幕变高后
+                                    //   收短——射线仍穿带顶延伸暗天空，但相对
+                                    //   光幕高度 0.34 不再 3.5 倍那么长）
 const float RAY_POW = 2.2;          // 射线幂律（少数亮 + 多数暗）
 // ---- v8 爆发品红（substorm 冠冕的主导色，图2）-----------------------------
 const vec3 EMIT_MAGENTA = vec3(1.00, 0.30, 0.55); // 品红粉（N2 强电离爆发色）
@@ -350,18 +366,17 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     float flick = 0.86 + 0.14 * sin(ts * (2.6 + 2.2 * h3) + rayX * 40.0
         + fi * 5.0 + uTreble * 5.0);
 
-    // 剖面：d>0 帘体指数衰减；d<0 **同样要截止**（v7.1 关键修复——旧代码
-    // dd=max(d,0) 让底边以下的像素 body=exp(0)=1，帘体在底边下方平铺全亮、
-    // 永不衰减，这就是"挂在天上一片亮布"的几何根源）。底边下方用
-    // 0.30H 快速断崖 + d≈0 的下缘亮线（σ 下方收 0.35 倍）
+    // 剖面（v12 完全重构：删除底缘锐利亮线）：d>0 光幕指数衰减；d<0 同样
+    // 截止（v7.1 血泪修复，勿回退——底边以下 body=1 永不衰减 = "亮布"）。
+    // 底缘不再是"画上去的亮线"，而是光幕 body 的自然边界：d≈0 处 presence²
+    // 调制让底缘有明暗断续（亮段/暗段自然过渡，实拍观感）
     float d = q.y - yc;
     float dd = max(d, 0.0);
     float dneg = min(d, 0.0);
     float H = BODY_H * mix(1.30, 1.0, depth) * (0.85 + 0.30 * h2);
-    float body = exp(-dd / H) * exp(dneg / (H * 0.30)) * presence;
-    float sig = d < 0.0 ? BORDER_W * 0.35 : BORDER_W;
-    // 亮线的水平断口比帘体更强（presence²）：实拍亮线常整段消失再出现
-    float border = exp(-d * d / (2.0 * sig * sig)) * presence * presence;
+    // 底缘自然边界：body 在底缘附近用 presence 加强断续感（不是叠加亮线）
+    float body = exp(-dd / H) * exp(dneg / (H * 0.30))
+        * (presence * presence * 0.75 + presence * 0.25);
     // 宽光晕在底边下方也要衰减（0.55H），否则辉光把下方天空糊亮
     wideEnv = exp(-dd / (H * 3.0)) * exp(dneg / (H * 0.55)) * presence;
 
@@ -379,8 +394,9 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
         - ts * (0.6 + 0.5 * act) + rayX * 4.0 + fi * 2.6);
 
     // 强度三层解耦（v8）：帘体基础（含弱射线纹理）+ 英雄褶独立亮层 +
-    // 独立射线层（衰减高度 3.5H——射线穿过带顶延伸到暗天空，图4 观感）。
-    // 射线幂律 RAY_POW：少数亮、多数暗，亮度差跨一个数量级
+    // 独立射线层（衰减高度 RAY_H_K×H——射线穿过光幕顶部延伸到暗天空）。
+    // 射线幂律 RAY_POW：少数亮、多数暗，亮度差跨一个数量级。
+    // v12：删除下缘亮线 eI（"破线"），峰值改由英雄褶 + 竖直射线承担
     float dk = mix(0.30, 1.0, depth);
     float bI = body * (0.55 + BODY_RAY_W * rays) * flick * stream
         * (1.0 + 0.7 * surge);
@@ -388,15 +404,11 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     float rayUp = exp(-dd / (H * RAY_H_K)) * exp(dneg / (H * 0.30));
     float beamI = presence * pow(0.5 + 0.5 * rf, RAY_POW) * rayUp
         * (0.55 + 0.85 * act) * flick * stream * (1.0 + 1.1 * surge);
-    // 下缘亮线沿光柱断续（rf 深调制——实拍亮线是一段段的，光柱强处
-    // 亮线在、暗隙处亮线缺）
-    float eI = border * (0.40 + 0.85 * rf) * stream
-        * (1.0 + 1.8 * act * rf + 1.2 * surge);
 
-    // 带内四段色阶（v8）：底缘白绿（亮线饱和）→ 主体黄绿（557.7nm）→
-    // 上部橙红（氧红混入）→ 带顶快速衰减（body 的指数衰减保证）。
-    // 实拍（图1/3/4）的白芯来自最亮处的传感器饱和，由白化项补足
-    float altK = clamp(dd / (H * 1.6), 0.0, 1.0);
+    // 带内四段色阶（v8，v12 光幕化后 altK 范围随 H 重分布）：底缘白绿
+    // （光幕最亮处）→ 主体黄绿（557.7nm）→ 上部橙红（氧红混入）→ 带顶
+    // 快速衰减（body 的指数衰减保证）。白芯来自亮处传感器饱和，由白化项补足
+    float altK = clamp(dd / (H * 1.2), 0.0, 1.0);
     vec3 bodyCol = mix(EMIT_GREEN * 1.45, EMIT_GREEN,
         smoothstep(0.0, 0.14, altK));                       // 底缘白绿→主体黄绿
     bodyCol = mix(bodyCol, vec3(0.72, 0.62, 0.30),
@@ -407,20 +419,17 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     vec3 emis = bodyCol * bI * BODY_GAIN * dk * beatG;
     emis += EMIT_GREEN * heroI * dk * beatG;                // 英雄褶亮层
     emis += EMIT_GREEN * beamI * RAY_GAIN * dk * beatG;     // 独立射线层
-    emis += EMIT_GREEN * eI * EDGE_GAIN * dk * beatG;
-    // 氧红：独立薄层贴在带顶（RED_LIFT 小——薄带里红边离绿边很近）；
+    // 氧红：独立薄层贴在带顶（RED_LIFT 小——光幕里红边离绿边很近）；
     // 底边下方同样快速截止
     float dr = d - RED_LIFT * span;
     float red = exp(-max(dr, 0.0) / (H * RED_H_K)) * exp(dneg / (H * 0.30))
         * presence * (0.55 + 0.45 * rf);
     emis += EMIT_RED * red * (RED_BASE + RED_ACT * act)
         * (0.5 + 0.9 * h2) * dk * beatG;
-    // N2+ 粉紫：只挂在活跃期的下缘亮线上 + 亮线下方的弥散薄层
-    // （picket fence 观感：粉紫在绿线的下面/外面，不在帘体内）
-    emis += EMIT_PINK * eI * act * 0.34 * dk * beatG;
-    float sigP = BORDER_W * 3.2;
-    float under = d < 0.0 ? exp(-d * d / (2.0 * sigP * sigP)) : 0.0;
-    emis += EMIT_PINK * under * presence * act * 0.26 * dk * beatG;
+    // N2+ 蓝紫：只挂在活跃期光幕底缘的弥散薄层（picket fence 观感——粉紫
+    // 在绿幕的下缘外侧；v12 改为挂 body 底缘，不再依赖已删除的亮线）
+    float under = d < 0.0 ? exp(-d * d / (2.0 * (H * 0.05) * (H * 0.05))) : 0.0;
+    emis += EMIT_PINK * under * presence * act * 0.30 * dk * beatG;
     // 爆发品红层（v8）：substorm 冠冕的主导色（图2）——act 高时整条带
     // 沿射线亮度叠加品红，不只是亮度变化而是"色变"。沿 rayUp 分布
     // （射线结构上），rf 调制让品红跟着射线断续
