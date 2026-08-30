@@ -1,5 +1,12 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v11 相对 v10 的水面倒影（方案遗留项：图2/3 的水面反射是沉浸感大杀器）：
+//   **水面**：近侧山脊改为水岸（远山脊保留为剪影），水面区域（水岸线以下）
+//   用**镜像坐标重算同一场极光**（把帘幕循环包成 auroraEmission 函数，主
+//   极光与倒影共用——水面反射的就是天上那场，不是另一条假带）。波纹：
+//   两频横向偏移扰动 + 亮度调制；衰减：离岸越远越暗（exp）+ 水面吸收偏
+//   蓝绿。成本控制：倒影只算主帘（depth=1.0）+ 宽光晕，避免 2 帘翻倍。
+//
 // v10 相对 v9 的方向随机化（用户反馈："极光方向不应固定竖直——电子入射
 // 方向不固定，与磁场作用后出现位置/方向都不确定"）：
 //   **整场方向角 dirAngle**（wander 慢漂，±31°）：把"带坐标系"旋转后再算
@@ -231,6 +238,12 @@ const float RIDGE_FAR_Y = -0.335;
 const float RIDGE_NEAR_Y = -0.435;
 const float SEED_SPREAD = 173.0;
 
+// ---- v11 水面倒影（图2/3 沉浸感大杀器：水面反射极光）-----------------------
+const float WATER_Y = -0.36;        // 水岸线高度（远山脊下方；近侧山脊改为水岸）
+const float RIPPLE_AMP = 0.028;     // 波纹横向偏移幅度（镜像坐标扰动）
+const float REFLECT_GAIN = 0.50;    // 倒影亮度增益（真实水面反射率 ~5-8%，
+                                    //   但夜景长曝光下视觉上更亮——取折中）
+
 // 星层：幂律亮度 + 温度色 + 亮星衍射星芒（摄影衍射Artifact，加一点就够）
 vec3 starLayer(vec2 q, float S, float thresh, float ts, float sd) {
     vec2 cell = floor(q * S);
@@ -419,6 +432,23 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
     return emis;
 }
 
+// 极光发射（带坐标系 q 内计算）：帘幕线性 HDR 叠加 + 宽尺度光晕。
+// 主极光与水面倒影共用——倒影用镜像坐标重算同一场极光（水面反射的
+// 就是天上那场，不是另一条假带）。out wide 供宽光晕合成用。
+vec3 auroraEmission(vec2 q, vec2 apex, float ts, float sd, float act,
+    float beatG, out float wide) {
+    float azx = (q.x - apex.x) / max(apex.y - q.y, 0.25);
+    vec3 emis = vec3(0.0);
+    wide = 0.0;
+    for (int i = 0; i < CURTAIN_N; i++) {
+        float wenv;
+        emis += curtain(q, azx, float(i), ts, sd,
+            float(i) / float(CURTAIN_N - 1), act, beatG, wenv);
+        wide += wenv * mix(0.3, 1.0, float(i) / float(CURTAIN_N - 1));
+    }
+    return emis;
+}
+
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
@@ -442,18 +472,10 @@ void main() {
     // 的汇聚点，随带方向一起倾斜
     vec2 apex = APEX_BASE + APEX_WANDER
         * vec2(wanderBi(ts, 61.0, sd + 3.0), wanderBi(ts, 47.0, sd + 9.0));
-    // 伪透视角坐标：条纹在带坐标系里近竖直（沿磁场线）、随高度向天顶收敛
-    float azx = (qr.x - apex.x) / max(apex.y - qr.y, 0.25);
 
-    // ---- 帘幕线性 HDR 叠加 + 宽尺度光晕（带坐标系 qr）----
-    vec3 emis = vec3(0.0);
+    // ---- 帘幕线性 HDR 叠加 + 宽尺度光晕（带坐标系 qr；azx 在函数内算）----
     float wide = 0.0;
-    for (int i = 0; i < CURTAIN_N; i++) {
-        float wenv;
-        emis += curtain(qr, azx, float(i), ts, sd,
-            float(i) / float(CURTAIN_N - 1), act, beatG, wenv);
-        wide += wenv * mix(0.3, 1.0, float(i) / float(CURTAIN_N - 1));
-    }
+    vec3 emis = auroraEmission(qr, apex, ts, sd, act, beatG, wide);
     emis *= transA;
     wide *= transA;
 
@@ -504,24 +526,46 @@ void main() {
     prev.b = texture2D(uPrev, fuv - FB_CHROMA).b;
     col += prev * FB_GAIN;
 
-    // ---- 前景山脊剪影：暗蓝黑两层 + 极光绿色上光 + 地平线低空辉光 ----
-    // 山脊顶缘被极光照亮（上光强度随极光整体亮度起伏）
+    // ---- 前景：远山脊剪影（水岸）+ 极光绿色上光 + 地平线辉光 ----
+    // 近侧山脊（RIDGE_NEAR_Y）在 v11 改为水面（见下），只保留远山脊
+    // 作为水岸线后面的剪影
     float ridgeFar = smoothstep(0.0, -0.035,
         q.y - RIDGE_FAR_Y - 0.16 * fbm(vec2(q.x * 2.2, 3.1)));
-    float ridgeNear = smoothstep(0.0, -0.030,
-        q.y - RIDGE_NEAR_Y - 0.12 * fbm(vec2(q.x * 1.4 + 9.0, 7.7)));
     vec3 ridge = vec3(0.008, 0.013, 0.020);
     float auroraLum = dot(emis, vec3(0.299, 0.587, 0.114));
     float upF = exp(-pow((q.y - RIDGE_FAR_Y) * 24.0, 2.0));
-    float upN = exp(-pow((q.y - RIDGE_NEAR_Y) * 20.0, 2.0));
-    ridge += EMIT_GREEN * (upF * 0.7 + upN)
+    ridge += EMIT_GREEN * upF
         * clamp(auroraLum * 0.7, 0.0, 0.6) * 0.09;
-    col = mix(col, ridge, clamp(ridgeFar + ridgeNear, 0.0, 1.0));
-    // 地平线低空辉光（v8）：山脊上方的贴地辉光——雪原/水面被极光整体
-    // 照亮（图4 雪地泛绿）。比山脊上光覆盖更宽（σ≈1/6 屏高），混在
-    // 山脊剪影之前的 col 上（剪影会盖掉山内的部分，露出的是山脊上方）
-    float ground = exp(-pow((q.y - RIDGE_FAR_Y) * 6.0, 2.0))
-        * (1.0 - clamp(ridgeFar + ridgeNear, 0.0, 1.0));
+    col = mix(col, ridge, ridgeFar);
+
+    // ---- 水面（v11）：近侧山脊改为水岸——极光倒影（图2/3 沉浸感大杀器）。
+    // 镜像坐标重算同一场极光（auroraEmission），叠加波纹扰动 + 距离衰减。
+    // 倒影只算主帘（depth=1.0 最近最亮）+ 宽光晕——水面反射最亮的结构，
+    // 完整 2 帘会让倒影区成本翻倍，主帘近似在 1/3 屏内视觉足够
+    float waterY = WATER_Y + 0.04 * fbm(vec2(q.x * 1.3 + 5.0, 7.7)); // 水岸线微起伏
+    float waterMask = smoothstep(waterY + 0.02, waterY, q.y);
+    if (waterMask > 0.01) {
+        // 波纹：两频横向偏移（时间流动），镜像坐标扰动
+        float ripple = 0.5 + 0.5 * sin(q.x * 26.0 - ts * 1.1 + waterY * 40.0);
+        vec2 mq = vec2(q.x + RIPPLE_AMP * (sin(q.x * 30.0 - ts * 1.4)
+            + 0.5 * sin(q.x * 47.0 + ts * 0.8)) * ripple,
+            2.0 * waterY - q.y);
+        // 镜像坐标也进带坐标系（倒影随极光方向一起倾斜）
+        vec2 mqr = rot(dirAngle) * mq;
+        float mwide;
+        vec3 memis = auroraEmission(mqr, apex, ts, sd, act, beatG, mwide);
+        // 亮芯白化（与主极光一致的后期）
+        float meL = dot(memis, vec3(0.299, 0.587, 0.114));
+        memis = mix(memis, vec3(1.02, 1.08, 1.00) * meL * 1.12,
+            smoothstep(0.55, 2.2, meL) * 0.9);
+        // 距离衰减（越靠画面底部越暗）+ 波纹亮度调制 + 水面吸收偏蓝绿
+        float depth = clamp((q.y - waterY) / 0.38, 0.0, 1.0);
+        float att = REFLECT_GAIN * exp(-depth * 2.2) * (0.5 + 0.5 * ripple);
+        col += (memis + mix(EMIT_GREEN, vec3(0.30, 0.55, 0.90), 0.4)
+            * mwide * 0.5) * att * transA;
+    }
+    // 地平线低空辉光（v8）：水岸上方的贴地辉光——雪原/水面被极光整体照亮
+    float ground = exp(-pow((q.y - RIDGE_FAR_Y) * 6.0, 2.0)) * (1.0 - ridgeFar);
     col += EMIT_GREEN * ground * clamp(auroraLum * 0.7, 0.0, 0.6)
         * GROUND_GLOW * transA;
 
