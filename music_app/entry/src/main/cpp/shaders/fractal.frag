@@ -1,169 +1,168 @@
-// fractal.frag：碎片（fragment）混沌引擎 v8——"持续繁衍、变化多样的碎片云"
+// fractal.frag：MilkDrop 式混沌引擎 v9——"一个主体持续变形 + 附加效果"
 //
-// v8 多样性增强（用户："变化太少太慢，加点函数让变化更多样"）：
-//   · 分裂/合并：每片带 2 个分裂子体（splitK 0→1 周期裂成 3 片再合并，
-//     细胞分裂感）
-//   · 次轨道：更快不可通约的第二轨道（轨迹从圆变成摆动花环）
-//   · 偶发突跳：高频 wander 峰触发快速移动（不是瞬移，是突然加速）
-//   · 全局形变波：空间行进波调制碎片大小（波扫过时碎片此起彼伏）
-//   · 形状极端化：边数 2~11、星形度 0~1.3（超星）
-//   · 色相快漂 + 偶发跳色、亮度快闪（双频）
-//   · 全部速率 ×~1.6（聚散 0.08 / 轨道 0.085 / 呼吸 / 自旋 0.24）
+// v9 彻底重做（用户："v8 刚开始一段黑屏+少量色点，效果更差了；原来主要是
+//   没有主体。千千静听 milkdrop 是有一个主体一直在各种变化，再叠加其他
+//   附加效果，观赏性很高"）。
+//   v7/v8 的碎片场（12 片小碎片散落中环轨道，冷启动 gather/次轨道把它们
+//   推远 → 黑屏 + 色点，且没有视觉中心）整体移除。
 //
-// v7 彻底重构（用户："不再采用固定分形结构，改为碎片形态持续不断演变的动态
-//   可视化；每一帧基于上一帧状态迭代变形，像混沌系统繁衍；碎片独立漂移/
-//   旋转/缩放/聚散"）：
-//   分形（固定数学结构的逃逸集/域扭曲）全部删除——DIVE/KALI/WARP/GYROID/
-//   VORONOI 五形态、22s 轮换调度、modeForShow/evalMode 一并移除。
+// 【主体：超公式 supershape（永远居中、永远在场、持续变形）】
+//   r(φ) = (|cos(mφ/4)|^n2 + |sin(mφ/4)|^n3)^(-1/n1)   —— Gielis 超公式
+//   · 对称数 m 在 3~9.5 之间持续游走（双不可通约频率）：主体从三角形→五角
+//     星→四叶草→螺旋星不断演变，但**始终是一大块**（BODY_SCALE=0.32 屏高）
+//   · 形态指数 n1 在 0.30~0.85 之间漂移（Gielis 参数扫描：n1∈[0.3,0.85] 才是
+//     星形区间，R 起伏 1.4~1.6×；n1>0.9 顶格成圆、m 演变不可见）
+//   · 整体缓慢旋转 + 边缘 fbm 扰动 = 熔岩般涌动的边界
+//   · 内部 fbm 流动颜色（色轮慢漂 + 角度色带 + 内部流动）= 彩色液体
+//   · 任何时刻 ts（含 0）下 m/n 都落在有效区间 → 永不黑屏
 //
-// 【核心算法：无状态 shader 里的"持续繁衍"】
-//   每个碎片的全部参数（位置/尺寸/旋转/边数/星形度/色相/亮度）都是时间 t
-//   的**连续混沌函数**（wander/sin 的不可通约频率组合）：
-//     · 帧间必然连续 = 上一帧状态自然延续（视觉上的"基于上一帧迭代"）
-//     · 长期无周期 = 混沌系统繁衍（永不复现）
-//     · 叠加 feedback 残影（每帧用 uPrev 上一帧数据加权合成）= 真正的
-//       逐帧继承，碎片运动拖出丝状残影，形态像活体一样生长变化
+// 【附加效果（MilkDrop 式叠加，衬托主体）】
+//   · 环绕碎片：8 片小型多边形/星形碎片绕主体外环漂移、呼吸、自旋（点缀）
+//   · 辐射射线：沿主体光晕向外放射的细光线（角度高频条纹，只在主体外）
+//   · 螺旋波纹：从主体向外扩散的涟漪（r·freq − t·speed + 角度项）
+//   · 反馈拖尾：每帧 25% 上一帧数据加权合成（残影流动）
+//   · beat 只进亮度（铁律）；vignette；toneExp + SHADOW_LIFT；applyTransition
 //
-// 【精灵运动（每片独立参数化）】
-//     pos    极坐标：r = 基半径 × gather（全场聚散 0.72~1.28）+ 绕心漂移
-//            （每片角速度不同、方向随机）+ wander 慢游走抖动
-//     size   基尺寸 × 呼吸脉冲（每片频率不同）= 缩放
-//     rot    自旋（速率每片不同，带抖动）
-//     sides 边数 3~9 慢演化、spike 星形度 0.3~1（0=圆润多边形 1=尖星）
-//     hue   色相慢漂（每片在色轮上独立游走）
-//     lum   亮度脉冲（每片相位不同）
+// 调试教训：① 主体过大会把全场垫亮（R clamp 上限 1.7 + BODY_SCALE 0.42 →
+//   主体占画面 80%，且 n1>0.9 时超公式顶格成圆失去形状）→ 收敛到
+//   BODY_SCALE 0.32 / R≤1.45 / n1∈[0.3,0.85]；② 边缘发光不能 max(d-1,0)
+//   （内部 exp(0)=1 被整体垫亮）→ 直接 exp(-(d-1)²·k)；③ 附加层（射线/
+//   波纹/光晕/反馈）都会垫高中环，一律减半起步。
 //
-// 渲染：碎片用"多边形/星形 SDF 半径"形状，场 F = Σ size²/d_eff²（d_eff =
-// 距碎片中心的形状归一化距离）——相邻碎片场值叠加融合（像细胞/泡沫），
-// 碎片间的场谷值压暗成"细胞膜"暗线。
-//
-// 保留：feedback 反馈循环、beat 亮度（铁律：音频量只进亮度）、vignette、
-// toneExp + SHADOW_LIFT、applyTransition、公共库注入。
+// 保留：公共库注入、反馈循环、节拍亮度铁律、收尾链。
 
 // ---- 公共函数（hash/vn/fbm/wander/rot/palIQ/toneExp/applyTransition/…）由
 // 工具链从 common.glsl 注入，不要在本文件重复定义。
 
-// ---- 碎片引擎参数 ----------------------------------------------------------
-const int FRAG_COUNT = 12;          // 碎片数（性能与密度平衡；逐像素×逐片）
-const float FRAG_SIZE_BASE = 0.038; // 基尺寸（屏高单位）
-const float FRAG_SIZE_RANGE = 0.062;// 尺寸分布跨度（大碎片 + 小碎片共存）
-const float FRAG_GATHER_AMP = 0.28; // 聚散幅度：全场半径 ×(0.72~1.28)
-const float FRAG_GATHER_RATE = 0.08;// 聚散周期（慢——聚集→散开→聚集）
-const float FRAG_ORBIT_RATE = 0.085;// 绕心漂移基础角速度（rad/s）
-const float FRAG_ORBIT_K = 0.18;    // 每片角速度差异（0.05±0.12 → 有正有负）
-const float FRAG_WOBBLE = 0.09;     // 慢游走抖动幅度（wander，混沌无周期）
-const float FRAG_BREATH = 0.38;     // 呼吸幅度（缩放 ±32%）
-const float FRAG_ROT_RATE = 0.24;   // 自旋基础速率（rad/s）
-const float FRAG_ROT_K = 0.45;      // 每片自旋差异
-const float FRAG_LUM_MIN = 0.30;    // 亮度下限（暗色碎片也存在，层次感）
-const float FRAG_EDGE_K = 0.30;     // 碎片间"细胞膜"暗线强度
-const float FRAG_BEAT_K = 0.20;     // 节拍对碎片亮度的调制（铁律：只进亮度）
+// ---- 主体（超公式 supershape）参数 -----------------------------------------
+const float BODY_SCALE = 0.32;      // 主体半尺寸（屏高单位）——中心大块、四周露暗背景
+const float BODY_ROT_RATE = 0.10;   // 主体整体旋转（rad/s，缓慢）
+const float BODY_M_BASE = 3.0;      // 对称数下限（3 瓣）
+const float BODY_M_RANGE = 6.5;     // 对称数游走范围（3 ~ 9.5 演变）
+const float BODY_N1_MIN = 0.30;     // 形态指数下限（Gielis 扫描：n1∈[0.3,0.85]
+                                   //   才是星形区间，R 起伏 1.8~2.0×；n1>0.9 顶格
+                                   //   成圆，m 演变不可见）
+const float BODY_N1_MAX = 0.85;     // 形态指数上限（保持星形区间内漂移）
+const float BODY_WAVE_K = 0.12;     // 边缘 fbm 扰动（熔岩涌动边界）
+const float BODY_INNER_GLOW = 0.62; // 内部填充强度（收敛——主体是画面最亮处但
+                                   //   不能把全场垫亮）
+const float BODY_EDGE_GLOW = 1.05;  // 边缘发光（主体轮廓最亮）
+const float BODY_HALO = 0.10;       // 外部光晕（贴主体的窄光晕——宽光晕会把
+                                   //   整个画面垫亮，暗背景衬托才像 MilkDrop）
+const float BODY_FLOW_K = 0.45;     // 内部流动强度（fbm 驱动亮度）
 
-// ---- 收尾常量（沿用旧引擎，值不变）---------------------------------------
+// ---- 附加效果参数 ----------------------------------------------------------
+const int SPARK_COUNT = 8;          // 环绕碎片数（点缀，非主体）
+const float SPARK_SIZE = 0.042;     // 碎片基尺寸
+const float SPARK_ORBIT = 0.13;     // 环绕角速度基础（rad/s）
+const float SPARK_ORBIT_K = 0.10;   // 每片角速度差异
+const float RAY_FREQ = 34.0;        // 辐射射线角度频率
+const float RAY_DRIFT = 0.9;        // 射线转动速度（rad/s）
+const float RAY_GAIN = 0.15;        // 射线强度（弱化——pow 22 已很锐，叠满
+                                   //   会把中环垫亮）
+const float RIPPLE_FREQ = 26.0;     // 螺旋波纹径向频率
+const float RIPPLE_SPEED = 2.2;     // 波纹扩散速度
+const float RIPPLE_GAIN = 0.04;     // 波纹强度
+
+// ---- 收尾常量（沿用，值不变）-----------------------------------------------
 const float SEED_SPREAD = 211.0;
-const float VIGNETTE = 0.22;
+const float VIGNETTE = 0.28;
 const float TRAIL_ZOOM_SOFT = 0.996; // 反馈采样的轻运动模糊（近恒等）
-const float TRAIL_GAIN = 0.30;       // 反馈权重（残影余晖）
-const float SHADOW_LIFT = 0.76;      // 暗部提升（压缩忽明忽暗的观感）
+const float TRAIL_GAIN = 0.25;       // 反馈权重（残影余晖；0.30 会让暗部被
+                                   //   残影无限垫亮，收敛到 0.25）
+const float SHADOW_LIFT = 0.80;      // 暗部提升（0.76 抬暗部太狠——暗背景
+                                   //   0.05 被抬到 0.09，0.80 少抬一点）
 
-// 碎片形状半径：n 边形（顶点=1、边=cos(π/n)）与星形（尖角）的混合。
-// dir 是碎片局部坐标系的方向（已减自旋角），sides 边数、spike 星形度。
+// 超公式半径（Gielis）：m 对称数、n1 锐度、n2/n3 形状指数。
+// pow(x, y) 在 x=0 是 GLSL 未定义行为（SwiftShader 返回 NaN 崩帧），
+// 底数必须夹下限。
+float supershapeR(float ang, float m, float n1, float n2, float n3) {
+    float t1 = pow(max(abs(cos(m * ang / 4.0)), 1e-4), n2);
+    float t2 = pow(max(abs(sin(m * ang / 4.0)), 1e-4), n3);
+    return pow(t1 + t2, -1.0 / n1);
+}
+
+// 多边形/星形碎片半径（附加碎片的形状）：n 边形与星形混合，spike 星形度。
 float fragShape(vec2 dir, float sides, float spike) {
     float a = atan(dir.y, dir.x);
     float an = TAU / sides;
-    float ang = abs(mod(a, an) - 0.5 * an);   // 到最近边中心的角距离 [0, 0.5an]
-    float rPoly = cos(ang) / cos(0.5 * an);   // 多边形：顶点 1、边 cos(π/n)
-    float rStar = 1.0 / cos(ang);             // 星形：边处向外尖
+    float ang = abs(mod(a, an) - 0.5 * an);
+    float rPoly = cos(ang) / cos(0.5 * an);
+    float rStar = 1.0 / cos(ang);
     return mix(rPoly, rStar, spike);
 }
 
-// 碎片场：F = Σ size²/d_eff²，d_eff = 距碎片中心的形状归一化距离。
-// 输出 hueLum = 场加权的 (色相, 亮度)，g = 场梯度（供法线）。
-float fragField(vec2 p, float ts, float sd, out vec3 hueLum, out vec2 g) {
+// 主体场：返回亮度贡献（内部填充 + 边缘发光 + 外部光晕），bcol 输出主体颜色。
+// 任何 ts 下 m/n 都落在有效区间 → 主体永远在场，永不黑屏。
+float mainBody(vec2 p, float ts, float sd, out vec3 bcol) {
+    float ang = atan(p.y, p.x);
+    float r = length(p) / BODY_SCALE;
+    // 对称数与形态持续演变（双不可通约频率——一直在变形但永远是一大块）
+    float m = BODY_M_BASE + BODY_M_RANGE * (0.5 + 0.5 * sin(ts * 0.073 + sd))
+        * (0.72 + 0.28 * sin(ts * 0.019 + sd * 1.7));
+    float n1 = BODY_N1_MIN + (BODY_N1_MAX - BODY_N1_MIN)
+        * (0.5 + 0.5 * sin(ts * 0.061 + sd * 2.3 + 1.7));
+    float n2 = 2.0 + 1.5 * (0.5 + 0.5 * sin(ts * 0.043 + sd * 3.1));
+    float n3 = 2.0 + 1.5 * (0.5 + 0.5 * sin(ts * 0.037 + sd * 4.3 + 0.9));
+    float rot = ts * BODY_ROT_RATE + 0.4 * sin(ts * 0.027 + sd);
+    float a = ang - rot;
+    // 边缘 fbm 扰动（熔岩涌动）；fbm 输入用单位圆上的点，扰动随角度连续
+    float wob = 1.0 + BODY_WAVE_K
+        * (fbm(vec2(cos(a) * 2.3, sin(a) * 2.3) + vec2(ts * 0.05, sd * 0.3)) - 0.5) * 2.0;
+    float R = clamp(supershapeR(a, m, n1, n2, n3) * wob, 0.20, 1.45);
+    float d = r / max(R, 1e-4);
+    // 主体：内部填充 + 边缘发光 + 外部光晕
+    float inner = smoothstep(1.25, 0.80, d) * BODY_INNER_GLOW;
+    // 边缘发光是 d≈1 处的高斯（内部 d<1 时 (d-1)² 大 → 快速衰减；
+    // 不能 max(d-1,0)——那会让内部整块 exp(0)=1 被垫亮过曝）
+    float edge = exp(-(d - 1.0) * (d - 1.0) * 26.0) * BODY_EDGE_GLOW;
+    float halo = smoothstep(1.25, 1.03, d) * BODY_HALO;
+    // 内部流动颜色（熔岩感：fbm 驱动亮度 + 色相）
+    float flow = fbm(p * 5.0 + vec2(ts * 0.22, ts * 0.13) + sd * 0.5);
+    float hue = 0.60 + 0.16 * sin(ts * 0.05 + sd)       // 全局色轮慢漂
+        + 0.12 * sin(a * 2.0 + ts * 0.09)                // 角度色带（旋转彩虹）
+        + 0.08 * flow;                                   // 内部流动
+    float lum = 0.32 + 0.24 * (0.5 + 0.5 * sin(ts * 0.31 + sd * 1.1))
+        + BODY_FLOW_K * flow * inner + 0.28 * inner;
+    bcol = hue2rgb(fract(hue)) * lum;
+    return inner + edge + halo;
+}
+
+// 环绕碎片（附加点缀）：8 片小碎片绕主体外环漂移/呼吸/自旋/变形
+float sparkField(vec2 p, float ts, float sd, inout vec3 col) {
     float F = 0.0;
     vec3 hl = vec3(0.0);
-    vec2 gg = vec2(0.0);
-    for (int i = 0; i < FRAG_COUNT; i++) {
+    for (int i = 0; i < SPARK_COUNT; i++) {
         float fi = float(i);
         float h1 = hash11(fi * 7.13 + sd);
         float h2 = hash11(fi * 3.71 + sd + 11.0);
         float h3 = hash11(fi * 5.39 + sd + 23.0);
-        float h4 = hash11(fi * 9.17 + sd + 37.0);
-
-        // ---- 精灵运动：位置（漂移 + 聚散 + 次轨道 + 偶发跳变）----
-        float rBase = 0.35 + 0.45 * h1;                  // 每片轨道半径
-        float gather = 1.0 - FRAG_GATHER_AMP
-            + FRAG_GATHER_AMP * (0.5 + 0.5 * sin(ts * FRAG_GATHER_RATE + sd));
-        float r = rBase * gather;
-        // 主轨道（每片角速度/方向不同）+ wander 慢游走（混沌无周期）
-        float orb = ts * (FRAG_ORBIT_RATE + FRAG_ORBIT_K * h2)
-            * (h4 < 0.5 ? 1.0 : -1.0);
-        float wob = FRAG_WOBBLE * wanderBi(ts * 0.05 + fi * 3.1, 1.0,
-            sd + h3 * 7.0);
-        float th = orb + fi * 2.4 + wob * TAU;
-        vec2 pos = vec2(cos(th), sin(th)) * r;
-        // 次轨道（更快、不可通约 → 轨迹不是圆，是摆动花环）
-        float orb2 = ts * (0.31 + 0.19 * h1) * (h3 < 0.5 ? 1.0 : -1.0);
-        pos += vec2(cos(orb2 + fi * 1.7), sin(orb2 * 1.3 + fi * 4.9))
-            * (0.10 + 0.08 * h2);
-        // 偶发突跳（高频 wander 的峰触发快速移动，不是瞬移）
-        float hop = wanderBi(ts * 0.8 + fi * 9.0, 0.35, sd + fi * 3.3);
-        pos += vec2(cos(hop * TAU), sin(hop * 1.7 * TAU))
-            * 0.14 * smoothstep(0.90, 1.0, abs(hop));
-
-        // ---- 精灵运动：缩放（呼吸 + 全局形变波）----
-        float size = FRAG_SIZE_BASE + FRAG_SIZE_RANGE * h3;
-        size *= 1.0 + FRAG_BREATH * sin(ts * (0.9 + 1.1 * h2) + fi * 5.3)
-            * (0.5 + 0.5 * sin(ts * 0.21 + fi * 2.9 + sd));
-        // 全局行进波：碎片大小随画面位置波动（波扫过时碎片此起彼伏）
-        size *= 0.75 + 0.5 * (0.5 + 0.5 * sin(p.x * 4.0 - ts * 1.5 + p.y * 2.5));
-        size = max(size, 0.015);
-
-        // ---- 形状演变：边数 + 星形度（更快、更极端）----
-        float sides = 2.0 + floor(10.0 * h3);            // 2~11 边形
-        float spike = 1.3 * (0.5 + 0.5 * sin(ts * 0.15 + fi * 3.7 + sd));  // 0~1.3
-
-        // ---- 精灵运动：旋转（自旋 + 抖动）----
-        float rot = ts * (FRAG_ROT_RATE + FRAG_ROT_K * h1) + fi * 4.3
-            + 0.5 * sin(ts * 0.09 + fi * 2.2 + sd);
-
-        // ---- 场贡献：主碎片 + 分裂子体（细胞分裂感）----
-        // splitK 0→1：合并 → 裂成 3 片（主 + 2 偏移小块）→ 合并
-        float splitK = 0.5 + 0.5 * sin(ts * 0.11 + fi * 3.3 + sd);
-        // 颜色加权：色相快漂 + 偶发跳变 + 亮度快闪（先算，供子体循环用）
-        float hue = 0.06 * sin(ts * 0.05 + fi * 2.1 + sd)
-            + 0.03 * sin(ts * 0.17 + fi * 5.3) + 0.83 * h1 + 0.17 * h2;
-        hue += step(0.94, fract(ts * 0.023 + fi * 0.71)) * 0.4;   // 偶发跳色
-        float lum = FRAG_LUM_MIN + (1.0 - FRAG_LUM_MIN)
-            * (0.5 + 0.5 * sin(ts * (0.35 + 0.30 * h4) + fi * 6.1));
-        lum *= 0.7 + 0.6 * (0.5 + 0.5 * sin(ts * 2.1 + fi * 7.7)); // 快速闪动
-        vec2 subOff = vec2(cos(rot + 1.1), sin(rot + 1.1))
-            * size * (0.9 + 0.6 * splitK);
+        float th = ts * (SPARK_ORBIT + SPARK_ORBIT_K * h1)
+                * (h2 < 0.5 ? 1.0 : -1.0)
+            + fi * 2.4
+            + 0.08 * wanderBi(ts * 0.05 + fi, 1.0, sd + h3 * 5.0);
+        float rr = 0.62 + 0.30 * h3 + 0.05 * sin(ts * 0.09 + fi * 3.0);
+        vec2 pos = vec2(cos(th), sin(th)) * rr;
         vec2 d = p - pos;
+        float size = SPARK_SIZE * (0.6 + 0.8 * h3);
+        size *= 1.0 + 0.35 * sin(ts * (0.7 + 0.9 * h2) + fi * 5.1);  // 呼吸
+        size = max(size, 0.015);
+        float sides = 3.0 + floor(4.0 * h1);                          // 3~6 边形
+        float spike = 0.3 + 0.7 * (0.5 + 0.5 * sin(ts * 0.11 + fi * 3.7 + sd));
+        float rot = ts * (0.20 + 0.30 * h2) + fi * 4.3;               // 自旋
         float ang = atan(d.y, d.x) - rot;
         float srad = fragShape(vec2(cos(ang), sin(ang)), sides, spike);
         float dEff = length(d) / max(srad, 0.05);
         float w = size * size / (dEff * dEff + 1e-4);
         F += w;
-        // 两个分裂子体（尺寸 ×0.5×splitK，splitK→0 时消失）
-        for (int k = 0; k < 2; k++) {
-            vec2 subPos = pos + (k == 0 ? subOff : -subOff);
-            vec2 sd2 = p - subPos;
-            float sEff = length(sd2) / max(srad * 0.9, 0.05);
-            float w2 = (size * size * 0.25 * splitK * splitK)
-                / (sEff * sEff + 1e-4);
-            F += w2;
-            hl += vec3(fract(hue), lum, 0.0) * w2;
-            gg += -2.0 * w2 * sd2 / max(dot(sd2, sd2), 1e-4);
-        }
+        float hue = 0.66 + 0.10 * h1 + 0.08 * sin(ts * 0.06 + fi * 2.1);
+        float lum = 0.45 + 0.55 * (0.5 + 0.5 * sin(ts * (0.4 + 0.3 * h2) + fi * 6.1));
         hl += vec3(fract(hue), lum, 0.0) * w;
-
-        // 梯度（元球式近似，供法线）
-        gg += -2.0 * w * d / max(dot(d, d), 1e-4);
     }
-    hueLum = hl / max(F, 1e-4);
-    g = gg;
-    return F;
+    float m = smoothstep(0.7, 1.1, F);
+    vec3 c = hue2rgb(hl.x / max(F, 1e-4)) * (hl.y / max(F, 1e-4));
+    col += c * m;
+    return m;
 }
 
 void main() {
@@ -171,35 +170,34 @@ void main() {
     float sd = seedHash() * SEED_SPREAD;
     vec2 q = sceneUV(vec2(0.5));
 
-    // ---- 碎片场 ----
-    vec3 hueLum;
-    vec2 g;
-    float F = fragField(q, ts, sd, hueLum, g);
-    float m = smoothstep(0.80, 1.20, F);            // 碎片实体（等值面）
-    float glen = length(g);
-    vec3 n = normalize(vec3(-g / max(glen, 1e-4) * min(glen, 1.0), 1.0));
+    // ---- 主体（永远在场）----
+    vec3 bcol;
+    float body = mainBody(q, ts, sd, bcol);
+    vec3 col = bcol * body;
 
-    // ---- 着色：色相 → 颜色，光照 + 边缘辉光 + 核心白化 ----
-    vec3 base = hue2rgb(hueLum.x) * (0.35 + 0.65 * hueLum.y);
-    // 顶部光照（n.z）+ 等值面带 + 核心（F 峰值处白化）
-    float body = smoothstep(1.0, 0.0, abs(F - 1.0) * 2.5) * m;
-    float core = smoothstep(0.5, 0.0, F - 1.5) * m;
-    // 光照项乘 m：碎片本体亮（m=1），碎片之间只有 12% 暗底色——否则
-    // base 在 m=0 处也全量生效，整个画面被涂成亮底
-    vec3 col = base * (0.45 + 0.55 * n.z) * (0.12 + 0.88 * m)
-        + base * body * 0.7
-        + vec3(1.0, 0.96, 0.88) * core * 0.9;
-    // 碎片之间的场谷值压暗 = "细胞膜"暗线（碎片既融合又独立）
-    col *= 1.0 - FRAG_EDGE_K * smoothstep(0.35, 0.15, F) * (1.0 - m);
+    // ---- 附加：环绕碎片（外环点缀）----
+    sparkField(q, ts, sd, col);
+
+    // ---- 附加：辐射射线（沿主体光晕向外放射）----
+    float ang = atan(q.y, q.x);
+    float rr = length(q);
+    float rays = pow(vn(vec2(ang * RAY_FREQ + ts * RAY_DRIFT, sd * 3.0)), 22.0);
+    // 射线只在主体边缘外（rr>0.55）出现、向外衰减——主体内部已有颜色，
+    // 射线填满内部会糊
+    col += bcol * rays * smoothstep(0.55, 0.42, rr)
+        * smoothstep(1.25, 0.75, rr) * RAY_GAIN;
+
+    // ---- 附加：向外扩散的螺旋波纹 ----
+    float ripple = sin(rr * RIPPLE_FREQ - ts * RIPPLE_SPEED + ang * 2.0)
+        * exp(-rr * 2.4) * RIPPLE_GAIN;
+    col += bcol * ripple;
 
     // beat 只进亮度（速度恒定铁律）
-    col *= 0.95 + 0.18 * uBeat;
+    col *= 0.94 + 0.18 * uBeat;
     col *= 1.0 - VIGNETTE * dot(q, q);
 
-    // ---- 反馈循环：每帧用上一帧 fragment 数据生成新帧（用户核心诉求）----
-    // 碎片运动拖出丝状残影，形态像活体一样从上一帧"长"出来
-    vec3 prevS = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
-    vec3 prev = prevS;
+    // ---- 反馈循环：每帧用上一帧 fragment 数据生成新帧（残影流动）----
+    vec3 prev = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
     col = col * (1.0 - TRAIL_GAIN) + prev * TRAIL_GAIN;
 
     col = toneExp(col, 1.0);

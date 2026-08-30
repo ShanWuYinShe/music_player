@@ -10,30 +10,31 @@ function readShader(name: string): string {
 	return readFileSync(resolve(SHADER_ROOT, name), 'utf8');
 }
 
-describe('fractal v7 碎片混沌引擎（回归保护）', () => {
-	// v7 彻底重构（用户："不再采用固定分形结构，改为碎片持续演变的动态
-	// 可视化；每帧基于上一帧状态迭代变形；碎片独立漂移/旋转/缩放/聚散"）：
-	// 分形五形态（DIVE/KALI/WARP/GYROID/VORONOI）与 22s 轮换调度全部删除。
-	// 以下断言锁定新结构不变量，防止后续返工把旧分形结构带回来。
+describe('fractal v9 主体+附加引擎（回归保护）', () => {
+	// v9 彻底重做（用户："v8 刚开始黑屏+少量色点；原来主要是没有主体。千千
+	// 静听 milkdrop 是有一个主体一直在各种变化，再叠加附加效果"）：
+	// v7/v8 的碎片场（12 片小碎片散落中环轨道 → 冷启动黑屏 + 无视觉中心）
+	// 移除，改为超公式主体（永远居中、永远在场、持续变形）+ 附加效果。
+	// 以下断言锁定新结构不变量，防止后续返工把"散点碎片"或旧分形带回来。
 	const fractal = readShader('fractal.frag');
 
-	test('碎片引擎存在：fragShape（多边形/星形形状）+ fragField（碎片场）', () => {
-		expect(fractal).toMatch(/float\s+fragShape\s*\(/);
-		expect(fractal).toMatch(/float\s+fragField\s*\(/);
-		expect(fractal).toMatch(/FRAG_COUNT\s*=/);
+	test('主体存在：supershapeR（超公式）+ mainBody（永远在场的主体场）', () => {
+		expect(fractal).toMatch(/float\s+supershapeR\s*\(/);
+		expect(fractal).toMatch(/float\s+mainBody\s*\(/);
+		expect(fractal).toMatch(/BODY_SCALE\s*=/);
 	});
 
-	test('形状持续演变：边数 3~9 + 星形度参数（不是固定几何）', () => {
-		expect(fractal).toMatch(/sides\s*=\s*[23]\.0\s*\+\s*floor\(/);
-		expect(fractal).toMatch(/spike\s*=/);
-		expect(fractal).toMatch(/fragShape\(/);
+	test('主体持续演变：对称数 m 与形态指数 n1 都是时间的连续函数', () => {
+		expect(fractal).toMatch(/BODY_M_BASE\s*\+\s*BODY_M_RANGE/);
+		expect(fractal).toMatch(/BODY_N1_MIN\s*\+\s*\(BODY_N1_MAX/);
+		expect(fractal).toMatch(/sin\(ts/);   // 任何时刻主体都在变形
 	});
 
-	test('精灵运动：聚散 / 呼吸缩放 / 自旋 / 混沌漂移全部参数化', () => {
-		expect(fractal).toMatch(/gather\s*=/);        // 聚散
-		expect(fractal).toMatch(/FRAG_BREATH/);       // 呼吸缩放
-		expect(fractal).toMatch(/rot\s*=\s*ts/);      // 自旋
-		expect(fractal).toMatch(/wanderBi/);          // 混沌漂移（无周期）
+	test('附加效果存在：环绕碎片 sparkField + 辐射射线 + 螺旋波纹', () => {
+		expect(fractal).toMatch(/float\s+sparkField\s*\(/);
+		expect(fractal).toMatch(/SPARK_COUNT\s*=/);
+		expect(fractal).toMatch(/RAY_FREQ|rays\s*=/);
+		expect(fractal).toMatch(/RIPPLE_FREQ|ripple\s*=/);
 	});
 
 	test('反馈循环保留：col = col×(1−fb) + prev×fb（每帧用上一帧生成）', () => {
@@ -47,6 +48,11 @@ describe('fractal v7 碎片混沌引擎（回归保护）', () => {
 		expect(fractal).not.toMatch(/vec3\s+evalMode|float\s+modeForShow/);
 		expect(fractal).not.toMatch(/FORM_PERIOD|showIdx|fract\(cyc\)/);
 		expect(fractal).not.toMatch(/ph\s*>\s*1\.0\s*-\s*xf/);
+	});
+
+	test('v8 散点碎片场已移除（无 fragField 大循环：主体不是散点云）', () => {
+		expect(fractal).not.toMatch(/float\s+fragField\s*\(/);
+		expect(fractal).not.toMatch(/FRAG_COUNT\s*=/);
 	});
 });
 
