@@ -1,4 +1,20 @@
-// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v13：球面锅底 + 不规则水滴）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v14：贴壁球面滑行 + 扁平水珠）。
+//
+// v14 相对 v13 的运动/形态重构（用户反馈：水滴是在"锅底悬空的高度平面"上
+//   移动，应该贴着锅内侧做 3D 运动；而且"锅底只有水珠，不是有那么高的水"）：
+//   1. **球面滑行（核心）**：v13 的 pos 是纯 2D 平面坐标——所有水珠都在底
+//      缘椭圆内平移，读作"悬浮在锅底上方一个平面上的球"。现在把平面游走
+//      量映射成球面极角 θ（θ=0 锅心、θ=SLIDE_THETA 内壁），水平投影
+//      s=sin(θ) 让 ds/dθ=cos(θ)：锅心一掠而过、内壁徘徊——重力滑梯，快慢比
+//      1/cos(θmax)≈4.6×，不再是匀速兜圈。
+//   2. **高度视差**：球面高度 bowlZ 让爬高的珠在屏幕上向外偏（内壁在锅口
+//      椭圆上，比锅底椭圆大）+ 向远侧上方偏。这是"贴着内侧滑"的判别特
+//      征——平面运动永远做不出这种随高度变化的位移。
+//   3. **可以爬上内壁**：裁剪半径从底缘 bR 放宽到 mix(bR, 1.0, WALL_CLIMB)，
+//      绘制域同步放宽（dropMask），水珠能贴着内侧壁滑上一截。
+//   4. **近大远小**：PERSP_SIZE 让爬上近侧内壁的珠略大、远侧略小。
+//   5. **水珠扁平化**：DROP_FLAT=0.62 把元球穹顶压成贴地扁饼（中间平、边
+//      缘一圈陡接触角）——锅底只有水珠，没有"立起来的一泡水"。
 //
 // v13 相对 v12 的形态修正（用户反馈：锅底还是平的、水滴太规则就是半球形）：
 //   1. **锅底球面感（"平"的病根）**：不是贴图问题，是黑碳钢漫反射主导
@@ -216,6 +232,32 @@ const float WALL_W = 0.32;         // 内壁环带基准宽度（v11 0.28→0.32
                                    //   锅身 + 更宽内壁 = 深炒锅的"看进去"
                                    //   透视更扎实）
 const float OUTER_W = 0.10;        // 外壁环带宽度
+
+// ---- v14 球面 3D 滑行（水珠贴着锅内侧运动，不是在锅底某个"高度平面"上滑）----
+// v13 的病根：pos 是纯 2D 平面坐标，水珠全在底缘椭圆内平移——视觉上读作
+// "悬浮在锅底上方一个平面上的球"。真实莱顿弗罗斯特水珠是**贴着球面滑行**
+// 的：位置由球面极角 θ 决定，θ 越大爬得越高（越靠内壁），投影到屏幕时因
+// 高度产生视差（内壁上的珠在屏幕上更靠外、远侧更靠上）。
+const float SLIDE_THETA = 1.35;    // 球面最大极角（rad，≈77°）。重力滑梯：
+                                   //   水平投影 s=sin(θ)，ds/dθ=cos(θ) → 锅心
+                                   //   (θ≈0) 快、内壁 (θ=θmax) 慢，快慢比
+                                   //   1/cos(θmax)≈4.6×——这正是重力驱动的
+                                   //   "滑下去加速、冲上去减速"
+const float PARALLAX_R = 0.30;     // 高度视差（径向）：内壁上的珠在屏幕上
+                                   //   向外偏移（锅口椭圆 > 锅底椭圆，爬高的
+                                   //   珠越过底缘进入内壁环带）
+const float PARALLAX_Y = 0.22;     // 高度视差（纵向）：远侧内壁的珠更靠画面
+                                   //   上方（俯视视差，+y = 远侧）
+const float WALL_CLIMB = 0.55;     // 允许爬上内壁的比例（0=只许在底面，
+                                   //   1=可爬到锅口沿）。0.55 让受热乱窜的
+                                   //   珠能贴着内侧壁滑上一截——"贴壁 3D"的
+                                   //   主要视觉证据
+const float DROP_FLAT = 0.62;      // 水珠扁平度（v14：锅底只有水珠、没有"那么
+                                   //   高的水"——元球穹顶压扁成贴地扁饼，中间
+                                   //   平（反射整个环境）、边缘一圈陡接触角）
+const float PERSP_SIZE = 0.18;     // 高度透视缩放：爬上近侧内壁的珠离相机近
+                                   //   → 略大；远侧内壁的珠离相机远 → 略小
+                                   //   （近大远小是最强的 3D 深度线索）
 const float PAN_DIFF = 0.42;       // 钢面漫反射占比（v13 0.55→0.42：让位给镜面
                                    //   ——黑碳钢仍哑光为主，但要给球冠法线的镜面
                                    //   反射留出可见度）
@@ -459,10 +501,31 @@ float field(vec2 p, float ts, float sd, out vec2 g) {
         vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
             * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
         pos += trem;
-        // 等值面留在可见底面内（不许爬内壁/爬上沿口）——底面边缘随方位
-        // 收拢（远侧 0.58 / 近侧 0.92），与 v8 凹底构图一致
+        // ---- v14 球面滑行：平面游走量 → 球面极角 θ → 3D 投影回屏幕 ----
+        // 这是"贴着锅内侧的 3D 运动"的核心。v13 的 pos 是纯 2D 平面坐标，
+        // 水珠全在底缘椭圆内平移 → 读作"悬空平面上的球"。现在：
+        //   ① 极角 θ 由径向游走量驱动（θ=0 锅心、θ=θmax 内壁）
+        //   ② 水平投影 s = sin(θ)：ds/dθ = cos(θ) → 锅心一掠而过、内壁
+        //      徘徊（重力滑梯，快慢比 1/cos(θmax) ≈ 4.6×）
+        //   ③ 球面高度 bowlZ 产生屏幕视差：爬高的珠向外（内壁在锅口椭圆
+        //      上，比锅底椭圆大）+ 向远侧上方偏——这两项是"贴壁"的判别
+        //      特征，平面运动永远做不出来
+        float pl0 = length(pos);
+        vec2 sdir = pl0 > 1e-5 ? pos / pl0 : vec2(1.0, 0.0);
+        float rr01 = clamp(pl0 / max(range, 1e-4), 0.0, 1.0);
+        float th = rr01 * SLIDE_THETA;
+        float bowlZ = (1.0 - cos(th)) / (1.0 - cos(SLIDE_THETA));  // 0..1
+        pos = sdir * (sin(th) / sin(SLIDE_THETA) * range)
+            * (1.0 + bowlZ * PARALLAX_R)                 // 径向视差（向外）
+            + vec2(0.0, bowlZ * PARALLAX_Y * range);      // 纵向视差（远侧向上）
+        // 近大远小：爬上近侧内壁的珠离相机近 → 略大；远侧内壁 → 略小
+        float perspK = 1.0 + PERSP_SIZE * bowlZ * (0.6 - 0.9 * sdir.y);
+        rr *= perspK * perspK;
+        rad *= perspK;
+        // 等值面可贴着球面爬上内壁（WALL_CLIMB），但不越过锅口内沿；
+        // 底面边缘随方位收拢（远侧 0.58 / 近侧 0.92）仍与 v8 构图一致
         float bR = bRAt(pos);
-        float maxR = bR - 2.3 * rad - 0.05;
+        float maxR = mix(bR, 1.0, WALL_CLIMB) - 2.3 * rad - 0.05;
         if (maxR > 0.0) {
             float pl = length(pos);
             if (pl > maxR) {
@@ -683,8 +746,12 @@ void main() {
 
     // ---- 高度场法线：h = √(1−1/F)（球冠解析解）----
     float Fin = max(F, 1.0);
-    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0));
-    float dh = 0.5 / (Fin * Fin * max(hDome, 0.035));
+    // v14 扁平化：锅底只有水珠、没有"那么高的水"——元球穹顶压扁成贴地扁
+    // 饼（中间平 → 反射整个环境，边缘一圈陡接触角）。法线梯度同步缩小 →
+    // 中央区 n.z 更接近 1（平），只有边缘陡——贴在锅面上的液滴，不是立
+    // 起来的玻璃球
+    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0)) * DROP_FLAT;
+    float dh = 0.5 * DROP_FLAT / (Fin * Fin * max(hDome, 0.035));
     vec3 n = normalize(vec3(-g * dh, 1.0));
 
     // ---- 贴合阴影（同一份场推出；背光侧更深）----
@@ -701,6 +768,10 @@ void main() {
     // ---- 凹底构图：可见底缘随方位收拢，底缘与沿口之间是内壁环带 ----
     float bR = bRAt(p);
     float bottomMask = smoothstep(bR + 0.015, bR, pr);
+    // v14：水珠可贴着球面爬上内壁，绘制范围同样放宽到内壁环带
+    // （bottomMask 仍用于内壁环带底色合成；dropMask 才是水珠的可见域）
+    float dropMask = smoothstep(mix(bR, 1.0, WALL_CLIMB) + 0.015,
+        mix(bR, 1.0, WALL_CLIMB), pr);
     float innerWallMask = (1.0 - bottomMask)
         * smoothstep(1.02, 1.0, pr);
     col = mix(col, innerWallColor(p, pr, bR), innerWallMask);
@@ -764,7 +835,7 @@ void main() {
     drop += thinFilm(optPath) * iridZone * IRID_GAIN * (0.55 + 0.45 * awayWin);
 
     // 水珠只落在可见底面上（不爬上内壁/沿口）
-    col = mix(col, drop, m * bottomMask);
+    col = mix(col, drop, m * dropMask);
 
     // ---- 飞溅星芒（v10 简化实现）---- 
     // 真实粒子系统需几何 shader / 多 pass，单 pass fragment 内做全套代价
@@ -781,7 +852,7 @@ void main() {
     float splashNoise = vn(pw * 110.0 + ts * 4.0);  // 噪点增强飞溅密度感
     col += WIN_COLOR * splashBand * (splashStar + 0.35 * splashNoise)
         * SPLASH_GAIN * (0.6 + 0.6 * uTreble) * (1.0 - m) * panMask
-        * awayWin * bottomMask;
+        * awayWin * dropMask;
 
     // ---- 接触处白烟（v10）——每颗水珠周围小范围浓白雾，活跃时更浓----
     // 沸腾的水珠在接触处先冒一小团白烟，再合并到锅口大蒸汽层。位置：
@@ -791,12 +862,12 @@ void main() {
         * vn(pw * 9.0 + ts * 1.3 + vec2(sd));
     vec3 whiteSteam = vec3(0.78, 0.80, 0.84);
     col = mix(col, whiteSteam, localSteam * STEAM_LOCAL_GAIN
-        * (0.65 + 0.55 * uBass) * panMask * bottomMask);
+        * (0.65 + 0.55 * uBass) * panMask * dropMask);
 
     // ---- 焦散环：液滴透镜聚焦上方光，接触线外缘亮边（光侧，底面上）----
     float caustic = exp(-pow((F - 0.80) / 0.12, 2.0));
     col += WIN_COLOR * caustic * CAUSTIC_GAIN * (1.0 - m) * panMask
-        * awayWin * bottomMask;
+        * awayWin * dropMask;
 
     // ---- 内壁 / 外壁+台面（底面之外环带，按 pr 混合，无缝）----
     // 沿口半径随方位变化：远侧内壁高、近侧只剩卷边（深锅俯视透视）
