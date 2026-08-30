@@ -350,7 +350,8 @@ const float BURNER_W = 0.22;       // 火焰环宽度（很宽的一圈灶痕，
 const float BURNER_K = 0.16;       // 灶痕强度（弱——被油膜/食物残渣盖住了）
 const float HEAT_RING_K = 0.18;    // 静态使用痕迹的反照率调制深度（0.82~1.18）
 const float HEAT_CENTER_BIAS = 0.35;// 锅心温度偏置（燃气集中在中心）
-const float BUBBLE_DARKEN = 0.55;  // 接触处小气泡暗化强度
+const float BUBBLE_DARKEN = 0.35;  // 接触处小气泡暗化强度（v16 0.55→0.35：
+                                    //   变静态后是固定使用痕迹，不需要那么强）
 const float BUBBLE_FREQ = 80.0;     // 接触处小气泡密度（每单位多少点）
 
 // ---- 游走与濒死 ----------------------------------------------------------
@@ -733,16 +734,16 @@ vec3 bg(vec3 Pw, vec3 Nw, float ts) {
     // 锅心聚油 + 凹底自阴影：中心压暗（"凹下去"的深度线索之一）
     c *= 1.0 - BOWL_DARK * smoothstep(0.85, 0.10, r);
 
-    // 接触处沸腾气泡（v16：删 r·60 那项）——水珠正下方锅面被高温烫成沸
-    // 腾区，密集小气泡群（高频值噪声）作为暗点；只覆盖锅心附近的"沸
-    // 区"（圆环掩模，避开锅沿冷区）。**v10 这里写的
-    // sin(ts·5.7 + r·60) 是 bug**——r·60 在 sin 里就是 9.5 圈规则同心圆，
-    // 被 BUBBLE_DARKEN=0.55 压暗成黑锅上最显眼的暗环（用户连续两次反馈
-    // "还有圈圈在转" 的真凶之一）。改成纯时间项，气泡只是随时间闪。
+    // 接触处沸腾气泡（v16.1）——水珠正下方锅面被高温烫成沸腾区，密集小
+    // 气泡群（高频值噪声）作为暗点；只覆盖锅心附近的"沸区"（圆环掩模，
+    // 避开锅沿冷区）。**v10 写 sin(ts·5.7 + r·60) 两个 bug 全删**：
+    //   r·60 → 9.5 圈同心圆（"圈圈"）
+    //   ts·5.7 → 0.9Hz 脉动（"生锈效果一会有一会没有"——用户原话）
+    // 现在纯静态：气泡暗斑是**固定的锅面材质痕迹**（像烫斑/油污），不随
+    // 时间变——材质不能变来变去。
     float bubbleMask = smoothstep(0.05, 0.35, temp) * smoothstep(0.85, 0.55, r);
     float bubble = vn(p * BUBBLE_FREQ);
-    float bubbleDark = bubbleMask * smoothstep(0.55, 0.30, bubble)
-        * (0.5 + 0.5 * sin(ts * 5.7));
+    float bubbleDark = bubbleMask * smoothstep(0.55, 0.30, bubble);
     c *= 1.0 - BUBBLE_DARKEN * bubbleDark;
 
     // 远侧底面被内壁轻微遮挡（俯视时远侧底边有一点内壁阴影）
