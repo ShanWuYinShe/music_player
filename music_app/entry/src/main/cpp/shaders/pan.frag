@@ -219,10 +219,11 @@ const float FLAME_BLUE = 0.30;      // 灶圈蓝光混入强度（温度 0.4~0.7
                                    //   燃气反射的蓝色调）
 
 // ---- 水滴群（锅局部坐标：单位圆 = 锅口内沿）---------------------------------
-const int DROPLET_COUNT = 28;      // v12 性能：44→28（22 主滴 + 6 卫星）——
-                                   //   field() 循环是逐像素 × 逐滴的，44 滴在
-                                   //   软渲染下卡死；降 36% 保留大小珠层次
-const float SATELLITE_FROM = 22.0;
+const int DROPLET_COUNT = 20;      // v12 性能：44→28→20（16 主滴 + 4 卫星）——
+                                   //   field() 逐像素×逐滴循环是 GPU 最不擅长
+                                   //   的负载（每滴十几个 hash/sin/atan），高分
+                                   //   屏下再降一档保流畅，密度仍够
+const float SATELLITE_FROM = 16.0;
 const float R_MAIN_MIN = 0.014;    // 主滴半径区间（帕累托；真实液滴约锅径 1~4%）
 const float R_MAIN_MAX = 0.075;
 const float R_SAT_MIN = 0.010;
