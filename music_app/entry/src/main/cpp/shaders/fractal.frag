@@ -13,11 +13,14 @@
 //               膜连续变形（脑珊瑚/生物晶格感）；
 //     4 VORONOI 移动 cell 的 F2−F1 边网络——霓虹电路，脉冲沿边行波。
 //
-// 轮换机制（v3.1）：22s 形态轮换 + 两侧 1.5s crossfade——连续盯看 30s
-// 必见换形态（旧 72s 机制下手动挑中本场景盯看几乎看不到换脸）；自动
-// 轮播的 18s 出场内也常有一次换脸（crossfade 平滑无跳变）。各形态内部
-// 参数（c / warp 相位 / 切片深度 / cell 相位）仍由 wander 慢漂——
-// "同一形态"每次出场长相也不同。
+// 轮换机制（v3.2）：22s 形态轮换，**只在周期末尾**向下一场做 1.5s
+// crossfade——连续盯看 30s 必见换形态；自动轮播的 18s 出场内也常有一次
+// 换脸。v3.1 在周期两侧各有一段 crossfade：末尾已淡到新场 100%，开头
+// 又从旧场 0% 淡起——边界处画面从新场**硬跳回**旧场再淡一遍，每 22s
+// 必现一次形态跳变；冷启动 ts=0 时还会先显示幻影"上一场"再溶解，
+// 用户看到"花瓣→突然变水波"即此 bug。现在开头不做任何混合：边界两侧
+// 都是新场，严格连续。各形态内部参数（c / warp 相位 / 切片深度 /
+// cell 相位）仍由 wander 慢漂——"同一形态"每次出场长相也不同。
 //
 // 旧版平滑性经验全部保留（血换来的，别回退）：
 //   1. DIVE 的行程 D = ts × 恒定速度严格单调；beat 永不进速度；
@@ -94,8 +97,8 @@ const float VOR_EDGE_K = 160.0;      // 边线锐度
 const float VOR_PULSE_RATE = 1.6;    // 沿边脉冲行波速度
 
 // ---- 形态轮换 --------------------------------------------------------------
-// 22s 形态轮换 + 两侧 1.5s crossfade（与 kaleido.frag 同机制）：连续盯看
-// 30s 必见换形态；自动轮播的 18s 出场内也常有一次换脸（crossfade 平滑）。
+// 22s 形态轮换 + 周期末尾 1.5s crossfade 进入下一场（单侧！开头不混：
+// 开头混合会在边界处从新场硬跳回旧场，见文件头 v3.2 说明）。
 // mod 97 保护 hash 精度（97 质数 → 序列看似不循环）。
 const float FORM_PERIOD = 22.0;
 const float FORM_KEY_MOD = 97.0;
@@ -417,18 +420,15 @@ void main() {
     float sd = seedHash() * SEED_SPREAD;
     vec2 q = sceneUV(vec2(0.5));
 
-    // ---- 形态轮换：22s 一换，两侧 crossfade ----
+    // ---- 形态轮换：22s 一换，只在周期末尾向下一场 crossfade ----
+    // （开头不混：边界处末尾侧已是新场 100%，开头侧从新场 0% 淡起 = 严格连续）
     float cyc = ts / FORM_PERIOD;
     float showIdx = floor(cyc);
     float ph = fract(cyc);
     int modeIdx = int(modeForShow(showIdx, sd));
     vec3 col = evalMode(modeIdx, q, ts, sd);
     float xf = FORM_XF_SEC / FORM_PERIOD;
-    if (ph < xf) {
-        float k = smoothstep(0.0, xf, ph);
-        int prevIdx = int(modeForShow(showIdx - 1.0, sd));
-        col = mix(evalMode(prevIdx, q, ts, sd), col, k);
-    } else if (ph > 1.0 - xf) {
+    if (ph > 1.0 - xf) {
         float k = smoothstep(1.0 - xf, 1.0, ph);
         int nextIdx = int(modeForShow(showIdx + 1.0, sd));
         col = mix(col, evalMode(nextIdx, q, ts, sd), k);
@@ -439,13 +439,10 @@ void main() {
     col *= 1.0 - VIGNETTE * dot(q, q);
 
     // 反馈拖尾：深潜形态用对齐流速的缩放率，其余用近恒等轻模糊；
-    // crossfade 期间两侧有深潜就按比例混
+    // 末尾 crossfade 期间如下一场是深潜就按比例混入深潜缩放率
     vec3 prevS = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM_SOFT + 0.5).rgb;
     vec3 prevD = texture2D(uPrev, (vUV - 0.5) * TRAIL_ZOOM + 0.5).rgb;
     float diveW = modeIdx == 0 ? 1.0 : 0.0;
-    if (ph < xf && modeForShow(showIdx - 1.0, sd) == 0.0) {
-        diveW = max(diveW, 1.0 - smoothstep(0.0, xf, ph));
-    }
     if (ph > 1.0 - xf && modeForShow(showIdx + 1.0, sd) == 0.0) {
         diveW = max(diveW, smoothstep(1.0 - xf, 1.0, ph));
     }

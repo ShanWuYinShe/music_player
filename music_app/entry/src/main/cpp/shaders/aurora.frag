@@ -1,5 +1,62 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v7 相对 v6 的形态重做（用户反馈："撑死了算一个窗帘在天上飘着，根本
+// 就不是极光"——v6 的"波浪帘幕"几何本质是**布料窗帘**：大褶皱、整片
+// 发光、整体摇曳。真实极光的标志性形态是**弧带**，不是织物）：
+//   1. 一条主弧带（+一条淡次带），薄而高悬：底缘锐利、向上 ~0.3 屏高
+//      内快速渐隐——BODY_H 0.36→0.13、BORDER_W 0.014→0.010、EDGE_GAIN
+//      →2.6（下缘是最亮元素，帘体只是它的余晖）。
+//   2. 弧线几何：底边 = 干净抛物线（中部拱起，两端坠到山脊后）+
+//      轻倾斜 + 小幅度慢蜿蜒——不是大幅 fbm 织物褶皱（WOB 0.115→0.030、
+//      ARC fbm 项砍到 0.12，换成 ARC_K 抛物线）。
+//   3. 射线近竖直细直：RAY_BEND 0.38→0.10（真实弧带的射线沿磁场线，
+//      近乎笔直；v6 的大弯曲是"布料褶皱"感的另一半来源）、条纹频率
+//      110/190 更细。
+//   4. 2 帘而非 3 帘：一场极光只有一条主弧（+可能一条淡副弧）；上方
+//      暗天空、下方暗天空 + 山脊——光带被黑暗包围才是极光的观感。
+//   5. 出没行为：substorm 时主弧整体增亮、底缘泛紫、慢蜿蜒幅度抬升；
+//      音频只进亮度。
+//
+// v6 相对 v5 的形态返工（用户反馈："完全不像极光，是从天而降的笔直光线，
+// 像演唱会探照灯"——v5 颜色/谱线对了，但**几何语言**还是光束而不是帘幕）：
+//   1. 光柱去"探照灯化"：磁天顶 1.42→2.90（远天顶 = 近平行光柱，不再从
+//      一个近点扇形发散——扇形光束正是探照灯阵列的观感）；条纹频率同步
+//      放大补偿视角压缩。
+//   2. 光柱随帘波弯曲：条纹坐标叠加 RAY_BEND×(帘边波位移)——真实极光的
+//      射线跟着帘幕褶皱走（同一片电离层沿场线发光），不再是切割帘幕的
+//      刚直直线。
+//   3. 杀掉"扫描光束"：stream 垂直亮斑振幅 0.20→0.10、再放缓——沿光柱
+//      上下跑的亮斑是演唱会灯效的另一半来源。
+//   4. 帘幕读作"帘"：褶皱幅度 0.055→0.115（肉眼可见的波浪底边）、大弧
+//      0.34→0.44、帘体高度 0.42→0.54、增益 1.15→1.55，倾斜角加慢游走
+//      （整帘缓慢摇曳）；英雄柱/针柱增益下调——帘体主导，光柱退为纹理。
+//   5. 帘体内垂直色渐变：底边黄绿 → 中层青 → 顶部暗红（海拔分层本来就
+//      是渐变，v5 的"绿帘+独立红层"读起来是两条色带而不是过渡）。
+//   6. 曝光与占比重调（同环境对比 v5 后确认：v5 本身也满屏洗白——这才是
+//      "不像极光"的最大单一因素）：4 帘→3 帘、帘体高度 0.42→0.36（顶部
+//      留出暗天空）、帘体增益 1.15→0.85、宽光晕 0.28→0.12、存在感下限
+//      0.55→0.35（帘间有暗隙）。真实极光照片里暗天空占主导，亮帘带只
+//      是画面的一部分——明暗对比才是"极光感"的本体。
+//
+// v5 相对 v4 的"真实感"返工（v4 及更早都还停在"插画"档，逐项把错的东西改对）：
+//   1. 光柱去"梳子化"：旧 150/260 硬值噪声造出跨屏 ~70 条锐利细纹（百叶窗/
+//      琴键感），是"假极光"的头号来源。v5 降到 40/70 中频、幂律从 2.4 收到
+//      1.6，并叠一道大尺度 fbm 褶皱（少数几道亮褶）——光柱宽、软、亮度平滑
+//      渐变，像真的帘幕而不是竖条纹。
+//   2. 颜色校准：绿 (0.30,1.0,0.45)→(0.36,0.92,0.20) 黄绿（557.7nm 不是霓虹
+//      绿）；下缘 N2+ 粉紫 → 蓝紫 (0.52,0.30,1.0)（391.4/427.8nm 是蓝紫，不是
+//      粉）。真实极光的颜色是"稳"的，霓虹感一出来就露馅。
+//   3. 下缘"去画线化"：BORDER_W 0.0045→0.014、EDGE_GAIN 4.6→2.2——旧的是
+//      一条画上去的亮线，真实下缘是有界但柔软的过渡；宽光晕 WIDE_GAIN 0.14→
+//      0.28，极光是"大面积柔和辉光"，不是细线。
+//
+// v4 相对 v3 的两处真实感补齐：
+//   1. 垂直涌动：亮斑沿磁力线上下移动（"跳舞的帘幕"），活跃爆发时更快
+//      更明显——v3 只有水平漂移，缺了极光最标志性的纵向"舞动"。
+//   2. 前景山脊剪影 + 极光绿色上光：极光发生在 100–300km 高空，没有
+//      前景它就是屏幕上的色块；山脊把它推到天上、给出纵深与尺度，且
+//      爆发时山脊顶缘被极光染绿（光真的会照亮地面）。
+//
 // v3 相对 v2 的"照片感"差距清单（v2 是结构对的"插画"，v3 按实拍照片逐项补）：
 //   1. 发射谱而不是色轮：557.7nm 氧绿 (0.28,1.0,0.42) 是唯一主体色；
 //      630nm 氧红是**更高海拔的独立发光层**（沿同一条磁力线向上抬升、
@@ -30,42 +87,49 @@ const float FB_ZOOM = 1.004;        // 采样微胀——余晖微微向外晕�
 const float FB_CHROMA = 0.0009;     // 极轻色散（镜头感）
 
 // ---- 磁天顶（光柱汇聚点，画面上方远处，慢游走）----------------------------
-// 离屏远一点 → 放射线接近垂直（真实照片里磁天顶通常在画外高处，
-// 太近会造成大角度斜条纹，削弱"帘幕垂直光柱"的观感）
-const vec2 APEX_BASE = vec2(0.02, 1.42);
-const vec2 APEX_WANDER = vec2(0.16, 0.13);
+// v6 推到 2.90：远天顶 = 近平行光柱。旧 1.42 离屏上缘不到一个屏高，
+// 光柱从近点扇形发散——"演唱会探照灯阵列"观感的几何根源
+const vec2 APEX_BASE = vec2(0.02, 2.90);
+const vec2 APEX_WANDER = vec2(0.22, 0.18);
 
-// ---- 帘幕结构 --------------------------------------------------------------
-// 竖屏构图：帘幕是"从天顶垂下的高光幕"——底边（最亮最锐）落在画面
-// 中部 0.02~0.30，帘体向上贯穿到画面顶（H 大）才渐隐。又扁又低的帘
-// 读作"雾带"，是 v3 失败的根源。
-const int CURTAIN_N = 4;
-const float BASE_Y_LO = 0.020;      // 帘幕底边区间（画面中部）
-const float BASE_Y_HI = 0.300;
-const float TILT_AMP = 0.42;        // 帘幕整体倾斜（每帘不同——大幅斜跨
-                                    //   画面，不是水平带）
-const float ARC_GAIN = 0.34;        // 大尺度 fbm 弧（帘的整体走势）
-const float WOB_AMP = 0.055;        // 行波褶皱幅度（叠加两波）
-const float BODY_H = 0.42;          // 帘体向上衰减高度（贯穿上半屏！）
-const float BORDER_W = 0.0045;      // 下缘亮线 σ（极锐！且下方不对称截止）
-const float RED_LIFT = 0.24;        // 氧红层相对绿层的抬升量
-const float RED_H_K = 1.5;          // 氧红层衰减高度 = BODY_H × K
-const float STRIPE_FREQ_A = 150.0;  // 细条纹频率 A（跨屏 ~70 条——极光的
-                                    //   "琴键感"来自细锐亮柱与暗隙分明；
-                                    //   旧 fbm 光柱跨屏只有 ~16 个模糊块，
-                                    //   是"谁家极光"的主要答案）
-const float STRIPE_FREQ_B = 260.0;  // 细条纹频率 B（次级，更细）
-const float STRIPE_DRIFT = 0.9;     // 条纹沿帘漂移（格/秒，缓慢）
-const float BODY_GAIN = 1.15;       // 帘体增益
-const float EDGE_GAIN = 4.60;       // 下缘亮线增益（帘幕最亮元素）
-const float WIDE_GAIN = 0.14;       // 宽尺度环境光晕（镜头 bloom 解析近似）
+// ---- 弧带结构（v7：一场极光 = 一条薄弧带，不是飘动的布）---------------------
+// 竖屏构图：主弧带底边落在画面中上部 0.10~0.40，中部微拱、两端坠向
+// 山脊后；带体极薄（H=0.13，向上约 0.3 屏高内渐隐），下方大段暗天空。
+const int CURTAIN_N = 2;            // v7：主弧带 + 一条淡次带（真实"一场
+                                    //   极光"只有一条主弧，偶尔带一条副弧；
+                                    //   3+ 条叠起来就是"窗帘"）
+const float BASE_Y_LO = 0.10;       // 弧带底边区间（画面中上部——极光在天上）
+const float BASE_Y_HI = 0.40;
+const float TILT_AMP = 0.22;        // 弧带整体倾斜（轻斜跨，不是横着飘的布）
+const float TILT_SWAY = 55.0;       // 倾斜角慢游走时标（秒/格；极光变位很慢）
+const float ARC_K = 1.35;           // 抛物线弧：中部拱起、两端坠向山脊后
+                                    //   （虹一样的弧，极光照片的签名形态）
+const float ARC_GAIN = 0.12;        // 叠加在抛物线上的一点点有机 fbm 蜿蜒
+const float WOB_AMP = 0.030;        // 底边轻微蜿蜒（真实弧带会有波浪，但
+                                    //   幅度小；0.115 的大褶皱 = 布料窗帘）
+const float BODY_H = 0.13;          // 带体向上衰减高度（薄带！向上快速渐隐）
+const float BORDER_W = 0.010;       // 底缘亮线 σ（锐利但柔软）
+const float RED_LIFT = 0.10;        // 氧红层相对绿层的抬升量（薄带里贴近带顶）
+const float RED_H_K = 1.0;          // 氧红层衰减高度 = BODY_H × K
+const float STRIPE_FREQ_A = 110.0;  // 射线频率 A（细直射线——弧带内沿磁场
+                                    //   线的纹理，真实极光的"身份证"）
+const float STRIPE_FREQ_B = 190.0;  // 射线频率 B（次级，更细）
+const float STRIPE_DRIFT = 0.9;     // 条纹沿带漂移（格/秒，缓慢）
+const float RAY_BEND = 0.10;        // 射线随带边波的弯曲（真实射线近乎笔直；
+                                    //   0.38 的大弯曲 = 布料褶皱感）
+const float BODY_GAIN = 1.0;        // 带体增益（薄带不会洗屏；下缘亮线才是
+                                    //   画面最亮的元素）
+const float EDGE_GAIN = 2.60;       // 底缘增益（下缘亮线 = 弧带的"刀刃"）
+const float WIDE_GAIN = 0.07;       // 宽尺度环境光晕（收敛：光带周围只有
+                                    //   一丝弥散，不能被光晕糊成一片）
 
 // ---- 发射谱色（线性 HDR）----------------------------------------------------
-const vec3 EMIT_GREEN = vec3(0.300, 1.000, 0.450);  // OI 557.7nm（略偏青消霓虹感）
-const vec3 EMIT_RED = vec3(1.000, 0.180, 0.100);    // OI 630.0nm 暗红（高层）
-const vec3 EMIT_PINK = vec3(1.000, 0.520, 0.720);   // N2+ 活跃下缘（picket）
-const float RED_BASE = 0.10;        // 氧红常驻量（有，但淡）
-const float RED_ACT = 0.40;         // 活跃时氧红增强量
+const vec3 EMIT_GREEN = vec3(0.360, 0.920, 0.200);  // OI 557.7nm 黄绿（真实极光偏黄绿，非霓虹绿）
+const vec3 EMIT_RED = vec3(0.950, 0.160, 0.100);    // OI 630.0nm 暗红（高层）
+const vec3 EMIT_PINK = vec3(0.520, 0.300, 1.000);   // N2+ 427.8/391.4nm 蓝紫下缘（真实是蓝紫，非粉）
+const float RED_BASE = 0.06;        // 氧红常驻量（v6 帘体内已有垂直渐变，
+                                    //   独立红层退为补充，避免两条色带）
+const float RED_ACT = 0.30;         // 活跃时氧红增强量
 
 // ---- 行为相位 --------------------------------------------------------------
 const float ACT_SCALE = 71.0;       // substorm 慢相位（秒/格）
@@ -114,70 +178,93 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
 
     float span = mix(0.62, 1.55, depth);
 
-    // 底边曲线：基线 + 每帘独立倾斜（大幅斜跨画面）+ 大尺度 fbm 弧 +
-    // 行波褶皱 + 高频荷叶边——帘幕是大幅弯曲的幕，不是水平带
+    // 底边曲线（v7 弧带）：抛物线拱（中部拱起、两端坠向山脊后）+
+    // 轻倾斜（慢游走）+ 一点 fbm 有机蜿蜒 + 轻微行波——干净的一条弧，
+    // 不是大幅褶皱的布
     float baseY = mix(BASE_Y_LO, BASE_Y_HI, fi / float(CURTAIN_N - 1))
-        + 0.04 * sin(ts * 0.05 + fi * 2.2 + h2 * 6.28);
-    float tilt = TILT_AMP * (h1 - 0.5) * 2.0;
+        + 0.03 * sin(ts * 0.05 + fi * 2.2 + h2 * 6.28);
+    float tilt = TILT_AMP * (h1 - 0.5) * 2.0
+        * (0.55 + 0.75 * wander2(ts, TILT_SWAY, sd + fi * 5.3));
     float yc = baseY + tilt * q.x
+        - ARC_K * span * q.x * q.x                      // 抛物线拱（两端下坠）
         + (fbm(vec2(q.x * (0.7 + 0.5 * h1) + fi * 7.7,
-            ts * 0.014 + sd)) - 0.5) * ARC_GAIN * span
-        + tilt * 0.35 * q.x * q.x; // 轻微弧形倾斜（帘的弯曲度）
-    // 行波褶皱（速度恒定；幅度随活跃度抬升——不是速度）
+            ts * 0.014 + sd)) - 0.5) * ARC_GAIN * span; // 有机蜿蜒
+    // 轻微行波（速度恒定；幅度随活跃度抬升——不是速度）
     float wobA = WOB_AMP * span * (0.55 + 0.75 * act);
-    yc += wobA * sin(q.x * (2.3 + 1.1 * h2) - ts * (0.26 + 0.16 * h3) + fi * 2.1);
-    yc += wobA * 0.55 * sin(q.x * (4.9 + 1.6 * h1) + ts * (0.17 + 0.12 * h2) + fi * 4.7);
-    yc += 0.0060 * span * sin(q.x * (16.0 + 5.0 * h1) + ts * 0.55 + fi * 9.0);
+    yc += wobA * sin(q.x * (2.3 + 1.1 * h2) - ts * (0.20 + 0.12 * h3) + fi * 2.1);
+    yc += wobA * 0.6 * sin(q.x * (4.9 + 1.6 * h1) + ts * (0.13 + 0.09 * h2) + fi * 4.7);
 
-    // 水平存在感：柔化进退（0.55~1，不切碎——v3 的硬缺口把帘拆成了碎雾）
-    float presence = 0.55 + 0.45 * smoothstep(0.35, 0.65,
+    // 水平存在感：弧带要有明暗断点（光带强弱起伏），下限 0.25——暗处
+    // 接近消失，光带就不是"一条贴上去的带子"
+    float presence = 0.25 + 0.75 * smoothstep(0.35, 0.65,
         0.6 * vn(vec2(q.x * 0.55 + fi * 11.0, ts * 0.010 + sd * 0.7))
         + 0.4 * vn(vec2(q.x * 1.7 + fi * 3.0, ts * 0.017 + sd * 1.9)));
 
-    // 光柱：细锐条纹——单倍频值噪声（fbm 的 4 倍频叠会把高频糊成块，就是
-    // 旧版"模糊绿块"的根源）+ 幂律拉对比（亮柱与暗隙分明的琴键感）。
-    // 两组频率/速度错开叠层次；treble 驱动闪烁（亮度域，合规）
-    float sA = vn(vec2(azx * STRIPE_FREQ_A + ts * STRIPE_DRIFT + fi * 31.0,
+    // 射线：细直软柱（v7 RAY_BEND 收到 0.10——弧带内射线沿磁场线近乎
+    // 笔直；大弯曲是"布料"感）。大尺度 fbm 褶皱（少数几道亮褶）+
+    // 中频值噪声。treble 驱动闪烁（亮度域，合规）
+    float rayX = azx + RAY_BEND * (yc - baseY - tilt * q.x);
+    float fold = fbm(vec2(rayX * 9.0 + fi * 7.0, sd * 0.31 + ts * 0.010));
+    float sA = vn(vec2(rayX * STRIPE_FREQ_A + ts * STRIPE_DRIFT + fi * 31.0,
         fi * 3.1 + sd));
-    float sB = vn(vec2(azx * STRIPE_FREQ_B - ts * STRIPE_DRIFT * 0.7
+    float sB = vn(vec2(rayX * STRIPE_FREQ_B - ts * STRIPE_DRIFT * 0.7
         + fi * 17.0, fi * 7.7 + sd));
-    float rf = 0.62 * sA + 0.38 * sB;
-    float rays = 0.06 + 0.94 * pow(rf, 2.4);
-    float hero = pow(sA, 2.8) * (1.0 + 3.2 * act);
-    float needles = pow(sB, 7.0) * (0.9 + 2.8 * act);
-    float flick = 0.84 + 0.16 * sin(ts * (2.6 + 2.2 * h3) + azx * 90.0
+    float rf = 0.55 * sA + 0.45 * sB;
+    float rays = 0.28 + 0.72 * pow(rf, 1.6);
+    float hero = fold * fold * (0.8 + 2.6 * act);
+    float needles = pow(sB, 3.5) * (0.6 + 1.8 * act);
+    float flick = 0.86 + 0.14 * sin(ts * (2.6 + 2.2 * h3) + rayX * 40.0
         + fi * 5.0 + uTreble * 5.0);
 
-    // 剖面：d>0 帘体指数衰减 + 宽光晕；d≈0 下缘亮线（d² 型；线下方
-    // 截止更快——σ 收 0.35 倍，实拍里线下方几乎是断崖）
+    // 剖面：d>0 帘体指数衰减；d<0 **同样要截止**（v7.1 关键修复——旧代码
+    // dd=max(d,0) 让底边以下的像素 body=exp(0)=1，帘体在底边下方平铺全亮、
+    // 永不衰减，这就是"挂在天上一片亮布"的几何根源）。底边下方用
+    // 0.30H 快速断崖 + d≈0 的下缘亮线（σ 下方收 0.35 倍）
     float d = q.y - yc;
     float dd = max(d, 0.0);
+    float dneg = min(d, 0.0);
     float H = BODY_H * mix(1.30, 1.0, depth) * (0.85 + 0.30 * h2);
-    float body = exp(-dd / H) * presence;
+    float body = exp(-dd / H) * exp(dneg / (H * 0.30)) * presence;
     float sig = d < 0.0 ? BORDER_W * 0.35 : BORDER_W;
     // 亮线的水平断口比帘体更强（presence²）：实拍亮线常整段消失再出现
     float border = exp(-d * d / (2.0 * sig * sig)) * presence * presence;
-    wideEnv = exp(-dd / (H * 3.0)) * presence;
+    // 宽光晕在底边下方也要衰减（0.55H），否则辉光把下方天空糊亮
+    wideEnv = exp(-dd / (H * 3.0)) * exp(dneg / (H * 0.55)) * presence;
 
     // 沿帘扫过的增亮波（速度恒定的行波，由慢噪声选通——爆发期更频繁）
     float surge = smoothstep(0.60, 0.85,
         vn(vec2(q.x * 1.4 - ts * SURGE_RATE + fi * 7.0, sd + 3.0))) * act;
 
-    // 强度（HDR，近帘为基准）
+    // 垂直涌动：v7 再收敛（0.10→0.06，更慢）——极光是缓慢的呼吸式
+    // 明暗起伏，任何"亮斑沿带快速上下跑"都会变成扫描灯
+    float stream = 0.94 + 0.06 * sin(q.y * (2.4 + 1.2 * h3)
+        - ts * (0.6 + 0.5 * act) + rayX * 4.0 + fi * 2.6);
+
+    // 强度（HDR，近帘为基准）；v6 帘体主导：英雄柱/针柱增益下调，
+    // 光柱退为帘内纹理而不是独立光束
     float dk = mix(0.30, 1.0, depth);
-    float bI = body * (rays + hero * 0.55 + needles * 1.1) * flick
+    float bI = body * (rays + hero * 0.35 + needles * 0.55) * flick * stream
         * (1.0 + 0.7 * surge);
     // 下缘亮线沿光柱断续（rf 深调制——实拍亮线是一段段的，光柱强处
     // 亮线在、暗隙处亮线缺）
-    float eI = border * (0.40 + 0.85 * rf) * (1.0 + 1.8 * act * rf + 1.2 * surge);
+    float eI = border * (0.40 + 0.85 * rf) * stream
+        * (1.0 + 1.8 * act * rf + 1.2 * surge);
 
-    vec3 emis = EMIT_GREEN * bI * BODY_GAIN * dk * beatG;
+    // 带内垂直色渐变：底缘黄绿（557.7nm 峰值区）→ 带顶暗红（630nm
+    // 高层氧）——薄带里这个渐变贴近带体，是"绿弧顶上有一道红边"的
+    // 实拍观感
+    float altK = clamp(dd / (H * 1.6), 0.0, 1.0);
+    vec3 bodyCol = mix(EMIT_GREEN, vec3(0.22, 0.72, 0.58),
+        smoothstep(0.0, 0.50, altK));
+    bodyCol = mix(bodyCol, EMIT_RED, smoothstep(0.45, 1.0, altK) * 0.80);
+
+    vec3 emis = bodyCol * bI * BODY_GAIN * dk * beatG;
     emis += EMIT_GREEN * eI * EDGE_GAIN * dk * beatG;
-    // 氧红：抬升 + 变宽的独立层（沿同一批磁力线；高频被高空扩散抹平，
-    // 所以光柱图案直接复用绿层的 rf，不再单独造一份）
+    // 氧红：独立薄层贴在带顶（RED_LIFT 小——薄带里红边离绿边很近）；
+    // 底边下方同样快速截止
     float dr = d - RED_LIFT * span;
-    float red = exp(-max(dr, 0.0) / (H * RED_H_K)) * presence
-        * (0.55 + 0.45 * rf);
+    float red = exp(-max(dr, 0.0) / (H * RED_H_K)) * exp(dneg / (H * 0.30))
+        * presence * (0.55 + 0.45 * rf);
     emis += EMIT_RED * red * (RED_BASE + RED_ACT * act)
         * (0.5 + 0.9 * h2) * dk * beatG;
     // N2+ 粉紫：只挂在活跃期的下缘亮线上 + 亮线下方的弥散薄层
@@ -266,6 +353,20 @@ void main() {
     prev.g = texture2D(uPrev, fuv).g;
     prev.b = texture2D(uPrev, fuv - FB_CHROMA).b;
     col += prev * FB_GAIN;
+
+    // ---- 前景山脊剪影：暗蓝黑两层 + 极光绿色上光 ----
+    // 山脊顶缘被极光照亮（上光强度随极光整体亮度起伏）
+    float ridgeFar = smoothstep(0.0, -0.035,
+        q.y - RIDGE_FAR_Y - 0.16 * fbm(vec2(q.x * 2.2, 3.1)));
+    float ridgeNear = smoothstep(0.0, -0.030,
+        q.y - RIDGE_NEAR_Y - 0.12 * fbm(vec2(q.x * 1.4 + 9.0, 7.7)));
+    vec3 ridge = vec3(0.008, 0.013, 0.020);
+    float auroraLum = dot(emis, vec3(0.299, 0.587, 0.114));
+    float upF = exp(-pow((q.y - RIDGE_FAR_Y) * 24.0, 2.0));
+    float upN = exp(-pow((q.y - RIDGE_NEAR_Y) * 20.0, 2.0));
+    ridge += EMIT_GREEN * (upF * 0.7 + upN)
+        * clamp(auroraLum * 0.7, 0.0, 0.6) * 0.09;
+    col = mix(col, ridge, clamp(ridgeFar + ridgeNear, 0.0, 1.0));
 
     // ---- 摄影后期链：ACES → 暗角 → 亮度加权颗粒 ----
     col = filmic(col);

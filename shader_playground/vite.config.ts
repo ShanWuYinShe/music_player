@@ -15,7 +15,6 @@ export const SHADER_FILES = [
 	'fractal.frag',
 	'pan.frag',
 	'aurora.frag',
-	'kaleido.frag',
 	'blit.frag',
 ] as const;
 

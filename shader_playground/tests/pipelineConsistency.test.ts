@@ -12,14 +12,14 @@ function readRepoFile(path: string): string {
 
 function capture(source: string, pattern: RegExp, label: string): string {
 	const match = source.match(pattern);
-	if (match === null) {
+	if (match === null || match[1] === undefined) {
 		throw new Error(`无法从 ${label} 解析场景配置`);
 	}
 	return match[1];
 }
 
 function quotedStrings(source: string): string[] {
-	return Array.from(source.matchAll(/["']([^"']+)["']/g), (match) => match[1]);
+	return Array.from(source.matchAll(/["']([^"']+)["']/g), (match) => match[1] ?? '');
 }
 
 describe('shader 管线跨端配置一致性', () => {
