@@ -1,4 +1,14 @@
-// fractal.frag：碎片（fragment）混沌引擎 v7——"持续繁衍的碎片云"
+// fractal.frag：碎片（fragment）混沌引擎 v8——"持续繁衍、变化多样的碎片云"
+//
+// v8 多样性增强（用户："变化太少太慢，加点函数让变化更多样"）：
+//   · 分裂/合并：每片带 2 个分裂子体（splitK 0→1 周期裂成 3 片再合并，
+//     细胞分裂感）
+//   · 次轨道：更快不可通约的第二轨道（轨迹从圆变成摆动花环）
+//   · 偶发突跳：高频 wander 峰触发快速移动（不是瞬移，是突然加速）
+//   · 全局形变波：空间行进波调制碎片大小（波扫过时碎片此起彼伏）
+//   · 形状极端化：边数 2~11、星形度 0~1.3（超星）
+//   · 色相快漂 + 偶发跳色、亮度快闪（双频）
+//   · 全部速率 ×~1.6（聚散 0.08 / 轨道 0.085 / 呼吸 / 自旋 0.24）
 //
 // v7 彻底重构（用户："不再采用固定分形结构，改为碎片形态持续不断演变的动态
 //   可视化；每一帧基于上一帧状态迭代变形，像混沌系统繁衍；碎片独立漂移/
@@ -35,16 +45,16 @@
 
 // ---- 碎片引擎参数 ----------------------------------------------------------
 const int FRAG_COUNT = 12;          // 碎片数（性能与密度平衡；逐像素×逐片）
-const float FRAG_SIZE_BASE = 0.042; // 基尺寸（屏高单位）
+const float FRAG_SIZE_BASE = 0.038; // 基尺寸（屏高单位）
 const float FRAG_SIZE_RANGE = 0.062;// 尺寸分布跨度（大碎片 + 小碎片共存）
 const float FRAG_GATHER_AMP = 0.28; // 聚散幅度：全场半径 ×(0.72~1.28)
-const float FRAG_GATHER_RATE = 0.045;// 聚散周期（慢——聚集→散开→聚集）
-const float FRAG_ORBIT_RATE = 0.050;// 绕心漂移基础角速度（rad/s）
-const float FRAG_ORBIT_K = 0.12;    // 每片角速度差异（0.05±0.12 → 有正有负）
-const float FRAG_WOBBLE = 0.06;     // 慢游走抖动幅度（wander，混沌无周期）
-const float FRAG_BREATH = 0.32;     // 呼吸幅度（缩放 ±32%）
-const float FRAG_ROT_RATE = 0.14;   // 自旋基础速率（rad/s）
-const float FRAG_ROT_K = 0.30;      // 每片自旋差异
+const float FRAG_GATHER_RATE = 0.08;// 聚散周期（慢——聚集→散开→聚集）
+const float FRAG_ORBIT_RATE = 0.085;// 绕心漂移基础角速度（rad/s）
+const float FRAG_ORBIT_K = 0.18;    // 每片角速度差异（0.05±0.12 → 有正有负）
+const float FRAG_WOBBLE = 0.09;     // 慢游走抖动幅度（wander，混沌无周期）
+const float FRAG_BREATH = 0.38;     // 呼吸幅度（缩放 ±32%）
+const float FRAG_ROT_RATE = 0.24;   // 自旋基础速率（rad/s）
+const float FRAG_ROT_K = 0.45;      // 每片自旋差异
 const float FRAG_LUM_MIN = 0.30;    // 亮度下限（暗色碎片也存在，层次感）
 const float FRAG_EDGE_K = 0.30;     // 碎片间"细胞膜"暗线强度
 const float FRAG_BEAT_K = 0.20;     // 节拍对碎片亮度的调制（铁律：只进亮度）
@@ -80,44 +90,72 @@ float fragField(vec2 p, float ts, float sd, out vec3 hueLum, out vec2 g) {
         float h3 = hash11(fi * 5.39 + sd + 23.0);
         float h4 = hash11(fi * 9.17 + sd + 37.0);
 
-        // ---- 精灵运动：位置（漂移 + 聚散）----
+        // ---- 精灵运动：位置（漂移 + 聚散 + 次轨道 + 偶发跳变）----
         float rBase = 0.35 + 0.45 * h1;                  // 每片轨道半径
         float gather = 1.0 - FRAG_GATHER_AMP
             + FRAG_GATHER_AMP * (0.5 + 0.5 * sin(ts * FRAG_GATHER_RATE + sd));
         float r = rBase * gather;
-        // 绕心漂移（每片角速度/方向不同）+ wander 慢游走（混沌无周期）
+        // 主轨道（每片角速度/方向不同）+ wander 慢游走（混沌无周期）
         float orb = ts * (FRAG_ORBIT_RATE + FRAG_ORBIT_K * h2)
             * (h4 < 0.5 ? 1.0 : -1.0);
         float wob = FRAG_WOBBLE * wanderBi(ts * 0.05 + fi * 3.1, 1.0,
             sd + h3 * 7.0);
         float th = orb + fi * 2.4 + wob * TAU;
         vec2 pos = vec2(cos(th), sin(th)) * r;
+        // 次轨道（更快、不可通约 → 轨迹不是圆，是摆动花环）
+        float orb2 = ts * (0.31 + 0.19 * h1) * (h3 < 0.5 ? 1.0 : -1.0);
+        pos += vec2(cos(orb2 + fi * 1.7), sin(orb2 * 1.3 + fi * 4.9))
+            * (0.10 + 0.08 * h2);
+        // 偶发突跳（高频 wander 的峰触发快速移动，不是瞬移）
+        float hop = wanderBi(ts * 0.8 + fi * 9.0, 0.35, sd + fi * 3.3);
+        pos += vec2(cos(hop * TAU), sin(hop * 1.7 * TAU))
+            * 0.14 * smoothstep(0.90, 1.0, abs(hop));
 
-        // ---- 精灵运动：缩放（呼吸脉冲）----
+        // ---- 精灵运动：缩放（呼吸 + 全局形变波）----
         float size = FRAG_SIZE_BASE + FRAG_SIZE_RANGE * h3;
-        size *= 1.0 + FRAG_BREATH * sin(ts * (0.5 + 0.6 * h2) + fi * 5.3)
-            * (0.5 + 0.5 * sin(ts * 0.11 + fi * 2.9 + sd));
+        size *= 1.0 + FRAG_BREATH * sin(ts * (0.9 + 1.1 * h2) + fi * 5.3)
+            * (0.5 + 0.5 * sin(ts * 0.21 + fi * 2.9 + sd));
+        // 全局行进波：碎片大小随画面位置波动（波扫过时碎片此起彼伏）
+        size *= 0.75 + 0.5 * (0.5 + 0.5 * sin(p.x * 4.0 - ts * 1.5 + p.y * 2.5));
         size = max(size, 0.015);
 
-        // ---- 形状演变：边数 + 星形度（混沌慢演化）----
-        float sides = 3.0 + floor(6.5 * h3);             // 3~9 边形
-        float spike = 0.30 + 0.70 * (0.5 + 0.5 * sin(ts * 0.06 + fi * 3.7 + sd));
+        // ---- 形状演变：边数 + 星形度（更快、更极端）----
+        float sides = 2.0 + floor(10.0 * h3);            // 2~11 边形
+        float spike = 1.3 * (0.5 + 0.5 * sin(ts * 0.15 + fi * 3.7 + sd));  // 0~1.3
 
-        // ---- 精灵运动：旋转（自旋）----
-        float rot = ts * (FRAG_ROT_RATE + FRAG_ROT_K * h1) + fi * 4.3;
+        // ---- 精灵运动：旋转（自旋 + 抖动）----
+        float rot = ts * (FRAG_ROT_RATE + FRAG_ROT_K * h1) + fi * 4.3
+            + 0.5 * sin(ts * 0.09 + fi * 2.2 + sd);
 
-        // ---- 场贡献：形状归一化距离 ----
+        // ---- 场贡献：主碎片 + 分裂子体（细胞分裂感）----
+        // splitK 0→1：合并 → 裂成 3 片（主 + 2 偏移小块）→ 合并
+        float splitK = 0.5 + 0.5 * sin(ts * 0.11 + fi * 3.3 + sd);
+        // 颜色加权：色相快漂 + 偶发跳变 + 亮度快闪（先算，供子体循环用）
+        float hue = 0.06 * sin(ts * 0.05 + fi * 2.1 + sd)
+            + 0.03 * sin(ts * 0.17 + fi * 5.3) + 0.83 * h1 + 0.17 * h2;
+        hue += step(0.94, fract(ts * 0.023 + fi * 0.71)) * 0.4;   // 偶发跳色
+        float lum = FRAG_LUM_MIN + (1.0 - FRAG_LUM_MIN)
+            * (0.5 + 0.5 * sin(ts * (0.35 + 0.30 * h4) + fi * 6.1));
+        lum *= 0.7 + 0.6 * (0.5 + 0.5 * sin(ts * 2.1 + fi * 7.7)); // 快速闪动
+        vec2 subOff = vec2(cos(rot + 1.1), sin(rot + 1.1))
+            * size * (0.9 + 0.6 * splitK);
         vec2 d = p - pos;
         float ang = atan(d.y, d.x) - rot;
         float srad = fragShape(vec2(cos(ang), sin(ang)), sides, spike);
         float dEff = length(d) / max(srad, 0.05);
         float w = size * size / (dEff * dEff + 1e-4);
         F += w;
-
-        // 颜色加权：色相慢漂 + 亮度脉冲
-        float hue = 0.04 * sin(ts * 0.02 + fi * 2.1 + sd) + 0.83 * h1 + 0.17 * h2;
-        float lum = FRAG_LUM_MIN + (1.0 - FRAG_LUM_MIN)
-            * (0.5 + 0.5 * sin(ts * (0.35 + 0.30 * h4) + fi * 6.1));
+        // 两个分裂子体（尺寸 ×0.5×splitK，splitK→0 时消失）
+        for (int k = 0; k < 2; k++) {
+            vec2 subPos = pos + (k == 0 ? subOff : -subOff);
+            vec2 sd2 = p - subPos;
+            float sEff = length(sd2) / max(srad * 0.9, 0.05);
+            float w2 = (size * size * 0.25 * splitK * splitK)
+                / (sEff * sEff + 1e-4);
+            F += w2;
+            hl += vec3(fract(hue), lum, 0.0) * w2;
+            gg += -2.0 * w2 * sd2 / max(dot(sd2, sd2), 1e-4);
+        }
         hl += vec3(fract(hue), lum, 0.0) * w;
 
         // 梯度（元球式近似，供法线）

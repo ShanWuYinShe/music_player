@@ -24,7 +24,7 @@ describe('fractal v7 碎片混沌引擎（回归保护）', () => {
 	});
 
 	test('形状持续演变：边数 3~9 + 星形度参数（不是固定几何）', () => {
-		expect(fractal).toMatch(/sides\s*=\s*3\.0\s*\+\s*floor\(/);
+		expect(fractal).toMatch(/sides\s*=\s*[23]\.0\s*\+\s*floor\(/);
 		expect(fractal).toMatch(/spike\s*=/);
 		expect(fractal).toMatch(/fragShape\(/);
 	});
