@@ -16,8 +16,9 @@ interface QueueEntry {
 }
 
 /**
- * 播放页：全屏 MilkDrop 可视化背景（无封面卡片，控件浮于其上）/
- * 进度与音量 / 收藏与定时 / 主控制区 / 播放队列半模态。
+ * 播放页：全屏 MilkDrop 可视化背景 + 浮动控件 /
+ * 大封面舞台（Poweramp 式：封面浮于可视化之上，点击封面切纯可视化全屏，
+ * 顶栏按钮双态切换）/ 进度与音量 / 收藏与定时 / 主控制区 / 播放队列半模态。
  * 进入时系统栏字色切浅色以融合深底，离开时按深浅模式恢复。
  */
 @ComponentV2
@@ -30,6 +31,8 @@ export struct PlayerPage {
   @Local isQueueOpen: boolean = false;
   /** 当前可视化风格号（顶栏按钮与背景点击共用） */
   @Local vizPreset: number = 0;
+  /** 舞台双态：true 大封面（默认，Poweramp 习惯）；false 纯可视化全屏 */
+  @Local coverMode: boolean = true;
   private volumeBeforeMute: number = 1;
 
   aboutToAppear(): void {
@@ -90,7 +93,7 @@ export struct PlayerPage {
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       Column() {
-        // 顶部栏：仅返回 + 队列入口（歌名由主标题承担，避免重复）
+        // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）
         Row() {
           SymbolGlyph($r('sys.symbol.chevron_left'))
             .fontSize(24)
@@ -98,6 +101,13 @@ export struct PlayerPage {
             .padding(12)
             .onClick(() => this.navPathStack.pop())
           Blank()
+          SymbolGlyph(this.coverMode ? $r('sys.symbol.waveform') : $r('sys.symbol.picture'))
+            .fontSize(20)
+            .fontColor([$r('app.color.viz_fg')])
+            .padding(12)
+            .onClick(() => {
+              this.coverMode = !this.coverMode;
+            })
           SymbolGlyph($r('sys.symbol.wand_and_stars'))
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
@@ -115,8 +125,52 @@ export struct PlayerPage {
         .height(48)
         .padding({ left: 8, right: 8 })
 
-        // 上部大舞台：可视化主展示区
-        Blank()
+        // 上部大舞台：封面模式展示 Poweramp 式大封面（浮于可视化底景上，
+        // 暂停时轻微缩小变暗）；点击封面进入纯可视化全屏。可视化模式点击
+        // 画面切风格（由 VisualizerView 内部处理）。
+        if (this.coverMode) {
+          Column() {
+            Stack() {
+              if (this.player.currentSong !== null && this.player.currentSong.coverPath !== '') {
+                Image(this.player.currentSong.coverPath)
+                  .width('100%')
+                  .height('100%')
+                  .borderRadius(26)
+                  .objectFit(ImageFit.Cover)
+                  .interpolation(ImageInterpolation.Medium)
+              } else {
+                Column({ space: 14 }) {
+                  SymbolGlyph($r('sys.symbol.music_note_list'))
+                    .fontSize(56)
+                    .fontColor([$r('app.color.viz_fg_soft')])
+                  Text('暂无封面')
+                    .fontSize(12)
+                    .fontColor($r('app.color.viz_fg_faint'))
+                }
+                .width('100%')
+                .height('100%')
+                .borderRadius(26)
+                .backgroundColor('rgba(255,255,255,0.06)')
+                .justifyContent(FlexAlign.Center)
+              }
+            }
+            .aspectRatio(1)
+            .width('74%')
+            .clip(true)
+            .scale(this.player.isPlaying ? { x: 1, y: 1 } : { x: 0.93, y: 0.93 })
+            .opacity(this.player.isPlaying ? 1.0 : 0.72)
+            .animation({ duration: 360, curve: Curve.EaseOut })
+            .shadow({ radius: 42, color: 'rgba(0,0,0,0.55)', offsetY: 14 })
+            .onClick(() => {
+              this.coverMode = false;
+            })
+          }
+          .layoutWeight(1)
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+        } else {
+          Blank()
+        }
 
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
         Column() {
@@ -239,16 +293,16 @@ export struct PlayerPage {
             SymbolGlyph($r('sys.symbol.timer'))
               .fontSize(16)
               .fontColor([this.player.sleepRemainSec >= 0 ?
-                $r('app.color.ink') : $r('app.color.ink_faint')])
+                $r('app.color.accent') : $r('app.color.viz_fg_faint')])
             if (this.player.sleepRemainSec >= 0) {
               Text(formatTime(this.player.sleepRemainSec * 1000))
                 .fontSize(11)
-                .fontColor($r('app.color.ink'))
+                .fontColor($r('app.color.accent'))
             }
           }
           .height(30)
           .borderRadius(15)
-          .backgroundColor($r('app.color.surface'))
+          .backgroundColor('rgba(255,255,255,0.08)')
           .padding({ left: 10, right: 10 })
           .bindMenu(this.SleepMenu())
         }

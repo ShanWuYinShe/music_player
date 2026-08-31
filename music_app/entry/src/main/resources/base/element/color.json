@@ -37,6 +37,10 @@
       "value": "#A5691E"
     },
     {
+      "name": "on_accent",
+      "value": "#FBF6EC"
+    },
+    {
       "name": "danger",
       "value": "#BC4A2F"
     },

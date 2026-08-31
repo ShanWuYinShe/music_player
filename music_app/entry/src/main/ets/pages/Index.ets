@@ -377,11 +377,11 @@ struct Index {
   TabChip(tab: LibraryTab, label: string) {
     Text(this.chipCount(tab) > 0 ? `${label} ${this.chipCount(tab)}` : label)
       .fontSize(13)
-      .fontColor(this.tab === tab ? $r('app.color.paper') : $r('app.color.ink_soft'))
+      .fontColor(this.tab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
       .fontWeight(this.tab === tab ? FontWeight.Medium : FontWeight.Normal)
       .padding({ left: 14, right: 14, top: 5, bottom: 5 })
       .borderRadius(15)
-      .backgroundColor(this.tab === tab ? $r('app.color.ink') : $r('app.color.surface'))
+      .backgroundColor(this.tab === tab ? $r('app.color.accent') : $r('app.color.surface'))
       .onClick(() => {
         this.tab = tab;
       })
@@ -393,15 +393,15 @@ struct Index {
     Row({ space: 5 }) {
       SymbolGlyph(icon)
         .fontSize(14)
-        .fontColor([this.sourceTab === tab ? $r('app.color.paper') : $r('app.color.ink_soft')])
+        .fontColor([this.sourceTab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft')])
       Text(label)
         .fontSize(13)
-        .fontColor(this.sourceTab === tab ? $r('app.color.paper') : $r('app.color.ink_soft'))
+        .fontColor(this.sourceTab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
         .fontWeight(this.sourceTab === tab ? FontWeight.Medium : FontWeight.Normal)
     }
     .padding({ left: 14, right: 14, top: 5, bottom: 5 })
     .borderRadius(15)
-    .backgroundColor(this.sourceTab === tab ? $r('app.color.ink') : $r('app.color.surface'))
+    .backgroundColor(this.sourceTab === tab ? $r('app.color.accent') : $r('app.color.surface'))
     .onClick(() => this.switchSource(tab))
   }
 
