@@ -20,7 +20,7 @@ import { VizRenderer } from './renderer';
 
 // 与手机端一致的固定常量（不作为可调参数）
 const RENDER_SCALE = 0.5; // 内部反馈 FBO 分辨率比例（对齐端侧 gWidth/2；0.67 在高分屏
-	//  下 fragment 负载过大，pan.frag 逐像素×逐滴循环尤其卡，降到 1/2 像素少 44%）
+//  下 fragment 负载过大，pan.frag 逐像素×逐滴循环尤其卡，降到 1/2 像素少 44%）
 const TARGET_FPS = 30; // 设备 displaySync 30fps
 const TRANSITION_MS = 1500; // preset 切换渐入时长（VisualizerView presetTrans）
 

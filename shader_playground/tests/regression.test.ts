@@ -27,7 +27,7 @@ describe('fractal v9 主体+附加引擎（回归保护）', () => {
 	test('主体持续演变：对称数 m 与形态指数 n1 都是时间的连续函数', () => {
 		expect(fractal).toMatch(/BODY_M_BASE\s*\+\s*BODY_M_RANGE/);
 		expect(fractal).toMatch(/BODY_N1_MIN\s*\+\s*\(BODY_N1_MAX/);
-		expect(fractal).toMatch(/sin\(ts/);   // 任何时刻主体都在变形
+		expect(fractal).toMatch(/sin\(ts/); // 任何时刻主体都在变形
 	});
 
 	test('附加效果存在：环绕碎片 sparkField + 辐射射线 + 螺旋波纹', () => {
@@ -44,7 +44,9 @@ describe('fractal v9 主体+附加引擎（回归保护）', () => {
 
 	test('旧分形结构已彻底移除（无形态函数/轮换调度/变量）', () => {
 		// 匹配函数定义形式，避免头注释里的历史名词误命中
-		expect(fractal).not.toMatch(/vec3\s+modeDive|vec3\s+modeKali|vec3\s+modeWarp|vec3\s+modeGyroid|vec3\s+modeVoronoi/);
+		expect(fractal).not.toMatch(
+			/vec3\s+modeDive|vec3\s+modeKali|vec3\s+modeWarp|vec3\s+modeGyroid|vec3\s+modeVoronoi/,
+		);
 		expect(fractal).not.toMatch(/vec3\s+evalMode|float\s+modeForShow/);
 		expect(fractal).not.toMatch(/FORM_PERIOD|showIdx|fract\(cyc\)/);
 		expect(fractal).not.toMatch(/ph\s*>\s*1\.0\s*-\s*xf/);
@@ -116,7 +118,9 @@ describe('pan v15 真 3D 锅几何（回归保护）', () => {
 		const rsExpr = pan.match(/PAN_SPHERE_R\s*=\s*\([^;]+;/);
 		expect(rsExpr).not.toBeNull();
 		// 公式必须是 (1+D²)/(2D)
-		expect(rsExpr![0]).toMatch(/\(1\.0\s*\+\s*PAN_DEPTH\s*\*\s*PAN_DEPTH\)\s*\/\s*\(2\.0\s*\*\s*PAN_DEPTH\)/);
+		expect(rsExpr![0]).toMatch(
+			/\(1\.0\s*\+\s*PAN_DEPTH\s*\*\s*PAN_DEPTH\)\s*\/\s*\(2\.0\s*\*\s*PAN_DEPTH\)/,
+		);
 		// 由 D 反算 Rs，校验球冠自洽（锅心 z=0、锅口 z=D）
 		const Rs = (1 + depth * depth) / (2 * depth);
 		expect(Math.abs(Rs - Math.sqrt(Rs * Rs - 1) - depth)).toBeLessThan(1e-6);
@@ -135,8 +139,8 @@ describe('pan v15 真 3D 锅几何（回归保护）', () => {
 		const Rs = (1 + depth * depth) / (2 * depth);
 		const zTop = Rs * (1 - Math.cos(thMax));
 		const ratio = zTop / depth;
-		expect(ratio).toBeGreaterThan(0.25);   // 不能贴着锅底不动
-		expect(ratio).toBeLessThan(0.42);      // 不能超过 1/3 太多（会读作"水"）
+		expect(ratio).toBeGreaterThan(0.25); // 不能贴着锅底不动
+		expect(ratio).toBeLessThan(0.42); // 不能超过 1/3 太多（会读作"水"）
 	});
 
 	test('水滴极角是摆动（重力滑梯），不是绕心匀速盘旋', () => {

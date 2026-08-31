@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 set(SHADER_GEN_HEADER ${SHADER_GEN_DIR}/shader_src.h)
-set(SHADER_SCENES "fractal.frag,pan.frag,aurora.frag")
+set(SHADER_SCENES "fractal.frag,pan.frag,aurora.frag,spectrum.frag")
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(NOT Python3_Interpreter_FOUND)

@@ -283,7 +283,7 @@ export default function LocalUnitSuite() {
     });
 
     it('presetRotatesBySpan', 0, () => {
-      expect(PRESET_COUNT).assertEqual(3);
+      expect(PRESET_COUNT).assertEqual(4);
       expect(VIZ_PRESET_NAMES.length).assertEqual(PRESET_COUNT);
       const s = presetAt(0, 42);
       expect(s.index >= 0 && s.index < PRESET_COUNT).assertTrue();
