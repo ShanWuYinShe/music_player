@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.cer",
+          "certpath": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001A5F8BEFE8AE9F580EE0976C29B5B37790554FC4D9DA8061A82BB300859164B4412FB67B6A1A9B",
-          "profile": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.p7b",
+          "keyPassword": "0000001B1E51C5F92EAC2584F6742931CF3400B4603BDC92C81A5B971D0360D01F6AB8F3898627F55DC007",
+          "profile": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/liyou/.ohos/config/default_music_player_grjzNVPlH3pBfq9bFFZUVqg_3EPlsLlS4d3eql8Rxis=.p12",
-          "storePassword": "0000001A08BA5038197C4F59300435BFD98B9599FEDDFF6F1DB552043A5118DE45997AAFB612892F277E"
+          "storeFile": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.p12",
+          "storePassword": "0000001BF3B7294DA25489DB2B61DD77B8FF5B2A7FBF16D87B70410FD3E54EEB62556E88FAE303B66F0361"
         }
       }
     ],

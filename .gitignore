@@ -5,6 +5,7 @@
 # AI 会话工作目录
 /.workwork/
 /.worktrees/
+/.workbuddy/
 /.zcode/
 
 # 本地工具与模拟器

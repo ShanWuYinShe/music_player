@@ -84,6 +84,21 @@ $HDC install -r entry/build/default/outputs/default/entry-default-signed.hap
 $HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
 ```
 
+**一键签名构建+安装**（推荐，签名有效期内无需打开 IDE）：
+
+```bash
+tools/auto_sign.sh          # 校验签名材料并构建 signed HAP
+tools/auto_sign.sh install  # 校验 + 构建 + 安装 + 启动到已连接设备
+```
+
+签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名
+生成（File > Project Structure > Signing Configs 勾选 "Automatically generate
+signature"，需登录华为账号），debug profile 有效期一年。有效期内命令行直接构建；
+材料缺失/过期/新设备未绑定时，脚本会打印指引，只需去 IDE 重新生成一次签名。
+
+> 签名材料含私钥且绑定设备 UDID，**不入库**（build-profile.json5 的 material 为
+> 本机绝对路径，DevEco 每次重新生成会自动改写该段）。
+
 ## 音乐导入说明
 
 HarmonyOS（API 24）已移除 `READ_MEDIA_AUDIO` 权限，应用无法静默扫描公共媒体库。
