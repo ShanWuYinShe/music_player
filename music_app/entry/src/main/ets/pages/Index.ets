@@ -5,7 +5,7 @@ import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
 import { SongItem } from '../components/SongItem';
 import { MenuItemRow } from '../components/MenuItemRow';
-import { MiniPlayerBar } from '../components/MiniPlayerBar';
+import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
 
@@ -80,8 +80,16 @@ struct Index {
   /** LazyForEach 数据源 */
   private songSource: SongListDataSource = new SongListDataSource();
 
+  /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
+   * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
+   * onStateChanged 显式回调驱动 @Local（@Local 的 if 分支可靠） */
+  @Local mini: MiniInfo | null = null;
+  private stateListener: () => void = (): void => {
+  };
+
   aboutToAppear(): void {
     this.songSource.reload(this.filteredSongs);
+
     // 播放失败（在线无版权/网络中断等）统一 toast 反馈，由 PlayerController 回调
     appStore.player.onPlaybackError = (message: string): void => {
       promptAction.showToast({ message: message, duration: 2500 });
@@ -325,10 +333,11 @@ struct Index {
           this.SongList()
         }
 
-        // 底部迷你播放条
-        if (appStore.player.currentSong !== null) {
+        // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）
+        if (this.mini !== null) {
           MiniPlayerBar({
             player: appStore.player,
+            info: this.mini,
             onTapOpen: () => this.pathStack.pushPathByName('player', null)
           })
             .margin({ left: 12, right: 12, bottom: 12 })

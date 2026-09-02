@@ -12,6 +12,7 @@ import {
   PRESET_COUNT, PRESET_SPAN_MS, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
   beatEnvelope, bpmFromSeed, presetAt, hslToRgb
 } from '../main/ets/common/VisualizerCore';
+import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 
 /** 构造测试歌曲记录 */
 function mk(id: string, title: string, artist: string, duration: number): SongRecord {
@@ -276,6 +277,25 @@ export default function LocalUnitSuite() {
       expect(parseOnlineProviders('')).assertNull();
       expect(parseOnlineProviders('not json')).assertNull();
       expect(parseOnlineProviders('{}')).assertNull();
+    });
+  });
+
+  describe('Id3TlenTest', () => {
+    it('parseTlenMsAcceptsPlainDigits', 0, () => {
+      expect(parseTlenMs('230530')).assertEqual(230530);
+      expect(parseTlenMs('0')).assertEqual(0);
+    });
+    it('parseTlenMsStripsNoiseAndBounded', 0, () => {
+      expect(parseTlenMs('  12345 ')).assertEqual(12345);
+      expect(parseTlenMs('abc12def3')).assertEqual(123);
+      // 超 24h 视为非法
+      expect(parseTlenMs(`${24 * 3600 * 1000}`)).assertEqual(0);
+      expect(parseTlenMs(`${24 * 3600 * 1000 - 1}`)).assertEqual(24 * 3600 * 1000 - 1);
+    });
+    it('parseTlenMsRejectsInvalid', 0, () => {
+      expect(parseTlenMs('')).assertEqual(0);
+      expect(parseTlenMs('abc')).assertEqual(0);
+      expect(parseTlenMs('-500')).assertEqual(0);
     });
   });
 

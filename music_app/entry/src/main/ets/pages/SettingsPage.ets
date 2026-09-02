@@ -110,14 +110,15 @@ export struct SettingsPage {
       .backgroundColor($r('app.color.surface'))
       .alignItems(HorizontalAlign.Start)
 
-      // 清空曲库（危险操作）
+      // 清空曲库（危险操作）：统计只看本地曲库——在线模式下 player.songs
+      // 是在线列表，用它计数会把服务器/网络源歌曲误报成本地文件
       Row({ space: 14 }) {
         Column({ space: 3 }) {
           Text('清空曲库')
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.danger'))
-          Text(`删除全部 ${appStore.player.songs.length} 首歌曲的文件与记录，同时清空喜欢和播放记录，不可恢复。`)
+          Text(`删除全部 ${appStore.library.getAllSongs().length} 首歌曲的文件与记录，同时清空喜欢和播放记录，不可恢复。`)
             .fontSize(12)
             .fontColor($r('app.color.ink_soft'))
         }
@@ -131,7 +132,7 @@ export struct SettingsPage {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.danger'))
-          .enabled(appStore.player.songs.length > 0 || appStore.userData.favoriteIds.length > 0)
+          .enabled(appStore.library.getAllSongs().length > 0 || appStore.userData.favoriteIds.length > 0)
           .onClick(() => this.confirmClearLibrary())
       }
       .width('100%')
@@ -181,17 +182,18 @@ export struct SettingsPage {
   }
 
   private librarySummary(): string {
-    const count = appStore.player.songs.length;
-    if (count === 0) {
+    // 只统计本地曲库（在线模式下 player.songs 是在线列表，不代表本地文件）
+    const songs = appStore.library.getAllSongs();
+    if (songs.length === 0) {
       return '还没有歌曲，去首页导入吧';
     }
-    const total = formatTotalDuration(appStore.player.songs.reduce((sum, song) =>
+    const total = formatTotalDuration(songs.reduce((sum, song) =>
       sum + (song.duration > 0 ? song.duration : 0), 0));
-    return `${count} 首 · ${total}`;
+    return `${songs.length} 首 · ${total}`;
   }
 
   private confirmClearLibrary(): void {
-    const count = appStore.player.songs.length;
+    const count = appStore.library.getAllSongs().length;
     AlertDialog.show({
       title: '清空曲库',
       message: count > 0 ? `将删除 ${count} 首歌曲及其音频文件，且不可恢复。` : '将清空喜欢与播放记录。',

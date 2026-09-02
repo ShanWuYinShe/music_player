@@ -10,6 +10,8 @@ export interface Id3Tag {
   album: string;
   /** 封面图片数据，无封面时为空 */
   coverData: Uint8Array | null;
+  /** TLEN 帧时长（毫秒），无帧或非法值为 0 */
+  durationMs: number;
 }
 
 const TAG_HEADER_SIZE = 10;
@@ -20,7 +22,7 @@ const MAX_TAG_SIZE = 5 * 1024 * 1024; // 防御超大内嵌封面
  * v2.2 及无标签文件返回空字段，由调用方用文件名兜底。
  */
 export function parseId3(filePath: string): Id3Tag {
-  const empty: Id3Tag = { title: '', artist: '', album: '', coverData: null };
+  const empty: Id3Tag = { title: '', artist: '', album: '', coverData: null, durationMs: 0 };
   let file: fs.File | null = null;
   try {
     file = fs.openSync(filePath, fs.OpenMode.READ_ONLY);
@@ -59,7 +61,7 @@ export function parseId3(filePath: string): Id3Tag {
  * 遍历 ID3 frame 提取目标字段
  */
 function parseFrames(tag: Uint8Array, version: number): Id3Tag {
-  const result: Id3Tag = { title: '', artist: '', album: '', coverData: null };
+  const result: Id3Tag = { title: '', artist: '', album: '', coverData: null, durationMs: 0 };
   let offset = 0;
   while (offset + 10 <= tag.length) {
     const frameId = asciiString(tag, offset, 4);
@@ -85,6 +87,8 @@ function parseFrames(tag: Uint8Array, version: number): Id3Tag {
       result.album = decodeTextFrame(payload);
     } else if (frameId === 'APIC' && !result.coverData) {
       result.coverData = extractCover(payload);
+    } else if (frameId === 'TLEN' && result.durationMs === 0) {
+      result.durationMs = parseTlenMs(decodeTextFrame(payload));
     }
     offset = dataStart + frameSize;
   }
@@ -176,6 +180,23 @@ function decodeUtf16(body: Uint8Array, allowBom: boolean): string {
     out += String.fromCharCode(code);
   }
   return out;
+}
+
+/**
+ * TLEN 时长帧文本 → 毫秒：数字字符串直接取值；空/非数字/非正/超 24h
+ * 一律返回 0（播放 prepared 后仍会校准，宁缺勿错）。
+ */
+export function parseTlenMs(text: string): number {
+  const trimmed = text.trim();
+  // 负值在剥离符号前拦截，避免 "-500" 误判为 500
+  if (trimmed.startsWith('-')) {
+    return 0;
+  }
+  const n = parseInt(trimmed.replace(/[^0-9]/g, ''), 10);
+  if (Number.isNaN(n) || n <= 0 || n >= 24 * 3600 * 1000) {
+    return 0;
+  }
+  return n;
 }
 
 function syncSafeInt(bytes: Uint8Array, offset: number): number {

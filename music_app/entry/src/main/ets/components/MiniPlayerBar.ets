@@ -3,6 +3,15 @@ import { VisualizerView } from './VisualizerView';
 
 const BAR_HEIGHT = 62;
 
+/** 迷你条展示镜像：由 Index 经 onStateChanged 回调维护的 @Local 整体替换
+ * 传入（@Local→@Param 链路可靠）；进度/时长仍直读 player 的 @Trace */
+export interface MiniInfo {
+  title: string;
+  artist: string;
+  coverPath: string;
+  isPlaying: boolean;
+}
+
 /**
  * 底部迷你播放条：封面 + 歌名 + 播放/暂停 + 下一首，顶部细线为实时播放进度，
  * 整卡片区垫全宽金色频谱背景（播放中跳动），点击整条进入播放页。
@@ -10,6 +19,7 @@ const BAR_HEIGHT = 62;
 @ComponentV2
 export struct MiniPlayerBar {
   @Param @Require player: PlayerController;
+  @Param @Require info: MiniInfo;
   @Event onTapOpen: () => void = () => {
   };
 
@@ -21,9 +31,8 @@ export struct MiniPlayerBar {
   }
 
   build() {
-    if (this.player.currentSong !== null) {
-      // clip 使进度细线跟随卡片圆角
-      Column() {
+    // clip 使进度细线跟随卡片圆角
+    Column() {
         Stack({ alignContent: Alignment.TopStart }) {
           // 全卡片频谱背景（先声明垫底；固定高度与内容行一致，'100%' 会
           // 与 Stack 高度互引把迷你条撑高）
@@ -32,8 +41,8 @@ export struct MiniPlayerBar {
             .height(BAR_HEIGHT)
 
           Row({ space: 12 }) {
-            if (this.player.currentSong?.coverPath !== '') {
-              Image(this.player.currentSong?.coverPath ?? '')
+            if (this.info.coverPath !== '') {
+              Image(this.info.coverPath)
                 .width(40)
                 .height(40)
                 .borderRadius(8)
@@ -51,13 +60,13 @@ export struct MiniPlayerBar {
             }
 
             Column() {
-              Text(this.player.currentSong?.title ?? '')
+              Text(this.info.title)
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.ink'))
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(this.player.currentSong?.artist ?? '')
+              Text(this.info.artist)
                 .fontSize(12)
                 .fontColor($r('app.color.ink_soft'))
                 .maxLines(1)
@@ -66,7 +75,7 @@ export struct MiniPlayerBar {
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
 
-            SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.info.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(26)
               .fontColor([$r('app.color.ink')])
               .onClick(() => this.player.togglePlay())
@@ -87,16 +96,15 @@ export struct MiniPlayerBar {
             .height(2.5)
             .borderRadius({ bottomRight: 2 })
             .backgroundColor($r('app.color.accent'))
-            .opacity(this.player.isPlaying ? 0.5 : 0.3)
+            .opacity(this.info.isPlaying ? 0.5 : 0.3)
         }
         .width('100%')
       }
-      .width('100%')
-      .clip(true)
-      .borderRadius(16)
-      .backgroundColor($r('app.color.surface'))
-      .border({ width: 0.5, color: $r('app.color.line') })
-      .shadow({ radius: 16, color: 'rgba(0,0,0,0.30)', offsetY: 2 })
-    }
+    .width('100%')
+    .clip(true)
+    .borderRadius(16)
+    .backgroundColor($r('app.color.surface'))
+    .border({ width: 0.5, color: $r('app.color.line') })
+    .shadow({ radius: 16, color: 'rgba(0,0,0,0.30)', offsetY: 2 })
   }
 }

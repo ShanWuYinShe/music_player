@@ -16,6 +16,9 @@ const BAR_MAX_VP = 30;
 @ComponentV2
 export struct WaveformSeekbar {
   @Param @Require player: PlayerController;
+  /** 当前曲 id（父组件镜像传入驱动波形重算；直读 player.currentSongId 的
+   * @Computed 在真机上不触发，已踩坑） */
+  @Param songId: string = '';
   @Param playedColor: Resource = $r('app.color.accent');
   @Param trackColor: Resource = $r('app.color.viz_line');
   /** 拖动中的局部预览比例（-1 无拖动），避免与 timeUpdate 抖动 */
@@ -25,11 +28,10 @@ export struct WaveformSeekbar {
   /** 拖动起始时的进度比例（offsetX 为累计偏移，须从起点换算） */
   private startFraction: number = 0;
 
-  /** 波形柱高度（0~1）：依赖 currentSongId，切歌自动重算 */
+  /** 波形柱高度（0~1）：依赖 @Param songId，切歌由父组件镜像驱动重算 */
   @Computed
   get bars(): number[] {
-    const id = this.player.currentSong ? this.player.currentSong.id : '';
-    return synthSpectrum(seedFromId(id), 0, BAR_COUNT);
+    return synthSpectrum(seedFromId(this.songId), 0, BAR_COUNT);
   }
 
   /** 当前进度比例（0~1）：拖动预览优先 */

@@ -26,6 +26,12 @@ interface QueueEntry {
 export struct PlayerPage {
   @Param @Require player: PlayerController;
   @Param navPathStack: NavPathStack = new NavPathStack();
+  /** 当前曲 @Local 镜像：经状态订阅维护（player 的 @Computed 渲染依赖在
+   * 真机上不触发，已踩坑；@Local 驱动的 if/插值可靠） */
+  @Local song: SongRecord | null = null;
+  @Local isPlaying: boolean = false;
+  private stateListener: () => void = (): void => {
+  };
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
   /** 当前可视化风格号（顶栏按钮与背景点击共用） */
@@ -36,10 +42,18 @@ export struct PlayerPage {
 
   aboutToAppear(): void {
     this.applyImmersion(true);
+    this.stateListener = (): void => {
+      const id = this.player.currentSongId;
+      this.song = id === '' ? null : this.player.getSong(id);
+      this.isPlaying = this.player.isPlaying;
+    };
+    this.stateListener(); // 进入即同步一次当前状态
+    this.player.addStateListener(this.stateListener);
   }
 
   aboutToDisappear(): void {
     this.applyImmersion(false);
+    this.player.removeStateListener(this.stateListener);
   }
 
   /**
@@ -130,8 +144,8 @@ export struct PlayerPage {
         if (this.coverMode) {
           Column() {
             Stack() {
-              if (this.player.currentSong !== null && this.player.currentSong.coverPath !== '') {
-                Image(this.player.currentSong.coverPath)
+              if (this.song !== null && this.song.coverPath !== '') {
+                Image(this.song.coverPath)
                   .width('100%')
                   .height('100%')
                   .borderRadius(26)
@@ -156,8 +170,8 @@ export struct PlayerPage {
             .aspectRatio(1)
             .width('74%')
             .clip(true)
-            .scale(this.player.isPlaying ? { x: 1, y: 1 } : { x: 0.93, y: 0.93 })
-            .opacity(this.player.isPlaying ? 1.0 : 0.72)
+            .scale(this.isPlaying ? { x: 1, y: 1 } : { x: 0.93, y: 0.93 })
+            .opacity(this.isPlaying ? 1.0 : 0.72)
             .animation({ duration: 360, curve: Curve.EaseOut })
             .shadow({ radius: 42, color: 'rgba(0,0,0,0.55)', offsetY: 14 })
             .onClick(() => {
@@ -174,24 +188,24 @@ export struct PlayerPage {
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
         Column() {
           Column({ space: 5 }) {
-            Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
+            Text(this.song ? this.song.title : '未在播放')
               .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.player.currentSong ? this.player.currentSong.artist : '')
+            Text(this.song ? this.song.artist : '')
               .fontSize(15)
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示
-            if (this.player.currentSong !== null) {
+            if (this.song !== null) {
               Text() {
-                Span(this.songMetaText(this.player.currentSong))
+                Span(this.songMetaText(this.song))
                   .fontColor($r('app.color.viz_fg_faint'))
-                if (this.songTrialHint(this.player.currentSong) !== '') {
-                  Span(` · ${this.songTrialHint(this.player.currentSong)}`)
+                if (this.songTrialHint(this.song) !== '') {
+                  Span(` · ${this.songTrialHint(this.song)}`)
                     .fontColor($r('app.color.accent'))
                 }
               }
@@ -205,7 +219,7 @@ export struct PlayerPage {
 
           // 波形进度条（Poweramp 招牌）：已播 accent 着色，点击/拖动 seek
           Column({ space: 4 }) {
-            WaveformSeekbar({ player: this.player })
+            WaveformSeekbar({ player: this.player, songId: this.song?.id ?? '' })
             Row() {
               Text(formatTime(this.player.currentTime))
                 .fontSize(12)
@@ -237,7 +251,7 @@ export struct PlayerPage {
             .onClick(() => this.player.previous())
 
           Stack({ alignContent: Alignment.Center }) {
-            SymbolGlyph(this.player.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(36)
               .fontColor([$r('app.color.paper')])
           }
@@ -276,6 +290,7 @@ export struct PlayerPage {
             style: SliderStyle.OutSet
           })
             .layoutWeight(1)
+            .showTips(false)
             .selectedColor($r('app.color.accent'))
             .trackColor($r('app.color.viz_line'))
             .blockColor($r('app.color.accent'))
@@ -350,7 +365,7 @@ export struct PlayerPage {
 
   private currentIndexIn(entries: QueueEntry[]): number {
     for (let i = 0; i < entries.length; i++) {
-      if (entries[i].song.id === this.player.currentSongId) {
+      if (entries[i].song.id === (this.song?.id ?? '')) {
         return i;
       }
     }
@@ -384,9 +399,9 @@ export struct PlayerPage {
         ForEach(this.queueEntries, (entry: QueueEntry, index: number) => {
           ListItem() {
             Row({ space: 12 }) {
-              if (entry.song.id === this.player.currentSongId) {
+              if (entry.song.id === (this.song?.id ?? '')) {
                 Row() {
-                  EqIndicator({ active: this.player.isPlaying, color: $r('app.color.accent') })
+                  EqIndicator({ active: this.isPlaying, color: $r('app.color.accent') })
                 }
                 .width(22)
                 .justifyContent(FlexAlign.Center)
@@ -403,7 +418,7 @@ export struct PlayerPage {
                   Text(entry.song.title)
                     .fontSize(15)
                     .fontWeight(FontWeight.Medium)
-                    .fontColor(entry.song.id === this.player.currentSongId ?
+                    .fontColor(entry.song.id === (this.song?.id ?? '') ?
                       $r('app.color.accent') : $r('app.color.ink'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -433,7 +448,7 @@ export struct PlayerPage {
             .width('100%')
             .padding({ left: 20, right: 20, top: 8, bottom: 8 })
             .borderRadius(12)
-            .backgroundColor(entry.song.id === this.player.currentSongId ?
+            .backgroundColor(entry.song.id === (this.song?.id ?? '') ?
               $r('app.color.surface') : Color.Transparent)
             .onClick(() => this.player.playSong(entry.song.id))
           }
@@ -512,12 +527,12 @@ export struct PlayerPage {
   }
 
   private isFavorite(): boolean {
-    const song = this.player.currentSong;
+    const song = this.song;
     return song !== null && appStore.userData.isFavorite(song.id);
   }
 
   private toggleFavorite(): void {
-    const song = this.player.currentSong;
+    const song = this.song;
     if (!song) {
       return;
     }

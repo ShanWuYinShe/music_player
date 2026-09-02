@@ -70,7 +70,8 @@ export struct SongItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      // 当前播放：EQ 跳动指示（Poweramp 式，暂停时静止）
+      // 当前播放：EQ 跳动指示（Poweramp 式，暂停时静止）。isCurrent 由
+      // Index 在 onStateChanged 回调中 reload 列表驱动重建求值
       if (this.isCurrent) {
         EqIndicator({ active: this.isPlaying, color: CURRENT_COLOR })
       }

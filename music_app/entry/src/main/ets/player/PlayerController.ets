@@ -69,6 +69,24 @@ export class PlayerController {
   private songIndex: Map<string, SongRecord> = new Map();
   /** 播放失败提示回调（页面注入 promptAction），null 时静默 */
   onPlaybackError: ((message: string) => void) | null = null;
+  /** 播放状态变化订阅（切歌/启停）：真机上经 @ObservedV2/@Computed 的 UI
+   * 依赖对本实例不触发（仅 Text 内容插值存活，已实测），页面靠订阅维护
+   * @Local 镜像驱动渲染 */
+  private stateListeners: Set<() => void> = new Set();
+
+  addStateListener(fn: () => void): void {
+    this.stateListeners.add(fn);
+  }
+
+  removeStateListener(fn: () => void): void {
+    this.stateListeners.delete(fn);
+  }
+
+  private notifyState(): void {
+    for (const fn of this.stateListeners) {
+      fn();
+    }
+  }
   /** 连续播放失败计数：任一曲 prepared 成功即清零 */
   private errorStreak: number = 0;
   /** 已处理播放失败的代际号：error 事件与 stateChange(error) 双入口去重 */
@@ -149,9 +167,11 @@ export class PlayerController {
   playSong(id: string): void {
     const song = this.findSong(id);
     if (!song) {
+      hilog.warn(DOMAIN, TAG, 'playSong: song not found %{public}s', id);
       return;
     }
     this.currentSongId = id;
+    this.notifyState();
     this.pendingSeekMs = 0;
     this.userData.addRecent(id);
     this.loadAndPlay(song);
@@ -325,6 +345,7 @@ export class PlayerController {
     this.generation++;
     this.releasePlayer();
     this.currentSongId = '';
+    this.notifyState();
     this.isPlaying = false;
     this.isPrepared = false;
     this.currentTime = 0;
@@ -379,6 +400,7 @@ export class PlayerController {
     this.duration = song.duration;
     this.currentTime = pos > 0 && pos < song.duration ? pos : 0;
     this.pendingSeekMs = this.currentTime;
+    this.notifyState();
   }
 
   /** 弹出插播队列中仍存在的曲目 id */
@@ -534,10 +556,12 @@ export class PlayerController {
       });
     } else if (state === 'playing') {
       this.isPlaying = true;
+      this.notifyState();
       this.session.updatePlaybackState(true, this.currentTime, 1.0);
       this.session.startBackground();
     } else if (state === 'paused') {
       this.isPlaying = false;
+      this.notifyState();
       this.session.updatePlaybackState(false, this.currentTime, 1.0);
     } else if (state === 'completed') {
       this.onCompleted();

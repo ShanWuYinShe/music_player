@@ -337,6 +337,7 @@ export class MusicLibrary {
       record.title = tag.title;
       record.artist = tag.artist;
       record.album = tag.album;
+      record.duration = tag.durationMs; // TLEN 帧(prepared 后仍会校准)
       if (tag.coverData && tag.coverData.length > 0 && this.context) {
         record.coverPath = this.saveCover(record.id, tag.coverData);
       }
