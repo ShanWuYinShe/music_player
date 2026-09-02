@@ -48,9 +48,12 @@ go run -C music_server . -library-review
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | healthcheck,无限流 |
-| `GET /api/providers` | 源列表(library + 启用的 netease) |
-| `GET /api/songs?q=&limit=` | q 空:本地曲库全量(**空曲库时回填网易「新歌速递」推荐,开箱即有歌**);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
+| `GET /api/providers` | 源列表(library + 启用的 netease);netease 源带 `loggedIn`(是否已配置账号 cookie) |
+| `GET /api/songs?q=&limit=` | q 空:本地曲库全量 + 网易「新歌速递」推荐追加(在线页开箱即有内容);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
 | `GET /api/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
+
+- 网络源曲目带 `vip` 标记(fee=1/4 付费曲目):服务端未配置 cookie 时上游只发
+  30~60s 试听片段,客户端据此显示「试听」提示;`loggedIn` 与 `vip` 组合即完整语义
 
 - 本地曲库 id 不暴露磁盘路径,无路径穿越面;网络源直链域名仅允许 http(s)
 - 曲库索引 60s TTL 懒刷新,文件增删最迟一个 TTL 生效

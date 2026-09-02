@@ -51,11 +51,12 @@ func newFakeNetease(t *testing.T) *fakeNetease {
 		switch r.URL.Path {
 		case "/cloudsearch":
 			// 真实 /cloudsearch 为新版 eapi 形态(ar/al/dt)；另一条用旧形态
-			// (artists/album/duration)，覆盖双形态兼容。
+			// (artists/album/duration)，覆盖双形态兼容。fee 覆盖顶层与
+			// privilege 两种位置(VIP 标记来源)。
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"result":{"songs":[` +
-				`{"id":167855,"name":"有何不可","ar":[{"name":"许嵩"}],"al":{"name":"自定义"},"dt":240000},` +
-				`{"id":186016,"name":"晴天","artists":[{"name":"周杰伦"}],"album":{"name":"叶惠美"},"duration":269000}]}}`))
+				`{"id":167855,"name":"有何不可","ar":[{"name":"许嵩"}],"al":{"name":"自定义"},"dt":240000,"fee":1},` +
+				`{"id":186016,"name":"晴天","artists":[{"name":"周杰伦"}],"album":{"name":"叶惠美"},"duration":269000,"privilege":{"fee":4}}]}}`))
 		case "/song/url/v1":
 			id := r.URL.Query().Get("id")
 			w.Header().Set("Content-Type", "application/json")
@@ -108,6 +109,13 @@ func TestNeteaseSearchMerged(t *testing.T) {
 	}
 	if got.DurationMs != 269000 || got.Artist != "周杰伦" || got.Album != "叶惠美" {
 		t.Fatalf("unexpected metadata: %+v", got)
+	}
+	// VIP 标记:顶层 fee=1 与 privilege.fee=4 两种形态都应命中。
+	if v := byID["ne_167855"]; !v.VIP {
+		t.Fatalf("fee=1 (top-level) should mark VIP: %+v", v)
+	}
+	if !got.VIP {
+		t.Fatalf("privilege.fee=4 should mark VIP: %+v", got)
 	}
 
 	// 命中本地 + 追加网络:q 同时匹配本地与上游。
@@ -276,15 +284,16 @@ func TestNeteaseCookieFallback(t *testing.T) {
 	}
 }
 
-// 空曲库回填:q 为空且本地为空时返回网易新歌推荐;本地有曲库时不掺入。
+// 在线列表回填:q 为空时本地曲库在前、网易新歌推荐追加在后(在线页开箱
+// 即有内容);本地为空时纯推荐;上游失败降级仅本地。
 func TestNeteaseDiscoverBackfill(t *testing.T) {
 	f := newFakeNetease(t)
-	// 假上游补 /top/song。
+	// 假上游补 /top/song(fee=1 → VIP 标记)。
 	handler := f.api.Config.Handler
 	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/top/song" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"id":111,"name":"新歌A","artists":[{"name":"歌手甲"}],"album":{"name":"专辑"},"duration":200000}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":111,"name":"新歌A","artists":[{"name":"歌手甲"}],"album":{"name":"专辑"},"duration":200000,"fee":1}]}`))
 			return
 		}
 		handler.ServeHTTP(w, r)
@@ -306,8 +315,11 @@ func TestNeteaseDiscoverBackfill(t *testing.T) {
 	if resp.Total != 1 || resp.Songs[0].ID != "ne_111" || resp.Songs[0].Source != "netease" {
 		t.Fatalf("expect discover backfill, got %s", rec.Body.String())
 	}
+	if !resp.Songs[0].VIP {
+		t.Fatalf("fee=1 discover entry should mark VIP: %+v", resp.Songs[0])
+	}
 
-	// 本地有曲库:q 为空 → 只回本地,不掺推荐。
+	// 本地有曲库:q 为空 → 本地在前,推荐追加在后。
 	server2 := newTestServerWithNetease(t, f.api.URL)
 	rec = httptest.NewRecorder()
 	server2.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
@@ -318,20 +330,62 @@ func TestNeteaseDiscoverBackfill(t *testing.T) {
 	if err := decodeJSONBody(t, rec.Body.String(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Total == 0 || resp.Songs[0].Source == "netease" {
-		t.Fatalf("local library should stay pure, got %s", rec.Body.String())
+	if resp.Total != 5 { // 本地 4 + 推荐 1
+		t.Fatalf("expect local+discover, got %d (%s)", resp.Total, rec.Body.String())
+	}
+	if resp.Songs[0].Source != "" || resp.Songs[4].Source != "netease" {
+		t.Fatalf("local first then discover: %+v", resp.Songs)
 	}
 
-	// 上游 /top/song 失败:降级返回空列表(200),不报错。
+	// 上游 /top/song 失败:降级返回本地列表(200),不报错。
 	f2 := newFakeNetease(t)
 	f2.api.Close()
 	server3 := newTestServerWithNetease(t, f2.api.URL)
-	server3.library = nil
-	server3.byID = map[string]songFile{}
 	rec = httptest.NewRecorder()
 	server3.handleSongs(rec, httptest.NewRequest("GET", "/api/songs", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("degraded discover must still 200, got %d", rec.Code)
+	}
+	var localOnly struct {
+		Total int `json:"total"`
+	}
+	if err := decodeJSONBody(t, rec.Body.String(), &localOnly); err != nil {
+		t.Fatal(err)
+	}
+	if localOnly.Total != 4 {
+		t.Fatalf("degraded should keep local songs, got %d", localOnly.Total)
+	}
+}
+
+// providers 登录态:配置 cookie(env 或文件)时 netease 源带 loggedIn=true,
+// 未配置为 false;未启用网络源时不出现该字段。
+func TestProvidersNeteaseLoginState(t *testing.T) {
+	f := newFakeNetease(t)
+
+	server := newTestServerWithNetease(t, f.api.URL) // 无 cookie
+	server.netease = newNeteaseClient(f.api.URL, "", "")
+	rec := httptest.NewRecorder()
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	if !strings.Contains(rec.Body.String(), `"loggedIn":false`) {
+		t.Fatalf("expect loggedIn=false without cookie, got %s", rec.Body.String())
+	}
+
+	server.netease = newNeteaseClient(f.api.URL, "MUSIC_U=x", "")
+	rec = httptest.NewRecorder()
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	if !strings.Contains(rec.Body.String(), `"loggedIn":true`) {
+		t.Fatalf("expect loggedIn=true with env cookie, got %s", rec.Body.String())
+	}
+
+	cookiePath := filepath.Join(t.TempDir(), "netease-cookie.txt")
+	if err := os.WriteFile(cookiePath, []byte("MUSIC_U=y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server.netease = newNeteaseClient(f.api.URL, "", cookiePath)
+	rec = httptest.NewRecorder()
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	if !strings.Contains(rec.Body.String(), `"loggedIn":true`) {
+		t.Fatalf("expect loggedIn=true with cookie file, got %s", rec.Body.String())
 	}
 }
 

@@ -130,6 +130,19 @@ func (c *neteaseClient) enabled() bool {
 	return c != nil && c.base != ""
 }
 
+// loggedIn 报告是否已配置账号 cookie(文件或 env 任一非空)。
+// 已登录时上游返回完整音频;未登录时付费曲目只有 30~60s 试听片段。
+func (c *neteaseClient) loggedIn() bool {
+	return c.enabled() && c.currentCookie() != ""
+}
+
+// isVIPFee 判定网易曲目 fee 是否付费曲目:1=VIP 专享,4=付费专辑,
+// 0=免费,8=非会员免费(限低音质)。付费曲目未登录时上游只发试听片段,
+// 标记 VIP 让客户端给出「试听」提示。
+func isVIPFee(fee int) bool {
+	return fee == 1 || fee == 4
+}
+
 // getJSON 请求上游接口并解析 JSON(匿名或带配置 cookie)。
 func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
@@ -162,6 +175,11 @@ type cloudsearchSongs struct {
 			Ar   []struct{ Name string } `json:"ar"`
 			Al   struct{ Name string }   `json:"al"`
 			Dt   int64                   `json:"dt"`
+			// Fee 顶层付费标记;privilege.fee 为同值的权限位形态,取非零者。
+			Fee       int `json:"fee"`
+			Privilege struct {
+				Fee int `json:"fee"`
+			} `json:"privilege"`
 
 			Artists  []struct{ Name string } `json:"artists"`
 			Album    struct{ Name string }   `json:"album"`
@@ -185,6 +203,7 @@ type topSongResp struct {
 		Artists  []struct{ Name string } `json:"artists"`
 		Album    struct{ Name string }   `json:"album"`
 		Duration int64                   `json:"duration"`
+		Fee      int                     `json:"fee"`
 	} `json:"data"`
 }
 
@@ -226,6 +245,7 @@ func (c *neteaseClient) discover(ctx context.Context) []Song {
 			DurationMs: item.Duration,
 			Format:     "mp3",
 			Source:     "netease",
+			VIP:        isVIPFee(item.Fee),
 		})
 	}
 
@@ -265,6 +285,10 @@ func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]
 		if album == "" {
 			album = s.Album.Name // 旧形态回退
 		}
+		fee := s.Fee
+		if fee == 0 {
+			fee = s.Privilege.Fee // 权限位形态回退
+		}
 		songs = append(songs, Song{
 			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, s.ID),
 			Title:      s.Name,
@@ -273,6 +297,7 @@ func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]
 			DurationMs: duration,
 			Format:     "mp3",
 			Source:     "netease",
+			VIP:        isVIPFee(fee),
 		})
 	}
 	return songs, nil

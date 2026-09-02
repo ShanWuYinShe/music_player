@@ -47,7 +47,8 @@ var supportedExt = map[string]bool{
 
 // Song 是对外暴露的曲目元数据。本地曲目 DurationMs 恒为 0(音频时长解析
 // 成本高,由客户端在 prepared 后回填);netease 源带真实时长。
-// Source 标识来源(library 省略保持兼容,netease 网络源)。
+// Source 标识来源(library 省略保持兼容,netease 网络源);VIP 标记网易
+// 付费曲目(未配置登录 cookie 时上游只给 30~60s 试听片段,客户端据此提示)。
 type Song struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`
@@ -57,6 +58,7 @@ type Song struct {
 	Format     string `json:"format"`
 	SizeBytes  int64  `json:"sizeBytes"`
 	Source     string `json:"source,omitempty"`
+	VIP        bool   `json:"vip,omitempty"`
 }
 
 // musicServer 聚合配置、限流器与带 TTL 缓存的曲库索引。
@@ -167,13 +169,16 @@ func (s *musicServer) requireRateLimit(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // handleProviders 返回可用音乐源列表:内置 library 源 + 可选 netease 网络源。
+// netease 源附带 loggedIn(是否已配置账号 cookie),客户端据此提示
+// 「未登录时 VIP 歌曲仅试听片段」。
 func (s *musicServer) handleProviders(w http.ResponseWriter, r *http.Request) {
-	providers := []map[string]string{
+	providers := []map[string]any{
 		{"id": "library", "name": "服务器曲库", "type": "library"},
 	}
 	if s.netease.enabled() {
-		providers = append(providers, map[string]string{
+		providers = append(providers, map[string]any{
 			"id": "netease", "name": "网易云(网络源)", "type": "online",
+			"loggedIn": s.netease.loggedIn(),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
@@ -222,11 +227,12 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 			matched = append(matched, online...)
 		}
 	}
-	// 空曲库开箱体验:q 为空且本地一首都没有时,回填网易「新歌速递」推荐,
-	// 让"在线"列表开箱即有歌(用户上传过音频后恢复纯曲库语义)。
-	if query == "" && len(matched) == 0 && s.netease.enabled() {
+	// 开箱体验:q 为空时在本地曲库之后追加网易「新歌速递」推荐——「在线」
+	// 列表是"在线可播的一切"而非纯服务器目录,服务器曲库只有寥寥几首时
+	// 在线页仍有内容可听(推荐结果带 VIP 标记,客户端按登录态提示试听)。
+	if query == "" && s.netease.enabled() && len(matched) < limit {
 		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
-		matched = s.netease.discover(ctx)
+		matched = append(matched, s.netease.discover(ctx)...)
 		cancel()
 	}
 	total := len(matched)
