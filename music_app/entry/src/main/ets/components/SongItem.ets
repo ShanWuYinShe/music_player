@@ -1,11 +1,12 @@
 import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
+import { EqIndicator } from './EqIndicator';
 
 const COVER_SIZE = 48;
 const CURRENT_COLOR = $r('app.color.accent');
 
 /**
- * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放高亮
+ * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放高亮（EQ 跳动指示）+ VIP 徽标
  */
 @ComponentV2
 export struct SongItem {
@@ -41,12 +42,25 @@ export struct SongItem {
 
       // 歌名 / 歌手
       Column({ space: 4 }) {
-        Text(this.song.title)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: 6 }) {
+          Text(this.song.title)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          // 网易云付费曲目徽标（未登录时为 30 秒试听，在线页横幅统一说明）
+          if (this.song.vip === true) {
+            Text('VIP')
+              .fontSize(9)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(CURRENT_COLOR)
+              .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+              .borderRadius(4)
+              .border({ width: 0.5, color: CURRENT_COLOR })
+          }
+        }
+        .alignItems(VerticalAlign.Center)
         Text(this.song.artist)
           .fontSize(13)
           .fontColor($r('app.color.ink_soft'))
@@ -56,11 +70,9 @@ export struct SongItem {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      // 当前播放标记 + 时长（图标语义与 MiniPlayerBar 一致：播放中显示暂停符）
+      // 当前播放：EQ 跳动指示（Poweramp 式，暂停时静止）
       if (this.isCurrent) {
-        SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-          .fontSize(16)
-          .fontColor([CURRENT_COLOR])
+        EqIndicator({ active: this.isPlaying, color: CURRENT_COLOR })
       }
       Text(this.song.duration > 0 ? formatTime(this.song.duration) : '--:--')
         .fontSize(12)

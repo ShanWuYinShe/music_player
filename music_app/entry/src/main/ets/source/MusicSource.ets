@@ -1,6 +1,6 @@
 import { http } from '@kit.NetworkKit';
 import { SongRecord } from '../model/Song';
-import { parseOnlineSongs, songsUrl, effectiveBaseUrl } from './OnlineApi';
+import { OnlineProviderState, parseOnlineProviders, parseOnlineSongs, providersUrl, songsUrl, effectiveBaseUrl } from './OnlineApi';
 
 /** 在线请求连接与读取超时（毫秒） */
 const REQUEST_TIMEOUT_MS = 8000;
@@ -22,7 +22,8 @@ export class OnlineSource {
 
   /**
    * 拉取在线曲目列表：query 非空走服务端搜索（本地曲库匹配 + 网络源聚合），
-   * 为空返回服务器曲库全量（limit 上限 500）。网络/HTTP 失败抛 Error 由调用方提示。
+   * 为空返回服务器曲库全量 + 网络源推荐（limit 上限 500）。网络/HTTP 失败抛
+   * Error 由调用方提示。
    */
   async fetchSongs(query: string = ''): Promise<SongRecord[]> {
     const request = http.createHttp();
@@ -38,6 +39,33 @@ export class OnlineSource {
         throw new Error(`服务端响应 ${response.responseCode}`);
       }
       return parseOnlineSongs(this.baseUrl, `${response.result}`);
+    } finally {
+      request.destroy();
+    }
+  }
+
+  /**
+   * 拉取源能力摘要（网易云源是否启用/已登录）：用于在线页「未登录仅试听」
+   * 提示。网络/HTTP 失败抛 Error，调用方静默忽略（提示非关键路径）。
+   */
+  async fetchProviders(): Promise<OnlineProviderState> {
+    const request = http.createHttp();
+    try {
+      const response = await request.request(providersUrl(this.baseUrl), {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: REQUEST_TIMEOUT_MS,
+        readTimeout: REQUEST_TIMEOUT_MS,
+        usingCache: false
+      });
+      if (response.responseCode !== 200) {
+        throw new Error(`服务端响应 ${response.responseCode}`);
+      }
+      const state = parseOnlineProviders(`${response.result}`);
+      if (state === null) {
+        throw new Error('providers 响应解析失败');
+      }
+      return state;
     } finally {
       request.destroy();
     }

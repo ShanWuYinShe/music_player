@@ -7,6 +7,8 @@ import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
 import { VisualizerView } from '../components/VisualizerView';
+import { WaveformSeekbar } from '../components/WaveformSeekbar';
+import { EqIndicator } from '../components/EqIndicator';
 import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
 /** 队列表项 */
@@ -25,8 +27,6 @@ interface QueueEntry {
 export struct PlayerPage {
   @Param @Require player: PlayerController;
   @Param navPathStack: NavPathStack = new NavPathStack();
-  /** 拖动进度条期间的本地值，避免与 timeUpdate 抖动 */
-  @Local dragValue: number = -1;
   /** 播放队列半模态开关 */
   @Local isQueueOpen: boolean = false;
   /** 当前可视化风格号（顶栏按钮与背景点击共用） */
@@ -174,9 +174,9 @@ export struct PlayerPage {
 
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
         Column() {
-          Column({ space: 6 }) {
+          Column({ space: 5 }) {
             Text(this.player.currentSong ? this.player.currentSong.title : '未在播放')
-              .fontSize(22)
+              .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
@@ -186,32 +186,29 @@ export struct PlayerPage {
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
+            // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示
+            if (this.player.currentSong !== null) {
+              Text() {
+                Span(this.songMetaText(this.player.currentSong))
+                  .fontColor($r('app.color.viz_fg_faint'))
+                if (this.songTrialHint(this.player.currentSong) !== '') {
+                  Span(` · ${this.songTrialHint(this.player.currentSong)}`)
+                    .fontColor($r('app.color.accent'))
+                }
+              }
+              .fontSize(11)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
           }
-          .alignItems(HorizontalAlign.Center)
+          .alignItems(HorizontalAlign.Start)
           .width('100%')
 
-          // 进度条
+          // 波形进度条（Poweramp 招牌）：已播 accent 着色，点击/拖动 seek
           Column({ space: 4 }) {
-            Slider({
-              value: this.sliderValue(),
-              min: 0,
-              max: Math.max(this.player.duration, 1),
-              style: SliderStyle.OutSet
-            })
-              .selectedColor($r('app.color.accent'))
-              .trackColor($r('app.color.viz_line'))
-              .blockColor($r('app.color.accent'))
-              .enabled(this.player.isPrepared)
-              .onChange((value: number, mode: SliderChangeMode) => {
-                if (mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving) {
-                  this.dragValue = value;
-                } else if (mode === SliderChangeMode.End) {
-                  this.player.seek(Math.floor(value));
-                  this.dragValue = -1;
-                }
-              })
+            WaveformSeekbar({ player: this.player })
             Row() {
-              Text(formatTime(this.sliderValue()))
+              Text(formatTime(this.player.currentTime))
                 .fontSize(12)
                 .fontColor($r('app.color.viz_fg_faint'))
               Blank()
@@ -220,10 +217,10 @@ export struct PlayerPage {
                 .fontColor($r('app.color.viz_fg_faint'))
             }
             .width('100%')
-            .padding({ left: 4, right: 4 })
+            .padding({ left: 2, right: 2 })
           }
           .width('100%')
-          .margin({ top: 24 })
+          .margin({ top: 20 })
 
           // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢
           Row({ space: 30 }) {
@@ -338,7 +335,8 @@ export struct PlayerPage {
     const insertedIds = new Set(this.player.playNextIds());
     const entries: QueueEntry[] = [];
     for (const id of insertedIds) {
-      const song = appStore.library.getSongById(id);
+      // 插播队列含在线曲目：播放队列索引优先，本地曲库兜底（旧数据）
+      const song = this.player.getSong(id) ?? appStore.library.getSongById(id);
       if (song) {
         entries.push({ song: song, inserted: true });
       }
@@ -388,11 +386,11 @@ export struct PlayerPage {
           ListItem() {
             Row({ space: 12 }) {
               if (entry.song.id === this.player.currentSongId) {
-                SymbolGlyph(this.player.isPlaying ?
-                  $r('sys.symbol.play_fill') : $r('sys.symbol.pause_fill'))
-                  .fontSize(14)
-                  .fontColor([$r('app.color.accent')])
-                  .width(22)
+                Row() {
+                  EqIndicator({ active: this.player.isPlaying, color: $r('app.color.accent') })
+                }
+                .width(22)
+                .justifyContent(FlexAlign.Center)
               } else {
                 Text(`${index + 1}`)
                   .fontSize(13)
@@ -481,8 +479,9 @@ export struct PlayerPage {
     .width(180)
     .padding(6)
     .borderRadius(16)
-    .backgroundColor($r('app.color.surface'))
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.15)' })
+    .backgroundColor($r('app.color.menu_glass'))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
@@ -503,8 +502,9 @@ export struct PlayerPage {
     .width(220)
     .padding(6)
     .borderRadius(16)
-    .backgroundColor($r('app.color.surface'))
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.15)' })
+    .backgroundColor($r('app.color.menu_glass'))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   private applySleepTimer(minutes: number): void {
@@ -545,10 +545,24 @@ export struct PlayerPage {
     }
   }
 
-  private sliderValue(): number {
-    if (this.dragValue >= 0) {
-      return this.dragValue;
+  /** 元数据行文案：格式 · 来源（在线/本地）；本地按文件扩展名推断 */
+  private songMetaText(song: SongRecord): string {
+    let format = song.format ?? '';
+    if (format === '' && !song.fileName.startsWith('http')) {
+      const dot = song.fileName.lastIndexOf('.');
+      if (dot >= 0 && dot < song.fileName.length - 1) {
+        format = song.fileName.substring(dot + 1).toUpperCase();
+      }
     }
-    return this.player.currentTime;
+    const origin = song.fileName.startsWith('http') ? '在线' : '本地';
+    return format !== '' ? `${format} · ${origin}` : origin;
+  }
+
+  /** 付费试听提示：VIP 曲目且服务端未登录时展示（登录后自动消失） */
+  private songTrialHint(song: SongRecord): string {
+    if (song.vip === true && !appStore.neteaseLoggedIn) {
+      return 'VIP 试听 30 秒';
+    }
+    return '';
   }
 }

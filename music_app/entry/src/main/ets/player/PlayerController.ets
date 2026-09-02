@@ -16,6 +16,9 @@ const KEY_LAST_SONG = 'last_song_id';
 const KEY_LAST_POS = 'last_position_ms';
 const KEY_PLAY_MODE = 'play_mode';
 
+/** 连续播放失败熔断阈值：达到后停止自动跳过（防全队列不可播时死循环） */
+const ERROR_STREAK_LIMIT = 3;
+
 /** 判定 fileName 是否为网络流地址（http/https，在线曲目由 OnlineSource 生成） */
 function isNetworkUrl(fileName: string): boolean {
   return fileName.startsWith('http://') || fileName.startsWith('https://');
@@ -64,6 +67,12 @@ export class PlayerController {
   private sleepTimerId: number = -1;
   /** 当前队列 id → SongRecord 索引（本地曲库或在线列表），playSong/currentSong 查找用 */
   private songIndex: Map<string, SongRecord> = new Map();
+  /** 播放失败提示回调（页面注入 promptAction），null 时静默 */
+  onPlaybackError: ((message: string) => void) | null = null;
+  /** 连续播放失败计数：任一曲 prepared 成功即清零 */
+  private errorStreak: number = 0;
+  /** 已处理播放失败的代际号：error 事件与 stateChange(error) 双入口去重 */
+  private failureGen: number = -1;
 
   constructor(library: MusicLibrary, userData: UserData) {
     this.library = library;
@@ -103,6 +112,11 @@ export class PlayerController {
 
   get currentSong(): SongRecord | null {
     return this.findSong(this.currentSongId);
+  }
+
+  /** 队列查找（含当前播放但不在列表的条目），找不到返回 null；UI 队列展示用 */
+  getSong(id: string): SongRecord | null {
+    return this.findSong(id);
   }
 
   /** 插播队列长度（UI 展示用） */
@@ -432,7 +446,30 @@ export class PlayerController {
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load song failed: %{public}s', JSON.stringify(err));
       this.isPlaying = false;
+      this.handlePlaybackFailure(gen, song, '加载失败');
     }
+  }
+
+  /**
+   * 播放失败统一处理：提示 + 自动跳下一首（在线曲目 404 无版权/网络中断/
+   * 本地文件损坏等场景此前完全无反馈）。同一代际只处理一次（error 事件与
+   * stateChange(error) 双入口）；连续失败达到熔断阈值后停止，防止全队列
+   * 不可播时无限循环切歌。
+   */
+  private handlePlaybackFailure(gen: number, song: SongRecord, reason: string): void {
+    if (gen !== this.generation || gen === this.failureGen) {
+      return;
+    }
+    this.failureGen = gen;
+    this.errorStreak += 1;
+    this.isPlaying = false;
+    if (this.errorStreak >= ERROR_STREAK_LIMIT) {
+      this.onPlaybackError?.(`「${song.title}」${reason}，已连续 ${this.errorStreak} 首无法播放，停止尝试`);
+      hilog.warn(DOMAIN, TAG, 'error streak limit reached, stop auto-skip');
+      return; // 保留现场：用户可手动重试或切歌
+    }
+    this.onPlaybackError?.(`「${song.title}」${reason}，已跳过`);
+    this.next();
   }
 
   private registerPlayerEvents(player: media.AVPlayer, gen: number, song: SongRecord): void {
@@ -440,7 +477,7 @@ export class PlayerController {
       if (gen !== this.generation) {
         return;
       }
-      this.onPlayerState(state, player, song);
+      this.onPlayerState(state, player, song, gen);
     });
     player.on('timeUpdate', (time: number) => {
       if (gen !== this.generation) {
@@ -450,11 +487,14 @@ export class PlayerController {
     });
     player.on('error', (err) => {
       hilog.error(DOMAIN, TAG, 'AVPlayer error: %{public}s', JSON.stringify(err));
+      // 具体跳过/熔断逻辑统一走 stateChange(error)；此处仅兜底（个别错误
+      // 只回调 error 不迁移状态时也能反馈），代际去重防双触发。
+      this.handlePlaybackFailure(gen, song, '播放失败');
     });
   }
 
   /** AVPlayer 状态机推进（异步事件驱动） */
-  private onPlayerState(state: string, player: media.AVPlayer, song: SongRecord): void {
+  private onPlayerState(state: string, player: media.AVPlayer, song: SongRecord, gen: number): void {
     hilog.info(DOMAIN, TAG, 'state -> %{public}s', state);
     if (state === 'initialized') {
       player.prepare().catch((err: Object) => {
@@ -462,6 +502,7 @@ export class PlayerController {
       });
     } else if (state === 'prepared') {
       this.isPrepared = true;
+      this.errorStreak = 0; // 任一曲加载成功即解除熔断计数
       if (player.duration > 0) {
         this.duration = player.duration;
         if (isNetworkUrl(song.fileName)) {
@@ -501,7 +542,8 @@ export class PlayerController {
     } else if (state === 'completed') {
       this.onCompleted();
     } else if (state === 'error') {
-      this.isPlaying = false;
+      // 在线无版权/网络中断/本地文件损坏：统一走提示+跳过（代际去重）
+      this.handlePlaybackFailure(gen, song, '无法播放');
     }
   }
 

@@ -12,10 +12,14 @@ export interface SongRecord {
   album: string;
   /** 总时长（毫秒），未播放过时为 0，首次 prepared 后回填 */
   duration: number;
-  /** 沙盒 music 目录内的文件名 */
+  /** 沙盒 music 目录内的文件名；在线曲目存流媒体绝对地址 */
   fileName: string;
   /** 封面缓存文件绝对路径，无封面为空字符串 */
   coverPath: string;
+  /** 音频格式（大写短名，如 MP3/FLAC）；本地曲库省略（按文件名推断） */
+  format?: string;
+  /** 网易云付费曲目（服务端未配置登录 cookie 时仅 30~60 秒试听） */
+  vip?: boolean;
 }
 
 /**

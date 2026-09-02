@@ -3,7 +3,11 @@ import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMod
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
 import { LibraryTab, SortMode, filterAndSort } from '../main/ets/common/LibraryFilter';
-import { ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL, songsUrl, parseOnlineSongs, OnlineSongItem, OnlineSongsResponse } from '../main/ets/source/OnlineApi';
+import {
+  ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL,
+  songsUrl, providersUrl, parseOnlineSongs, parseOnlineProviders,
+  OnlineSongItem, OnlineSongsResponse
+} from '../main/ets/source/OnlineApi';
 import {
   PRESET_COUNT, PRESET_SPAN_MS, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
   beatEnvelope, bpmFromSeed, presetAt, hslToRgb
@@ -224,6 +228,54 @@ export default function LocalUnitSuite() {
       expect(parseOnlineSongs('http://h/api', '{"total":0}').length).assertEqual(0);
       // 未配置 Base URL 直接返回空
       expect(parseOnlineSongs('', BODY).length).assertEqual(0);
+    });
+
+    it('parseMapsFormatAndVip', 0, () => {
+      const vipItem1: OnlineSongItem = { id: 'ne_111', title: 'VIP歌', format: 'mp3', vip: true };
+      const vipItem2: OnlineSongItem = { id: 'ne_222', title: '免费歌', format: 'flac', vip: false };
+      const vipItem3: OnlineSongItem = { id: 'ne_333', title: '省略字段' };
+      const vipBody = JSON.stringify({ songs: [vipItem1, vipItem2, vipItem3], total: 3 });
+      const list = parseOnlineSongs('http://h/api/music', vipBody);
+      expect(list[0].format).assertEqual('MP3');
+      expect(list[0].vip).assertTrue();
+      expect(list[1].format).assertEqual('FLAC');
+      expect(list[1].vip).assertUndefined();
+      expect(list[2].format).assertUndefined();
+      expect(list[2].vip).assertUndefined();
+    });
+
+    it('providersUrlJoinsPath', 0, () => {
+      expect(providersUrl('http://host/api/music/')).assertEqual('http://host/api/music/providers');
+    });
+
+    it('parseOnlineProvidersStates', 0, () => {
+      // netease 存在且已登录
+      const loggedIn = parseOnlineProviders('{"providers":[{"id":"library"},{"id":"netease","loggedIn":true}]}');
+      if (loggedIn === null) {
+        expect(false).assertTrue();
+      } else {
+        expect(loggedIn.neteaseEnabled).assertTrue();
+        expect(loggedIn.neteaseLoggedIn).assertTrue();
+      }
+      // netease 存在但未登录（loggedIn 缺省视为 false）
+      const anon = parseOnlineProviders('{"providers":[{"id":"library"},{"id":"netease"}]}');
+      if (anon === null) {
+        expect(false).assertTrue();
+      } else {
+        expect(anon.neteaseEnabled).assertTrue();
+        expect(anon.neteaseLoggedIn).assertFalse();
+      }
+      // 无 netease 源
+      const localOnly = parseOnlineProviders('{"providers":[{"id":"library"}]}');
+      if (localOnly === null) {
+        expect(false).assertTrue();
+      } else {
+        expect(localOnly.neteaseEnabled).assertFalse();
+      }
+      // 非法响应返回 null
+      expect(parseOnlineProviders('')).assertNull();
+      expect(parseOnlineProviders('not json')).assertNull();
+      expect(parseOnlineProviders('{}')).assertNull();
     });
   });
 

@@ -63,6 +63,10 @@
     {
       "name": "viz_line",
       "value": "#38342B"
+    },
+    {
+      "name": "menu_glass",
+      "value": "#F2211E18"
     }
   ]
 }

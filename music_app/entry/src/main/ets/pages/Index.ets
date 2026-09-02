@@ -82,6 +82,10 @@ struct Index {
 
   aboutToAppear(): void {
     this.songSource.reload(this.filteredSongs);
+    // 播放失败（在线无版权/网络中断等）统一 toast 反馈，由 PlayerController 回调
+    appStore.player.onPlaybackError = (message: string): void => {
+      promptAction.showToast({ message: message, duration: 2500 });
+    };
   }
 
   /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
@@ -183,6 +187,26 @@ struct Index {
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
+
+        // 网易云未登录提示：VIP 歌曲仅试听片段（登录后自动消失）
+        if (this.sourceTab === SourceTab.ONLINE && appStore.neteaseEnabled && !appStore.neteaseLoggedIn) {
+          Row({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
+              .fontSize(14)
+              .fontColor([$r('app.color.accent')])
+            Text('网易云未登录：VIP 歌曲仅 30 秒试听，在服务器管理面板「音乐曲库」扫码登录可解锁')
+              .fontSize(11)
+              .fontColor($r('app.color.ink_soft'))
+              .layoutWeight(1)
+              .maxLines(2)
+          }
+          .alignItems(VerticalAlign.Top)
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(12)
+          .backgroundColor($r('app.color.surface'))
+          .margin({ top: 4 })
+        }
 
         // 搜索 + 排序（在线列表为服务端顺序，隐藏排序入口）
         Row({ space: 10 }) {
@@ -504,8 +528,9 @@ struct Index {
     .width(196)
     .padding(6)
     .borderRadius(16)
-    .backgroundColor($r('app.color.surface'))
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.15)' })
+    .backgroundColor($r('app.color.menu_glass'))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 排序菜单 */
@@ -544,8 +569,9 @@ struct Index {
     .width(160)
     .padding(6)
     .borderRadius(16)
-    .backgroundColor($r('app.color.surface'))
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.15)' })
+    .backgroundColor($r('app.color.menu_glass'))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 左滑操作：下一首播放 + 删除 */
@@ -735,6 +761,8 @@ struct Index {
     const reqId = ++this.onlineRequestId;
     this.onlineLoading = true;
     this.onlineError = '';
+    appStore.refreshOnlineProviders().catch(() => {
+    });
     try {
       const list = await appStore.onlineSource.fetchSongs(query);
       if (reqId !== this.onlineRequestId) {
