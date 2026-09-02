@@ -27,7 +27,9 @@ go run -C music_server . -library-review
   music_app rawfile 的 `demoXX_歌手 - 歌名.wav` 命名习惯兼容)
 - 无「 - 」分隔时整体作为标题,歌手为空
 - 一级子目录名作为专辑名
-- 本地曲目时长不解析(durationMs 恒 0),由客户端 prepared 后回填;
+- 本地曲库时长由 duration.go 解析容器元数据(mp3 Xing/CBR、flac STREAMINFO、
+  m4a mvhd、wav fmt+data、ogg/opus 尾页 granulepos),扫描时一次解析进索引;
+  解析失败返回 0 由客户端 prepared 后回填;
   netease 源带真实时长
 
 ## 曲目来源与 id 空间

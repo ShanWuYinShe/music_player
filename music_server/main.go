@@ -371,12 +371,13 @@ func scanLibrary(dir string) ([]Song, map[string]songFile, error) {
 		}
 		entry := songFile{
 			Song: Song{
-				ID:        id,
-				Title:     title,
-				Artist:    artist,
-				Album:     album,
-				Format:    strings.TrimPrefix(ext, "."),
-				SizeBytes: info.Size(),
+				ID:         id,
+				Title:      title,
+				Artist:     artist,
+				Album:      album,
+				Format:     strings.TrimPrefix(ext, "."),
+				SizeBytes:  info.Size(),
+				DurationMs: probeDurationSafe(path, ext, info.Size()),
 			},
 			relPath: relSlash,
 			modTime: info.ModTime(),
@@ -395,6 +396,17 @@ func scanLibrary(dir string) ([]Song, map[string]songFile, error) {
 		return library[i].ID < library[j].ID
 	})
 	return library, byID, nil
+}
+
+// probeDurationSafe 打开文件解析时长,任何失败静默返回 0(客户端 prepared
+// 后仍会回填),不让单文件元数据问题阻塞曲库扫描。
+func probeDurationSafe(path, ext string, size int64) int64 {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	return probeAudioDuration(f, ext, size)
 }
 
 // parseSongName 从去扩展名的文件名解析歌手与标题:
