@@ -95,7 +95,8 @@ export struct MiniPlayerBar {
       .clip(true)
       .borderRadius(16)
       .backgroundColor($r('app.color.surface'))
-      .shadow({ radius: 16, color: 'rgba(0,0,0,0.08)', offsetY: 2 })
+      .border({ width: 0.5, color: $r('app.color.line') })
+      .shadow({ radius: 16, color: 'rgba(0,0,0,0.30)', offsetY: 2 })
     }
   }
 }

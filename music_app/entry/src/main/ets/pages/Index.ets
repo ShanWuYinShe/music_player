@@ -205,6 +205,7 @@ struct Index {
           .padding({ left: 12, right: 12, top: 8, bottom: 8 })
           .borderRadius(12)
           .backgroundColor($r('app.color.surface'))
+          .border({ width: 0.5, color: $r('app.color.line') })
           .margin({ top: 4 })
         }
 

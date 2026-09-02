@@ -1,4 +1,4 @@
-import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import display from '@ohos.display';
@@ -47,15 +47,14 @@ export default class EntryAbility extends UIAbility {
   private setupImmersiveWindow(windowStage: window.WindowStage): void {
     try {
       const win = windowStage.getMainWindowSync();
-      const dark = appStore.abilityContext !== null &&
-        appStore.abilityContext.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+      // app 恒定 Poweramp 深色主题，窗口兜底色与系统栏字色不随系统深浅切换
       win.setWindowLayoutFullScreen(true);
-      win.setWindowBackgroundColor(dark ? '#16140F' : '#F6F3EC');
+      win.setWindowBackgroundColor('#121212');
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         navigationBarColor: '#00000000',
-        statusBarContentColor: dark ? '#F3EFE4' : '#26221B',
-        navigationBarContentColor: dark ? '#F3EFE4' : '#26221B'
+        statusBarContentColor: '#F2EFE9',
+        navigationBarContentColor: '#F2EFE9'
       });
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setup immersive window failed: %{public}s', JSON.stringify(err));

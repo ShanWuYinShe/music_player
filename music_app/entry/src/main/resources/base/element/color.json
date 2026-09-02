@@ -2,51 +2,55 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#F6F3EC"
+      "value": "#121212"
     },
     {
       "name": "page_bg",
-      "value": "#F6F3EC"
+      "value": "#121212"
     },
     {
       "name": "surface",
-      "value": "#FEFDFB"
+      "value": "#1D1C1A"
     },
     {
       "name": "surface_alt",
-      "value": "#ECE8DC"
+      "value": "#282623"
     },
     {
       "name": "ink",
-      "value": "#26221B"
+      "value": "#F2EFE9"
     },
     {
       "name": "ink_soft",
-      "value": "#6D6759"
+      "value": "#A8A29A"
     },
     {
       "name": "ink_faint",
-      "value": "#A29B8A"
+      "value": "#6E6960"
     },
     {
       "name": "paper",
-      "value": "#FBFAF5"
+      "value": "#17150F"
     },
     {
       "name": "accent",
-      "value": "#A5691E"
+      "value": "#DBA84E"
     },
     {
       "name": "on_accent",
-      "value": "#FBF6EC"
+      "value": "#201807"
     },
     {
       "name": "danger",
-      "value": "#BC4A2F"
+      "value": "#E08260"
     },
     {
       "name": "line",
-      "value": "#E7E2D4"
+      "value": "#2E2B26"
+    },
+    {
+      "name": "menu_glass",
+      "value": "#E61D1C1A"
     },
     {
       "name": "viz_fg",
@@ -63,10 +67,6 @@
     {
       "name": "viz_line",
       "value": "#464135"
-    },
-    {
-      "name": "menu_glass",
-      "value": "#F2FEFDFB"
     }
   ]
 }

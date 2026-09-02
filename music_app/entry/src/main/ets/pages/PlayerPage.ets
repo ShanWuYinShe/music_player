@@ -1,5 +1,4 @@
 import { promptAction, window } from '@kit.ArkUI';
-import { ConfigurationConstant } from '@kit.AbilityKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -56,9 +55,9 @@ export struct PlayerPage {
       return;
     }
     window.getLastWindow(ctx).then((win) => {
-      const dark = ctx.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
-      const fg = enter || dark ? '#F3EFE4' : '#26221B';
-      const bg = enter ? '#0C0A09' : (dark ? '#16140F' : '#F6F3EC');
+      // app 恒定深色主题:字色恒浅,底色沉浸时透明、离开时回落页面深色
+      const fg = '#F2EFE9';
+      const bg = enter ? '#0C0A09' : '#121212';
       win.setWindowBackgroundColor(bg);
       win.setWindowSystemBarProperties({
         statusBarColor: enter ? '#00000000' : bg,
