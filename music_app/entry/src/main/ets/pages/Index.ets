@@ -94,6 +94,22 @@ struct Index {
     appStore.player.onPlaybackError = (message: string): void => {
       promptAction.showToast({ message: message, duration: 2500 });
     };
+    // 播放状态镜像：切歌/启停时刷新 mini bar 并重建列表当前行。
+    // 上轮提交此处接线丢失（文本替换静默失败），导致 mini bar 永不出现——已回踩
+    this.stateListener = (): void => {
+      const song = appStore.player.currentSong;
+      this.mini = song === null ? null : {
+        title: song.title,
+        artist: song.artist,
+        coverPath: song.coverPath,
+        isPlaying: appStore.player.isPlaying
+      };
+      // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动
+      this.songSource.reload(this.filteredSongs);
+    };
+    appStore.player.addStateListener(this.stateListener);
+    // 冷启动恢复的播放态发生在本组件挂载前(init 早于 aboutToAppear)，补一次同步
+    this.stateListener();
   }
 
   /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
