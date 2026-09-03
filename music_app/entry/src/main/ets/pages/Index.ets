@@ -67,9 +67,11 @@ struct Index {
   @Local scanning: boolean = false;
   @Local sourceTab: SourceTab = SourceTab.LOCAL;
   @Local onlineLoading: boolean = false;
-  /** 在线拉取失败提示（有旧缓存时仍展示缓存列表） */
+  /** 在线拉取失败提示（有旧列表时仍展示旧列表） */
   @Local onlineError: string = '';
-  /** 最近一次成功拉取的在线列表（切回在线 tab 时的兜底缓存） */
+  /** 在线列表唯一展示数据源：最近一次成功拉取的结果。播放队列
+   * (player.songs) 在拉取返回前仍是本地曲库，展示层直读会让在线 tab
+   * 在加载期间闪现本地曲目（逻辑错误）；拉取失败时保留旧值兜底 */
   @Local onlineSongs: SongRecord[] = [];
   /** 在线搜索防抖定时器 id（-1 无待触发任务） */
   private searchTimerId: number = -1;
@@ -113,12 +115,13 @@ struct Index {
   }
 
   /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
-   * 在线模式列表即最近一次服务端返回（q 已在服务端匹配并聚合网络源），
-   * 不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉。 */
+   * 在线模式展示 onlineSongs（最近一次成功结果，q 已在服务端匹配并聚合
+   * 网络源），不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉，
+   * 也不直读 player.songs——它是播放队列，加载期间还是本地曲库。 */
   @Computed
   get filteredSongs(): SongRecord[] {
     if (this.sourceTab === SourceTab.ONLINE) {
-      return appStore.player.songs;
+      return this.onlineSongs;
     }
     const opts: FilterOptions = {
       query: this.searchText,
@@ -178,7 +181,7 @@ struct Index {
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.ink'))
             Text(this.sourceTab === SourceTab.ONLINE
-              ? (appStore.player.songs.length > 0 ? `在线 · ${appStore.player.songs.length} 首歌曲` : '在线音乐')
+              ? (this.onlineSongs.length > 0 ? `在线 · ${this.onlineSongs.length} 首歌曲` : '在线音乐')
               : (appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐'))
               .fontSize(13)
               .fontColor($r('app.color.ink_soft'))
@@ -372,26 +375,12 @@ struct Index {
     .navDestination(this.pageMap)
   }
 
-  /** 歌曲列表：加载中在顶部显示轻量状态行（已有列表时的加载/搜索反馈） */
+  /** 歌曲列表。加载反馈不插顶部状态行：无旧列表时列表区域由
+   * OnlineStatusView 居中呈现加载态，有旧列表时保留展示（搜索框内
+   * 小 loading 与下拉刷新指示反馈进行中），避免列表内容跳动 */
   @Builder
   SongList() {
     List({ space: 2 }) {
-      if (this.onlineLoading) {
-        ListItem() {
-          Row({ space: 8 }) {
-            LoadingProgress()
-              .width(16)
-              .height(16)
-              .color($r('app.color.ink_faint'))
-            Text(this.searchText.trim() !== '' ? `正在搜索"${this.searchText.trim()}"…` : '正在更新在线曲库…')
-              .fontSize(13)
-              .fontColor($r('app.color.ink_soft'))
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-          .padding({ top: 10, bottom: 10 })
-        }
-      }
       LazyForEach(this.songSource, (song: SongRecord) => {
         ListItem() {
           SongItem({
@@ -455,7 +444,8 @@ struct Index {
     .onClick(() => this.switchSource(tab))
   }
 
-  /** 在线列表状态视图：加载中 / 未配置 / 拉取失败 / 服务器空库 / 搜索无结果 */
+  /** 在线列表状态视图（列表区域整体呈现，非顶部插行）：加载中 /
+   * 拉取失败 / 服务器空库 / 搜索无结果 */
   @Builder
   OnlineStatusView() {
     if (this.onlineLoading) {
@@ -464,14 +454,14 @@ struct Index {
           .width(38)
           .height(38)
           .color($r('app.color.ink_faint'))
-        Text('正在拉取在线曲库…')
+        Text(this.searchText.trim() !== '' ? `正在搜索 "${this.searchText.trim()}"…` : '正在拉取在线曲库…')
           .fontSize(14)
           .fontColor($r('app.color.ink_soft'))
       }
       .width('100%')
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
-    } else if (this.onlineError !== '' && appStore.player.songs.length === 0) {
+    } else if (this.onlineError !== '' && this.onlineSongs.length === 0) {
       Column({ space: 14 }) {
         SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
           .fontSize(40)
@@ -781,7 +771,8 @@ struct Index {
     }
   }
 
-  /** 进入在线源：按关键词拉取曲目（空=曲库全量）并替换播放队列；失败时回退旧缓存并提示。
+  /** 进入在线源：按关键词拉取曲目（空=曲库全量），成功后更新展示列表
+   * (onlineSongs) 并替换播放队列；失败时保留旧列表并提示。
    * latest-wins：在途请求期间的新查询立即发出，旧响应按代际号作废丢弃 */
   private async enterOnline(query: string): Promise<void> {
     const reqId = ++this.onlineRequestId;

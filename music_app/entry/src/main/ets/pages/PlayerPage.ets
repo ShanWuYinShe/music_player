@@ -147,7 +147,9 @@ export struct PlayerPage {
       }
 
       Column() {
-        // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）
+        // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）。
+        // 可视化风格菜单只在可视化舞台出现——封面模式与可视化互斥，此时
+        // 切风格无作用，展示属多余入口
         Row() {
           SymbolGlyph($r('sys.symbol.chevron_left'))
             .fontSize(24)
@@ -162,11 +164,13 @@ export struct PlayerPage {
             .onClick(() => {
               this.coverMode = !this.coverMode;
             })
-          SymbolGlyph($r('sys.symbol.wand_and_stars'))
-            .fontSize(22)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(12)
-            .bindMenu(this.VizMenu())
+          if (!this.coverMode) {
+            SymbolGlyph($r('sys.symbol.wand_and_stars'))
+              .fontSize(22)
+              .fontColor([$r('app.color.viz_fg')])
+              .padding(12)
+              .bindMenu(this.VizMenu())
+          }
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])

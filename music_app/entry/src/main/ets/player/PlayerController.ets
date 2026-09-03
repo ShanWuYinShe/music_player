@@ -537,6 +537,10 @@ export class PlayerController {
           this.songs = this.library.getAllSongs().slice();
         }
         this.rebuildIndex(this.songs);
+        // 时长属 SongRecord 普通字段，列表 '--:--' → 时长的刷新须广播：
+        // 在线列表展示已与队列解耦（Index.onlineSongs 直持对象引用），
+        // 数组替换不再触发其重算，靠订阅方 reload 兜底
+        this.notifyState();
         // 时长回填后再刷新一次媒体中心元数据（锁屏进度更准确）
         this.session.updateMetadata(song);
       }
