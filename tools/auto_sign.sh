@@ -115,7 +115,8 @@ fi
 
 # ---------- 4. （install 模式）校验当前设备已绑定 ----------
 if [[ "$DO_INSTALL" -eq 1 ]]; then
-  TARGETS="$("$HDC" list targets 2>/dev/null | grep -E '^[0-9]' || true)"
+  # 序列号可含字母开头（如 MJE0224A…），仅排除空输出与 [Empty] 占位
+  TARGETS="$("$HDC" list targets 2>/dev/null | grep -E '^[0-9A-Za-z]' || true)"
   if [[ -z "$TARGETS" ]]; then
     die "没有已连接的设备/模拟器，请先启动（Emulator -start <name>）"
   fi
