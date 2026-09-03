@@ -168,3 +168,58 @@ describe('pan v15 真 3D 锅几何（回归保护）', () => {
 		expect(pan).not.toMatch(/src\s*=\s*clamp\(\s*p\.y/);
 	});
 });
+
+describe('pan v17 状态预通道与掩模跳过（回归保护）', () => {
+	// v17 性能重构的三个核心结构（详见 pan.frag 头注释）：
+	//   1. 水珠状态是每帧常量 → dropState() 单一实现，主循环 texelFetch
+	//      取状态（uStateMode 三态：1=写出 / 2=fetch / 0=编译期回退）；
+	//   2. 锅外像素按掩模跳过重活；
+	//   3. bg() 同参重复调用去重（v12 注释声称合并、实际没做的历史遗留）。
+	const pan = readShader('pan.frag');
+
+	test('状态计算单一实现：dropState 存在且主循环走 fetchDrop（可回退）', () => {
+		expect(pan).toMatch(/PanDrop\s+dropState\s*\(/);
+		expect(pan).toMatch(/PanDrop\s+fetchDrop\s*\(/);
+		expect(pan).toMatch(/texelFetch\s*\(\s*uState/);
+		expect(pan).toMatch(/#ifdef\s+PAN_NO_STATE_TEX/);
+		// 写出分支：uStateMode=1 时按 20×4 槽位写 vec4
+		expect(pan).toMatch(/uStateMode\s*>\s*0\.5\s*&&\s*uStateMode\s*<\s*1\.5/);
+	});
+
+	test('锅外像素跳过：掩模先于重活计算', () => {
+		// panMask/wallMask/outerMask 必须在 field()/bg() 之前算出并分支
+		expect(pan).toMatch(/max\(panMask,\s*wallMask\)\s*>\s*0\.004/);
+		const maskPos = pan.search(/float wallMask = /);
+		const fieldPos = pan.search(/F = field\(pw/);
+		expect(maskPos).toBeGreaterThan(0);
+		expect(fieldPos).toBeGreaterThan(maskPos);
+	});
+
+	test('bg() 每像素只算一次（v16 重复调用已去重）', () => {
+		const bgCalls = pan.match(/=\s*bg\(/g) ?? [];
+		expect(bgCalls).toHaveLength(1);
+		// 折射底色复用 panBase；剥掉注释后不应再有死变量 ruv
+		expect(pan).toContain('vec3 panBase = bg(Ph2, Nh2, ts);');
+		const panBody = pan.replace(/^\s*\/\/.*$/gm, '');
+		expect(panBody).not.toMatch(/\bruv\b/);
+	});
+});
+
+describe('aurora v15 倒影单帘（回归保护）', () => {
+	const aurora = readShader('aurora.frag');
+
+	test('水面倒影只算最近主帘，不再整场重算', () => {
+		// v11 注释设计"倒影只算主帘"，v15 对齐：直接调 curtain(fi=CURTAIN_N-1,
+		// depth=1.0)，而不是完整 auroraEmission（两帘翻倍）
+		expect(aurora).toMatch(/curtain\(mqr,\s*mazx,\s*float\(CURTAIN_N - 1\)/);
+		expect(aurora).not.toMatch(/auroraEmission\(mqr/);
+	});
+
+	test('结构性噪声保持完整 fbm（只有软特征降阶到 fbm3）', () => {
+		// presence/射线（sA/sB）这类结构纹理必须还是 vn；绸带蜿蜒/银河/
+		// 山脊/水岸/蒸汽等软特征用 fbm3。防止后续把结构层也降阶。
+		const auroraBody = aurora.replace(/^\s*\/\/.*$/gm, '');
+		expect(auroraBody).not.toMatch(/float\s+fold\s*=\s*fbm\(/);
+		expect(auroraBody).toMatch(/float\s+fold\s*=\s*fbm3\(/);
+	});
+});

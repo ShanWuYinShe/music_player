@@ -3,10 +3,14 @@
  *
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
  * full：XComponent(SURFACE)+GLES3 shader 管线，打包无限分形、热锅水珠、
- *   全屏极光、霓虹频谱四个场景；运算量只与像素数相关，半分辨率（1/2）
- *   渲染后线性上屏，反馈纹理仅供需要拖尾的场景采样。
+ *   全屏极光、霓虹频谱四个场景；运算量只与像素数相关，内部按场景比例
+ *   降采样（fractal/spectrum 1/2，pan 0.45、aurora 0.40——后两者逐像素
+ *   成本高且形态柔软，更低比例上屏放大视觉近无损；pan 另有状态预通道，
+ *   见 cpp/shaders/pan.frag）渲染后线性上屏，反馈纹理仅供拖尾场景采样。
  * mini：全宽金色频谱柱，垫于迷你条卡片底层（2D Canvas 双离屏 ping-pong）。
  * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛即停。
+ * active=false（播放页封面模式）停帧不渲染——封面与可视化互斥，避免
+ * 全速渲染被遮挡的画面。
  */
 
 import displaySync from '@ohos.graphics.displaySync';
@@ -45,6 +49,9 @@ export struct VisualizerView {
   @Param variant: string = 'full';
   /** 当前风格号（父页面持有，切换按钮与背景点击共用同一数据源） */
   @Param presetIndex: number = 0;
+  /** 舞台是否激活：false 时停帧不渲染（播放页封面模式——封面与可视化互斥，
+   * 不再全速渲染被遮挡的画面）；XComponent/Canvas 保持挂载，恢复即续播 */
+  @Param active: boolean = true;
   /** 风格过渡进度 0→1（切换后 1.5s 内新场景渐入，旧画面靠反馈余晖消散） */
   private presetTrans: number = 1;
   /** 请求切换风格（背景点击触发；父页面更新 presetIndex 后经 @Param 回流） */
@@ -102,8 +109,18 @@ export struct VisualizerView {
     this.syncState();
   }
 
+  /** 舞台激活态变化：失活立即停帧（GPU 归零），激活时按播放态恢复 */
+  @Monitor('active')
+  onActiveChange(): void {
+    this.syncState();
+  }
+
   private syncState(): void {
     if (this.disposed) {
+      return;
+    }
+    if (!this.active) {
+      this.stopLoop();
       return;
     }
     const id = this.player.currentSongId;

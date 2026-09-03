@@ -2,6 +2,10 @@
  * WebGL2 渲染管线：与手机端 cpp/visualizer.cpp 一致的
  * 全屏三角形 + 反馈 FBO ping-pong + 内部降采样 + blit 上屏。
  * 差异仅在 GLSL ES 1.00 → 3.00 的补丁（见 glslPatch.ts）。
+ * pan 状态预通道同样对齐端侧：每帧先以 20×4 小视口（uStateMode=1）把
+ * 每滴水珠状态写进 RGBA16F 纹理，主 pass（uStateMode=2）texelFetch 取用；
+ * WebGL 上下文缺 EXT_color_buffer_float 时，按端侧同一手法在 #version 行
+ * 后插 #define PAN_NO_STATE_TEX 1 编译逐像素回退变体。
  */
 import { type Diagnostic, ShaderError, toDiagnostic } from './errors';
 import {
@@ -22,7 +26,7 @@ export interface RenderParams {
 	bass: number;
 	treble: number;
 	transition: number;
-	/** 内部分辨率比例（对应手机端 kRenderScale） */
+	/** 内部分辨率比例（对应手机端 kPresetScale） */
 	renderScale: number;
 }
 
@@ -35,6 +39,21 @@ interface SceneUniforms {
 	treble: WebGLUniformLocation | null;
 	transition: WebGLUniformLocation | null;
 	prev: WebGLUniformLocation | null;
+	/** pan 专用：uStateMode / uState（其他场景无此 uniform，恒 null） */
+	stateMode: WebGLUniformLocation | null;
+	state: WebGLUniformLocation | null;
+}
+
+/** pan 状态纹理尺寸：宽 = DROPLET_COUNT(20)、高 = PAN_STATE_ROWS(4)，
+ * 与 pan.frag、visualizer.cpp 的常量一一对应（改那边必须同步这里） */
+const PAN_STATE_W = 20;
+const PAN_STATE_H = 4;
+
+/** 端侧 WithPanStateDisabled 的同构实现：#version 必须保持首行 */
+function withPanStateDisabled(patchedSrc: string): string {
+	const nl = patchedSrc.indexOf('\n');
+	if (nl < 0) return patchedSrc;
+	return `${patchedSrc.slice(0, nl + 1)}#define PAN_NO_STATE_TEX 1\n${patchedSrc.slice(nl + 1)}`;
 }
 
 /** 编译器报错行号 → 源文件行号（可能落在公共库 common.glsl 里） */
@@ -96,6 +115,8 @@ function getSceneLocs(gl: WebGL2RenderingContext, p: WebGLProgram): SceneUniform
 		treble: gl.getUniformLocation(p, 'uTreble'),
 		transition: gl.getUniformLocation(p, 'uTransition'),
 		prev: gl.getUniformLocation(p, 'uPrev'),
+		stateMode: gl.getUniformLocation(p, 'uStateMode'),
+		state: gl.getUniformLocation(p, 'uState'),
 	};
 }
 
@@ -112,6 +133,9 @@ export class VizRenderer {
 	private fboW = 0;
 	private fboH = 0;
 	private flip = 0;
+	/** pan 状态预通道资源；stateTex 为 null 表示回退逐像素路径（无浮点 FBO） */
+	private stateTex: WebGLTexture | null = null;
+	private stateFbo: WebGLFramebuffer | null = null;
 
 	constructor(canvas: HTMLCanvasElement) {
 		this.canvas = canvas;
@@ -136,6 +160,40 @@ export class VizRenderer {
 		gl.enableVertexAttribArray(0);
 		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 		gl.bindVertexArray(null);
+
+		// pan 状态预通道：RGBA16F 颜色缓冲需要 EXT_color_buffer_float（WebGL2
+		// 核心不含）。不可用时 stateTex 保持 null，compileAll 会按编译期开关
+		// 给 pan 编逐像素回退变体（与端侧 visualizer.cpp 同构）
+		if (gl.getExtension('EXT_color_buffer_float')) {
+			const tex = gl.createTexture();
+			gl.bindTexture(gl.TEXTURE_2D, tex);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA16F,
+				PAN_STATE_W,
+				PAN_STATE_H,
+				0,
+				gl.RGBA,
+				gl.HALF_FLOAT,
+				null,
+			);
+			const fbo = gl.createFramebuffer();
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+			if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+				this.stateTex = tex;
+				this.stateFbo = fbo;
+			} else {
+				gl.deleteFramebuffer(fbo);
+				gl.deleteTexture(tex);
+			}
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		}
 	}
 
 	/**
@@ -213,7 +271,12 @@ export class VizRenderer {
 				continue;
 			}
 			try {
-				const fragSrc = patchFragForWebGL2(src, preset.file, common);
+				let fragSrc = patchFragForWebGL2(src, preset.file, common);
+				// pan 在无浮点 FBO 的上下文里编译回退变体（在 #version 后插
+				// 编译期开关，与端侧一致；回退变体的报错行号会比源文件 +1）
+				if (preset.statePass && this.stateTex === null) {
+					fragSrc = withPanStateDisabled(fragSrc);
+				}
 				const fs = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc, preset.file, (line) =>
 					mapFragErrorLine(line, common),
 				);
@@ -249,13 +312,9 @@ export class VizRenderer {
 		h = Math.max(1, Math.floor(h));
 		const gl = this.gl;
 		if (this.fboW === w && this.fboH === h && this.texAt(0)) return;
-		const oldT0 = this.texAt(0);
-		if (oldT0) {
-			gl.deleteTexture(oldT0);
-			gl.deleteTexture(this.texAt(1));
-			gl.deleteFramebuffer(this.fboAt(0));
-			gl.deleteFramebuffer(this.fboAt(1));
-		}
+		const oldTexs = [this.texAt(0), this.texAt(1)];
+		const oldFbos = [this.fboAt(0), this.fboAt(1)];
+		const hadOld = oldTexs[0] !== null && this.fboW > 1 && this.fboH > 1;
 		const texs: (WebGLTexture | null)[] = [gl.createTexture(), gl.createTexture()];
 		const fbos: (WebGLFramebuffer | null)[] = [gl.createFramebuffer(), gl.createFramebuffer()];
 		for (let i = 0; i < 2; i++) {
@@ -273,6 +332,27 @@ export class VizRenderer {
 				texs[i] ?? null,
 				0,
 			);
+		}
+		// 旧帧内容 blit 拷贝到新尺寸（线性重采样）——每场景 renderScale 不同，
+		// 切风格触发重建时保住 uTransition 交叉淡化依赖的旧画面
+		if (hadOld && this.blitProgram) {
+			gl.bindVertexArray(this.vao);
+			gl.useProgram(this.blitProgram);
+			gl.viewport(0, 0, w, h);
+			for (let i = 0; i < 2; i++) {
+				gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[i] ?? null);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, oldTexs[i] ?? null);
+				gl.uniform1i(this.blitLoc, 0);
+				gl.drawArrays(gl.TRIANGLES, 0, 3);
+			}
+			gl.bindVertexArray(null);
+		}
+		for (const t of oldTexs) {
+			if (t) gl.deleteTexture(t);
+		}
+		for (const f of oldFbos) {
+			if (f) gl.deleteFramebuffer(f);
 		}
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		this.texs = texs;
@@ -297,14 +377,34 @@ export class VizRenderer {
 		const fboH = Math.max(1, Math.floor(targetH * p.renderScale));
 		this.ensureFboSize(fboW, fboH);
 
-		// Pass A: scene + 反馈 -> 当前 FBO
-		gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboAt(this.flip));
-		gl.viewport(0, 0, this.fboW, this.fboH);
-		gl.bindVertexArray(this.vao);
+		// Pass S（仅 pan）：状态预通道——20×4 小视口、uStateMode=1，把每颗
+		// 水珠的常量状态写进 RGBA16F 纹理（uPrev 绑反馈纹理仅为采样器合法，
+		// 写出分支不采样）
+		const preset = PRESETS[presetIndex];
 		const program = this.programs[presetIndex] ?? null;
 		const loc = this.locs[presetIndex] ?? null;
 		if (!program || !loc) return;
+		gl.bindVertexArray(this.vao);
 		gl.useProgram(program);
+		if (preset?.statePass && this.stateTex && this.stateFbo) {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, this.stateFbo);
+			gl.viewport(0, 0, PAN_STATE_W, PAN_STATE_H);
+			gl.uniform1f(loc.t, p.t);
+			gl.uniform1f(loc.seed, p.seed);
+			gl.uniform1f(loc.beat, p.beat);
+			gl.uniform1f(loc.bass, p.bass);
+			gl.uniform1f(loc.treble, p.treble);
+			gl.uniform1f(loc.transition, p.transition);
+			gl.uniform1f(loc.stateMode, 1);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, this.texAt(1 - this.flip));
+			gl.uniform1i(loc.prev, 0);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+		}
+
+		// Pass A: scene + 反馈 -> 当前 FBO
+		gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboAt(this.flip));
+		gl.viewport(0, 0, this.fboW, this.fboH);
 		gl.uniform1f(loc.t, p.t);
 		gl.uniform1f(loc.seed, p.seed);
 		gl.uniform2f(loc.res, this.fboW, this.fboH);
@@ -312,6 +412,15 @@ export class VizRenderer {
 		gl.uniform1f(loc.bass, p.bass);
 		gl.uniform1f(loc.treble, p.treble);
 		gl.uniform1f(loc.transition, p.transition);
+		// pan：2=读状态纹理（常规）；0=回退逐像素（无浮点 FBO 的上下文）
+		if (preset?.statePass) {
+			gl.uniform1f(loc.stateMode, this.stateTex ? 2 : 0);
+			if (this.stateTex) {
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, this.stateTex);
+				gl.uniform1i(loc.state, 1);
+			}
+		}
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, this.texAt(1 - this.flip));
 		gl.uniform1i(loc.prev, 0);

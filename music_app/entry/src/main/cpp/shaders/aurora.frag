@@ -1,5 +1,16 @@
 // aurora.frag：照片级极光（发射谱分层 × 磁天顶光线汇聚 × HDR 直绘）。
 //
+// v15 性能优化（用户反馈：全屏极光严重卡顿——保证效果的前提下优化）：
+//   1. **水面倒影只算最近主帘**：v11 注释一直写"倒影只算主帘（depth=1.0）
+//      + 宽光晕，避免 2 帘翻倍"，代码却调了完整 auroraEmission（两帘全部
+//      重算）——注释与实现不符的浪费。v15 对齐注释意图：倒影区只算 fi=1、
+//      depth=1 的最近帘（水面保留最亮结构的镜像），倒影成本减半，观感
+//      与 v11 设计初衷一致。
+//   2. **软特征 fbm→fbm3**：绸带蜿蜒有机扰动、英雄褶 fold、银河云絮×2、
+//      尘带、远山脊线、水岸线——全是低频柔软载体，4 倍频降到 3 倍频
+//      （common.glsl 的 fbm3）每次省 1 档 vn，肉眼不可辨；射线/存在感等
+//      结构性 vn 全部保持原样。
+//
 // v14 氛围增强（用户："增强氛围感"）：WIDE_GAIN 0.07→0.10（光带周围弥散
 // 光晕）、GROUND_GLOW 0.10→0.16（雪原被极光照亮）、STAR_GAIN 1.25→1.45
 // （星空氛围）、SKY_HORIZON 微提（地景衔接）、新增低空大气绿弥散 AIRGLOW
@@ -330,7 +341,7 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
         + RIB_AMP * span * sin(q.x * 2.0 - ts * RIB_FLOW1 + fi * 2.1 + h2 * TAU)
         + 0.5 * RIB_AMP * span * sin(q.x * 3.1 + ts * RIB_FLOW2 + fi * 4.7 + h1 * TAU)
         + 0.3 * RIB_AMP * span * sin(q.x * 5.3 - ts * RIB_FLOW3 + fi * 1.9 + h3 * TAU)
-        + (fbm(vec2(q.x * 1.3 - ts * 0.020 + fi * 7.7, sd * 0.7)) - 0.5)
+        + (fbm3(vec2(q.x * 1.3 - ts * 0.020 + fi * 7.7, sd * 0.7)) - 0.5)
             * 0.10 * span;                              // 有机扰动
     // 底缘波浪（绸带的褶皱；幅度随活跃度抬升——不是速度）
     float wobA = WOB_AMP * span * (0.55 + 0.75 * act);
@@ -379,7 +390,7 @@ vec3 curtain(vec2 q, float azx, float fi, float ts, float sd, float depth,
         rayX += curlK * CURL_TWIST
             * sin(distC * CURL_WIND * 0.7 - ts * CURL_SPIN + ddRay * 1.3);
     }
-    float fold = fbm(vec2(rayX * 9.0 + fi * 7.0, sd * 0.31 + ts * 0.010));
+    float fold = fbm3(vec2(rayX * 9.0 + fi * 7.0, sd * 0.31 + ts * 0.010));
     float sA = vn(vec2(rayX * STRIPE_FREQ_A + ts * STRIPE_DRIFT + fi * 31.0
         + ddRay * RAY_TILT_H * STRIPE_FREQ_A * 0.02,
         fi * 3.1 + sd));
@@ -532,8 +543,8 @@ void main() {
     vec2 mwDir = normalize(vec2(0.83, 1.0));
     float mwAxis = dot(q, mwDir) - 0.05;
     float band = exp(-mwAxis * mwAxis * 6.0);
-    float cloud = 0.6 * fbm(q * 4.0 + 31.0) + 0.4 * fbm(q * 9.0 + 7.0);
-    float dust = smoothstep(0.40, 0.62, fbm(q * 5.0 + 77.0));
+    float cloud = 0.6 * fbm3(q * 4.0 + 31.0) + 0.4 * fbm3(q * 9.0 + 7.0);
+    float dust = smoothstep(0.40, 0.62, fbm3(q * 5.0 + 77.0));
     float along = dot(q, vec2(-mwDir.y, mwDir.x));
     vec3 mwCol = mix(vec3(0.10, 0.12, 0.19), vec3(0.21, 0.17, 0.13),
         smoothstep(-0.3, 0.35, along));
@@ -569,7 +580,7 @@ void main() {
     // 近侧山脊（RIDGE_NEAR_Y）在 v11 改为水面（见下），只保留远山脊
     // 作为水岸线后面的剪影
     float ridgeFar = smoothstep(0.0, -0.035,
-        q.y - RIDGE_FAR_Y - 0.16 * fbm(vec2(q.x * 2.2, 3.1)));
+        q.y - RIDGE_FAR_Y - 0.16 * fbm3(vec2(q.x * 2.2, 3.1)));
     vec3 ridge = vec3(0.008, 0.013, 0.020);
     float auroraLum = dot(emis, vec3(0.299, 0.587, 0.114));
     float upF = exp(-pow((q.y - RIDGE_FAR_Y) * 24.0, 2.0));
@@ -581,7 +592,7 @@ void main() {
     // 镜像坐标重算同一场极光（auroraEmission），叠加波纹扰动 + 距离衰减。
     // 倒影只算主帘（depth=1.0 最近最亮）+ 宽光晕——水面反射最亮的结构，
     // 完整 2 帘会让倒影区成本翻倍，主帘近似在 1/3 屏内视觉足够
-    float waterY = WATER_Y + 0.04 * fbm(vec2(q.x * 1.3 + 5.0, 7.7)); // 水岸线微起伏
+    float waterY = WATER_Y + 0.04 * fbm3(vec2(q.x * 1.3 + 5.0, 7.7)); // 水岸线微起伏
     float waterMask = smoothstep(waterY + 0.02, waterY, q.y);
     if (waterMask > 0.01) {
         // 波纹：两频横向偏移（时间流动），镜像坐标扰动
@@ -591,8 +602,13 @@ void main() {
             2.0 * waterY - q.y);
         // 镜像坐标也进带坐标系（倒影随极光方向一起倾斜）
         vec2 mqr = rot(dirAngle) * mq;
+        // v15：倒影只算最近主帘（fi=CURTAIN_N-1、depth=1）——v11 注释一直
+        // 这么设计（"倒影只算主帘 + 宽光晕，避免 2 帘翻倍"），代码此前却
+        // 完整重算两帘；对齐设计意图，水面保留最亮结构的镜像，成本减半
+        float mazx = (mqr.x - apex.x) / max(apex.y - mqr.y, 0.25);
         float mwide;
-        vec3 memis = auroraEmission(mqr, apex, ts, sd, act, beatG, mwide);
+        vec3 memis = curtain(mqr, mazx, float(CURTAIN_N - 1), ts, sd, 1.0,
+            act, beatG, mwide);
         // 亮芯白化（与主极光一致的后期）
         float meL = dot(memis, vec3(0.299, 0.587, 0.114));
         memis = mix(memis, vec3(1.02, 1.08, 1.00) * meL * 1.12,

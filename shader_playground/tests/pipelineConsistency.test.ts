@@ -61,4 +61,46 @@ describe('shader 管线跨端配置一致性', () => {
 		// id 从 0 起连续（preset 轮换与 shader 槽位索引依赖它）
 		expect(PRESETS.map((preset) => preset.id)).toEqual(PRESETS.map((_, i) => i));
 	});
+
+	test('每场景内部渲染比例与端侧 kPresetScale 逐项对齐', () => {
+		const cpp = readRepoFile('music_app/entry/src/main/cpp/visualizer.cpp');
+		const scaleMatch = cpp.match(/kPresetScale\[kVizPresetCount\]\s*=\s*\{([^}]+)\}/);
+		expect(scaleMatch).not.toBeNull();
+		const cppScales = (scaleMatch?.[1] ?? '')
+			.split(',')
+			.map((s) => Number.parseFloat(s.trim().replace(/f$/, '')));
+		expect(cppScales).toHaveLength(PRESETS.length);
+		for (let i = 0; i < PRESETS.length; i++) {
+			expect(cppScales[i]).toBeCloseTo(PRESETS[i]?.renderScale ?? NaN, 5);
+		}
+	});
+
+	test('pan 状态预通道三端常量一致（槽位 / 纹理尺寸）', () => {
+		const cpp = readRepoFile('music_app/entry/src/main/cpp/visualizer.cpp');
+		const pan = readShader('pan.frag');
+		const renderer = readRepoFile('shader_playground/src/renderer.ts');
+
+		// 端侧 pan 槽位 = presets.ts 里 statePass 的场景索引
+		const panSlot = Number((cpp.match(/kVizPresetPan\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const statePassIdx = PRESETS.findIndex((preset) => preset.statePass === true);
+		expect(statePassIdx).toBeGreaterThanOrEqual(0);
+		expect(panSlot).toBe(statePassIdx);
+
+		// 状态纹理尺寸 = pan.frag 的 DROPLET_COUNT × PAN_STATE_ROWS，三处一致
+		const dropCount = Number((pan.match(/DROPLET_COUNT\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const stateRows = Number((pan.match(/PAN_STATE_ROWS\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const cppW = Number((cpp.match(/kPanStateTexW\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const cppH = Number((cpp.match(/kPanStateTexH\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const tsW = Number((renderer.match(/PAN_STATE_W\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		const tsH = Number((renderer.match(/PAN_STATE_H\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		expect(dropCount).toBe(cppW);
+		expect(cppW).toBe(tsW);
+		expect(stateRows).toBe(cppH);
+		expect(cppH).toBe(tsH);
+	});
 });
+
+/** 读 shaders/ 目录下的场景源（与 regression.test.ts 同约定） */
+function readShader(name: string): string {
+	return readFileSync(resolve(REPO_ROOT, 'music_app/entry/src/main/cpp/shaders', name), 'utf8');
+}

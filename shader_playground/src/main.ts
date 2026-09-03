@@ -19,8 +19,9 @@ import { BLIT_FILE, COMMON_FILE, PRESETS, VERT_FILE } from './presets';
 import { VizRenderer } from './renderer';
 
 // 与手机端一致的固定常量（不作为可调参数）
-const RENDER_SCALE = 0.5; // 内部反馈 FBO 分辨率比例（对齐端侧 gWidth/2；0.67 在高分屏
-//  下 fragment 负载过大，pan.frag 逐像素×逐滴循环尤其卡，降到 1/2 像素少 44%）
+const RENDER_SCALE = 0.5; // 兜底内部比例；各场景实际用 presets.ts 的 renderScale
+//  （与端侧 visualizer.cpp 的 kPresetScale 逐项对齐：pan 0.45 / aurora 0.40，
+//   其余 1/2——pan/aurora 逐像素负载高且形态柔软，更低比例上屏放大视觉近无损）
 const TARGET_FPS = 30; // 设备 displaySync 30fps
 const TRANSITION_MS = 1500; // preset 切换渐入时长（VisualizerView presetTrans）
 
@@ -271,6 +272,7 @@ let fpsLastUpdate = 0;
 
 function renderFrame(): void {
 	const { beat, bass, treble } = audio.sample();
+	const preset = PRESETS[state.presetIndex];
 	renderer.draw(state.presetIndex, {
 		t: audio.playClock,
 		seed: audio.seed,
@@ -278,7 +280,7 @@ function renderFrame(): void {
 		bass,
 		treble,
 		transition: state.transition,
-		renderScale: RENDER_SCALE,
+		renderScale: preset?.renderScale ?? RENDER_SCALE,
 	});
 }
 

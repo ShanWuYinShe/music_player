@@ -1,5 +1,23 @@
-// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v16：真 3D 几何 + 真实莱顿
-// 弗罗斯特物理）。
+// pan.frag：高温热炒菜锅上的水滴动力学（照片级 v17：真 3D 几何 + 真实莱顿
+// 弗罗斯特物理 + 状态预通道性能重构）。
+//
+// v17 相对 v16（用户反馈：热锅水珠严重卡顿——在保证效果的前提下优化性能）：
+//   1. **水珠状态预通道**：每颗水珠的完整状态（位置/半径/速度向/形状参数）
+//      只依赖 (索引, t, seed, uBass)，是**每帧常量**，v16 以前却在 field()
+//      里被逐像素重复计算（20 滴 × 每滴十余次 hash/sin/atan/vn/wander，
+//      是本场景卡顿的主因）。现在 C++ 侧每帧先以 20×4 小视口、uStateMode=1
+//      调起本 shader 把状态写进 RGBA16F 纹理（80 像素开销可忽略），主 pass
+//      循环 texelFetch 取状态，循环体只剩距离/轮廓/累积（~4× 于循环本身）。
+//      设备无浮点颜色缓冲扩展时，C++ 以 PAN_NO_STATE_TEX 编译期开关退回
+//      逐像素路径（与状态通道共用同一 dropState() 函数，零行为分叉）。
+//   2. **锅外像素跳过**：v16 的 field()/bg()/水珠着色/焦散/星芒全屏执行，
+//      而锅椭圆之外 ~70% 像素的结果都被 panMask/dropMask 归零（纯浪费）。
+//      v17 先算 panMask/wallMask/outerMask 再按掩模分支，锅外只走外壁/
+//      台面/蒸汽路径（掩模阈值以下的混叠贡献 <0.4% 亮度，肉眼不可辨）。
+//   3. **bg() 同参重复调用去重**：v12 注释声称"合并折射取样"，实际
+//      bg(Ph2,Nh2,ts) 以相同入参被调用了两次、折射偏移 ruv 是死代码——
+//      删除 ruv，水珠折射直接复用锅底色 panBase（输出逐像素等价，bg 全帧
+//      只算一次）；蒸汽缕与台面木纹 fbm→fbm3（软特征降阶）。
 //
 // v16 相对 v15（用户反馈：锅里还有一圈一圈的螺旋圆环；莱顿弗罗斯特有物理
 //   公式，不该用经验系数）：
@@ -491,8 +509,206 @@ vec2 bowlProject(vec3 Pw) {
     return vec2(Pw.x, Pw.y * TILT_COS + Pw.z * TILT_SIN);
 }
 
+// ---- v17 水珠状态预通道 -----------------------------------------------------
+// 每颗水珠的完整状态只依赖 (索引, t, seed, uBass)——是每帧常量，却曾在
+// field() 里被逐像素重复计算（20 滴 × 十余次 hash/sin/vn/wander，本场景
+// 卡顿主因）。三条路径共用同一 dropState()，行为一致：
+//   uStateMode=1：写出模式——以 20×PAN_STATE_ROWS 小视口渲染，每格写一个
+//     vec4 状态槽到 RGBA16F 纹理（C++ 侧每帧主 pass 之前调起一次）；
+//   uStateMode=2：主 pass 用 texelFetch 取回状态（常规路径）；
+//   PAN_NO_STATE_TEX：设备无浮点 FBO 时的编译期回退，逐像素重算。
+// uStateMode/uState 不在注入头 uniform 名单内，gen_shader_header.py 与
+// glslPatch.ts 均按名单置空，本文件里的声明会原样保留。
+uniform float uStateMode;
+#ifndef PAN_NO_STATE_TEX
+uniform sampler2D uState;
+const int PAN_STATE_ROWS = 4;
+#endif
+
+struct PanDrop {
+    vec2 pos;
+    float rr;
+    float rad;
+    vec2 vh;
+    float k;
+    float fores;
+    float wamp;
+    float phase;
+    float dirA;
+    float sizzleW;
+    float h1t;
+    float h4t;
+    float h3t;
+};
+
+// 单颗水珠的本帧状态（计算式与 v16 逐像素路径逐句等价，仅改为打包输出；
+// 死亡滴 rr=0，调用方以 FIELD_EPS 阈值跳过）。
+PanDrop dropState(float fi, float ts, float sd) {
+    PanDrop o;
+    o.rr = 0.0; o.rad = 0.0; o.k = 0.0; o.fores = 1.0;
+    o.wamp = 0.0; o.phase = 0.0; o.dirA = 0.0; o.sizzleW = 0.0;
+    o.h1t = 0.0; o.h4t = 0.0; o.h3t = 0.0;
+    o.pos = vec2(0.0); o.vh = vec2(1.0, 0.0);
+    float small = step(SATELLITE_FROM, fi);
+    float h1 = hash11(fi * 7.13 + sd);
+    float h2 = hash11(fi * 3.71 + sd + 11.0);
+    float h3 = hash11(fi * 5.39 + sd + 23.0);
+    float h4 = hash11(fi * 9.17 + sd + 37.0);
+    float r0 = mix(mix(R_MAIN_MIN, R_MAIN_MAX, pow(h3, 2.6)),
+        mix(R_SAT_MIN, R_SAT_MAX, pow(h3, 1.5)), small);
+    float P = (LIFE_BASE + LIFE_K * r0 * r0) * (0.70 + 0.60 * h1);
+    float age = mod(ts + h2 * P, P);
+    float lifeK = age / P;
+    float grow = mix(GROW_MIN, 1.0, smoothstep(0.0, GROW_PHASE, lifeK));
+    float rr = r0 * r0 * grow * max(1.0 - lifeK, 0.0);
+    // 沸腾度（v10）：每滴独立沸腾相位——蒸气速在液滴底部生成气泡，
+    // 气泡破裂让液滴"内部在翻腾"。沸腾度同时调制半径脉动幅度和
+    // 形状变形振幅，活跃期（lifeK 0.5~0.9）最强，濒死期还伴随
+    // 形状极不规则（接近爆裂态）。两个频率叠加避免节拍化
+    float boilK = 0.5 + 0.5 * sin(age * BOIL_RATE + fi * 5.7)
+        * (0.5 + 0.5 * sin(age * (BOIL_RATE * 0.43) + fi * 1.9));
+    // 受热震动（v16 Rayleigh 液滴振荡）：蒸气垫把液滴顶起→落下。
+    // n=2 基模 f = (1/2π)·√(σ/(ρR³))·√8 ⟹ f ∝ R^-3/2——小珠颤得快
+    // （~20Hz）、大珠颤得慢（~1.6Hz）。v9 用的"9+7·h2"与半径无关，
+    // 大珠小珠颤得一样快，不符合真实物理。
+    float oscF = clamp(RAYLEIGH_K / pow(max(r0, 6e-3), 1.5), 1.2, 30.0);
+    float heatHop = 1.0 + HEAT_JITTER * sin(age * oscF + fi * 3.7)
+        * (0.5 + 0.5 * sin(age * oscF * 0.31 + fi * 1.9));
+    // 沸腾半径脉动（v10）：boilK × BOIL_KICK 调制——沸腾时液滴高度
+    // 大幅脉动（液滴在"咕嘟咕嘟"地翻）
+    float boilKick = 1.0 + BOIL_KICK * boilK
+        * sin(age * (BOIL_RATE * 2.7) + fi * 4.3);
+    rr *= heatHop * boilKick;
+    // 濒死弹跳：蒸气垫破裂前液滴在锅面上蹦跳（半径脉动 → 接触阴影
+    // 与轮廓同步搏动；系数最低 0.72，不会反号）
+    float hopK = smoothstep(PANIC_FROM, 1.0, lifeK);
+    rr *= 1.0 + PANIC_HOP * hopK * sin(age * 36.0 + fi * 7.0);
+    if (rr < FIELD_EPS) return o;
+    float rad = sqrt(rr);
+    // 受热强度（v9）：每滴的热斑随时间慢漂——受热不均 → 运动速度
+    // 不是固定公式，而在 0.72×~1.35× 之间随机波动（急转的珠会缓下
+    // 来、缓移的珠会窜出去，像真实锅里被不同区域热流推着走）
+    float heatK = 0.28 + 0.72 * vn(vec2(age / HEAT_DRIFT + fi * 2.7,
+        sd * 0.011 + h1 * 4.0));
+    float sp = (0.9 + 0.5 * h4) * pow(0.12 / max(r0, 0.018), 0.35)
+        * mix(0.72, 1.35, heatK);
+    sp = clamp(sp, 0.6, 3.2);
+    float panic = 1.0 + PANIC_BOOST * smoothstep(PANIC_FROM, 1.0, lifeK);
+    float w1 = 1.35 * h4 * sp;
+    float w2 = 3.10 * h1 * sp;
+    float w3 = 1.15 * h2 * sp;
+    float w4 = 2.70 * h3 * sp;
+    float p1 = fi * 2.1;
+    float p2 = fi * 5.3;
+    float p3 = fi * 3.7;
+    float p4 = fi * 1.9;
+    vec2 pos = vec2(
+        sin(age * w1 + p1) + 0.55 * sin(age * w2 + p2),
+        cos(age * w3 + p3) + 0.55 * cos(age * w4 + p4));
+    vec2 vel = vec2(
+        w1 * cos(age * w1 + p1) + 0.55 * w2 * cos(age * w2 + p2),
+        -w3 * sin(age * w3 + p3) - 0.55 * w4 * sin(age * w4 + p4));
+    // 凹底行为：活动范围只微弱向锅心偏置（v11 0.85——球面上水珠被
+    // 蒸气垫托着四处滑行，重力只是弱引导，不会钉死在锅心）
+    float range = (1.0 - rad - 0.05) * BOWL_GATHER;
+    pos *= range / WANDER_NORM;
+    vel *= range / WANDER_NORM;
+    // v11 随机漂移（热流推挤）：每滴一个慢变方向的随机力叠加到轨道
+    // 上——真实锅里水珠被不同区域的热流/气流推着乱窜，轨迹不是规则
+    // 绕圈。wander 混沌驱动方向（每 DRIFT_SCALE 秒换向），幅度随受热
+    // 强度波动
+    float dr = DRIFT_AMP * (0.7 + 0.6 * heatK);
+    float driftX = wanderBi(age / DRIFT_SCALE + fi * 1.7, 1.0,
+        sd * 0.7 + h2 * 3.0);
+    float driftY = wanderBi(age / DRIFT_SCALE + fi * 3.1, 1.0,
+        sd * 1.3 + h1 * 5.0);
+    // ---- v15 真 3D 球面运动（替代 v11 的绕心盘旋 + v14 的伪球面）----
+    // ① **删掉绕心盘旋**：ORBIT_RATE 让每滴以恒定角速度绕锅心转，珠群
+    //    一旦靠近就融合成一团跟着转 = 用户看到的"螺旋圆一直在转"。
+    //    真实锅里没有这种整体环流。
+    // ② 热流推挤改为驱动**球面方位角 φ**（左右乱窜）+ 小幅极角扰动
+    //    （上下起伏）——上上下下左左右右，不是绕圈。
+    float phi = atan(pos.y, pos.x)
+        + driftX * dr * 5.0                       // 左右：绕着锅心换方位
+        + 0.55 * sin(age * (w1 * 0.7 + 0.4) + p2); // 持续横向游走
+    // ③ 极角 θ = 重力滑梯（GRAV_P 让水滴更多时间待在锅底）
+    float wR = 0.55 + 0.75 * h3 * mix(0.72, 1.35, heatK);
+    float th = DROP_THETA_MAX
+        // pow(x,y) 在 x=0 时是 GLSL 未定义行为（SwiftShader 返回 NaN 会
+        // 让整帧崩掉），必须夹一个下限
+        * pow(max(abs(sin(age * wR + fi * 2.7)), 1e-4), GRAV_P);
+    th += driftY * dr * 0.55;                     // 上下：热流顶起来的起伏
+    th = clamp(th, 0.0, DROP_THETA_MAX);
+    vec3 Pd = bowlPoint(th, phi);
+    pos = bowlProject(Pd);
+    // ④ 透视缩短：贴在球面上的水滴沿屏幕 y 被斜视投影压缩（真 3D 的
+    //    自然结果，不是 v14 那套拍脑袋的 PARALLAX 常数）
+    vec3 Nw = normalize(vec3(-Pd.x, -Pd.y, PAN_SPHERE_R - Pd.z));  // 锅内表面法线（朝上）
+    float fores = clamp(dot(Nw, vec3(0.0, -TILT_SIN, TILT_COS)), 0.35, 1.0);
+    vel = vec2(vel.x, vel.y * fores);
+    vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
+        * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
+    pos += trem;
+    // 等值面不越过锅口内沿（真实几何：水平半径 ≤ 1）
+    float maxR = 1.0 - 2.3 * rad - 0.05;
+    if (maxR <= 0.0) {
+        return o;   // 越界滴：贡献为 0（等价 v16 的 continue）
+    }
+    float pl = length(pos);
+    if (pl > maxR) {
+        pos *= maxR / pl;
+    }
+    // ---- 以下与像素无关（v16 在 field() 循环里逐像素重算的部分）----
+    float spd = length(vel);
+    float k = clamp(spd * SPEED_STRETCH, 0.0, 0.6);
+    vec2 vh = vel / max(spd, 1e-4);
+    float wsize = smoothstep(WOB_SIZE_LO, WOB_SIZE_HI, rad);
+    // 沸腾度调制 wob 振幅（v10）：沸腾时形状剧烈变形——大珠在
+    // lifeK 中段 (0.5~0.9) 变形振幅 ×2+，濒死期 (lifeK>0.9) ×3 接近
+    // 爆裂态（飞溅条纹的视觉基础）
+    float boilShape = 1.0 + boilK * WOB_BOIL_AMP
+        * (0.5 + 1.5 * smoothstep(0.85, 0.99, lifeK));
+    float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize) * boilShape;
+    float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize)
+        * (1.0 + 0.6 * boilK * smoothstep(0.85, 0.99, lifeK));
+    // v12 性能：sizzle 噪声从 vn(p*150)（per-pixel 4 次 hash）改为
+    // hash11（每滴 1 次，不依赖像素坐标）——濒死期液滴边缘沸腾抖动的
+    // 观感等价
+    float sizzle = smoothstep(SIZZLE_FROM, 1.0, lifeK);
+    float sizzleW = sizzle * (hash11(age * 7.0 + fi * 3.0 + sd * 0.01) - 0.5)
+        * SIZZLE_AMP;
+    o.pos = pos; o.rr = rr; o.rad = rad;
+    o.vh = vh; o.k = k; o.fores = fores;
+    o.wamp = wamp; o.phase = age * wrate; o.dirA = h2 * TAU + age * (WOB_TURN * 0.5 + 0.12 * heatK);
+    o.sizzleW = sizzleW;
+    o.h1t = h1 * TAU; o.h4t = h4 * TAU; o.h3t = h3 * TAU;
+    return o;
+}
+
+#ifndef PAN_NO_STATE_TEX
+// 状态纹理读取：每滴 4 个 vec4 槽（slot0 pos/rr/rad，slot1 vh/k/fores，
+// slot2 wamp/phase/dirA/sizzleW，slot3 谐波相位）。RGBA16F 的 10 位尾数
+// 对位置（≈0.1px）与相位（≈0.03rad）的量化误差均在感知阈值之下。
+// texelFetch 为 ES3 内建（两条管线均以 300 es 编译），无过滤无导数，
+// 可在分支内安全使用。
+PanDrop fetchDrop(int i) {
+    PanDrop o;
+    vec4 s0 = texelFetch(uState, ivec2(i, 0), 0);
+    vec4 s1 = texelFetch(uState, ivec2(i, 1), 0);
+    vec4 s2 = texelFetch(uState, ivec2(i, 2), 0);
+    vec4 s3 = texelFetch(uState, ivec2(i, 3), 0);
+    o.pos = s0.xy; o.rr = s0.z; o.rad = s0.w;
+    o.vh = s1.xy; o.k = s1.z; o.fores = s1.w;
+    o.wamp = s2.x; o.phase = s2.y; o.dirA = s2.z; o.sizzleW = s2.w;
+    o.h1t = s3.x; o.h4t = s3.y; o.h3t = s3.z;
+    return o;
+}
+#endif
+
 // 水滴元球场（锅局部单位圆坐标）：F = Σ r²/d_eff²，g = ∇F。
 // d_eff 含运动方向拉伸 + 角向谐波轮廓（不规则类球体）+ 受热震动 + 濒死泡沫化。
+// v17：每滴状态取自状态纹理（或回退路径的 dropState），循环体只剩
+// 像素相关的距离/轮廓/累积。
 float field(vec2 p, float ts, float sd, out vec2 g, out float dropRad) {
     g = vec2(0.0);
     float F = 0.0;
@@ -503,159 +719,38 @@ float field(vec2 p, float ts, float sd, out vec2 g, out float dropRad) {
     float wSum = 0.0;
     for (int i = 0; i < DROPLET_COUNT; i++) {
         float fi = float(i);
-        float small = step(SATELLITE_FROM, fi);
-        float h1 = hash11(fi * 7.13 + sd);
-        float h2 = hash11(fi * 3.71 + sd + 11.0);
-        float h3 = hash11(fi * 5.39 + sd + 23.0);
-        float h4 = hash11(fi * 9.17 + sd + 37.0);
-        float r0 = mix(mix(R_MAIN_MIN, R_MAIN_MAX, pow(h3, 2.6)),
-            mix(R_SAT_MIN, R_SAT_MAX, pow(h3, 1.5)), small);
-        float P = (LIFE_BASE + LIFE_K * r0 * r0) * (0.70 + 0.60 * h1);
-        float age = mod(ts + h2 * P, P);
-        float lifeK = age / P;
-        float grow = mix(GROW_MIN, 1.0, smoothstep(0.0, GROW_PHASE, lifeK));
-        float rr = r0 * r0 * grow * max(1.0 - lifeK, 0.0);
-        // 沸腾度（v10）：每滴独立沸腾相位——蒸气速在液滴底部生成气泡，
-        // 气泡破裂让液滴"内部在翻腾"。沸腾度同时调制半径脉动幅度和
-        // 形状变形振幅，活跃期（lifeK 0.5~0.9）最强，濒死期还伴随
-        // 形状极不规则（接近爆裂态）。两个频率叠加避免节拍化
-        float boilK = 0.5 + 0.5 * sin(age * BOIL_RATE + fi * 5.7)
-            * (0.5 + 0.5 * sin(age * (BOIL_RATE * 0.43) + fi * 1.9));
-        // 受热震动（v16 Rayleigh 液滴振荡）：蒸气垫把液滴顶起→落下。
-        // n=2 基模 f = (1/2π)·√(σ/(ρR³))·√8 ⟹ f ∝ R^-3/2——小珠颤得快
-        // （~20Hz）、大珠颤得慢（~1.6Hz）。v9 用的"9+7·h2"与半径无关，
-        // 大珠小珠颤得一样快，不符合真实物理。
-        float oscF = clamp(RAYLEIGH_K / pow(max(r0, 6e-3), 1.5), 1.2, 30.0);
-        float heatHop = 1.0 + HEAT_JITTER * sin(age * oscF + fi * 3.7)
-            * (0.5 + 0.5 * sin(age * oscF * 0.31 + fi * 1.9));
-        // 沸腾半径脉动（v10）：boilK × BOIL_KICK 调制——沸腾时液滴高度
-        // 大幅脉动（液滴在"咕嘟咕嘟"地翻）
-        float boilKick = 1.0 + BOIL_KICK * boilK
-            * sin(age * (BOIL_RATE * 2.7) + fi * 4.3);
-        rr *= heatHop * boilKick;
-        // 濒死弹跳：蒸气垫破裂前液滴在锅面上蹦跳（半径脉动 → 接触阴影
-        // 与轮廓同步搏动；系数最低 0.72，不会反号）
-        float hopK = smoothstep(PANIC_FROM, 1.0, lifeK);
-        rr *= 1.0 + PANIC_HOP * hopK * sin(age * 36.0 + fi * 7.0);
-        if (rr < FIELD_EPS) continue;
-        float rad = sqrt(rr);
-        // 受热强度（v9）：每滴的热斑随时间慢漂——受热不均 → 运动速度
-        // 不是固定公式，而在 0.72×~1.35× 之间随机波动（急转的珠会缓下
-        // 来、缓移的珠会窜出去，像真实锅里被不同区域热流推着走）
-        float heatK = 0.28 + 0.72 * vn(vec2(age / HEAT_DRIFT + fi * 2.7,
-            sd * 0.011 + h1 * 4.0));
-        float sp = (0.9 + 0.5 * h4) * pow(0.12 / max(r0, 0.018), 0.35)
-            * mix(0.72, 1.35, heatK);
-        sp = clamp(sp, 0.6, 3.2);
-        float panic = 1.0 + PANIC_BOOST * smoothstep(PANIC_FROM, 1.0, lifeK);
-        float w1 = 1.35 * h4 * sp;
-        float w2 = 3.10 * h1 * sp;
-        float w3 = 1.15 * h2 * sp;
-        float w4 = 2.70 * h3 * sp;
-        float p1 = fi * 2.1;
-        float p2 = fi * 5.3;
-        float p3 = fi * 3.7;
-        float p4 = fi * 1.9;
-        vec2 pos = vec2(
-            sin(age * w1 + p1) + 0.55 * sin(age * w2 + p2),
-            cos(age * w3 + p3) + 0.55 * cos(age * w4 + p4));
-        vec2 vel = vec2(
-            w1 * cos(age * w1 + p1) + 0.55 * w2 * cos(age * w2 + p2),
-            -w3 * sin(age * w3 + p3) - 0.55 * w4 * sin(age * w4 + p4));
-        // 凹底行为：活动范围只微弱向锅心偏置（v11 0.85——球面上水珠被
-        // 蒸气垫托着四处滑行，重力只是弱引导，不会钉死在锅心）
-        float range = (1.0 - rad - 0.05) * BOWL_GATHER;
-        pos *= range / WANDER_NORM;
-        vel *= range / WANDER_NORM;
-        // v11 随机漂移（热流推挤）：每滴一个慢变方向的随机力叠加到轨道
-        // 上——真实锅里水珠被不同区域的热流/气流推着乱窜，轨迹不是规则
-        // 绕圈。wander 混沌驱动方向（每 DRIFT_SCALE 秒换向），幅度随受热
-        // 强度波动
-        float dr = DRIFT_AMP * (0.7 + 0.6 * heatK);
-        float driftX = wanderBi(age / DRIFT_SCALE + fi * 1.7, 1.0,
-            sd * 0.7 + h2 * 3.0);
-        float driftY = wanderBi(age / DRIFT_SCALE + fi * 3.1, 1.0,
-            sd * 1.3 + h1 * 5.0);
-        // ---- v15 真 3D 球面运动（替代 v11 的绕心盘旋 + v14 的伪球面）----
-        // ① **删掉绕心盘旋**：ORBIT_RATE 让每滴以恒定角速度绕锅心转，珠群
-        //    一旦靠近就融合成一团跟着转 = 用户看到的"螺旋圆一直在转"。
-        //    真实锅里没有这种整体环流。
-        // ② 热流推挤改为驱动**球面方位角 φ**（左右乱窜）+ 小幅极角扰动
-        //    （上下起伏）——上上下下左左右右，不是绕圈。
-        float phi = atan(pos.y, pos.x)
-            + driftX * dr * 5.0                       // 左右：绕着锅心换方位
-            + 0.55 * sin(age * (w1 * 0.7 + 0.4) + p2); // 持续横向游走
-        // ③ 极角 θ = 重力滑梯（GRAV_P 让水滴更多时间待在锅底）
-        float wR = 0.55 + 0.75 * h3 * mix(0.72, 1.35, heatK);
-        float th = DROP_THETA_MAX
-            // pow(x,y) 在 x=0 时是 GLSL 未定义行为（SwiftShader 返回 NaN 会
-            // 让整帧崩掉），必须夹一个下限
-            * pow(max(abs(sin(age * wR + fi * 2.7)), 1e-4), GRAV_P);
-        th += driftY * dr * 0.55;                     // 上下：热流顶起来的起伏
-        th = clamp(th, 0.0, DROP_THETA_MAX);
-        vec3 Pd = bowlPoint(th, phi);
-        pos = bowlProject(Pd);
-        // ④ 透视缩短：贴在球面上的水滴沿屏幕 y 被斜视投影压缩（真 3D 的
-        //    自然结果，不是 v14 那套拍脑袋的 PARALLAX 常数）
-        vec3 Nw = normalize(vec3(-Pd.x, -Pd.y, PAN_SPHERE_R - Pd.z));  // 锅内表面法线（朝上）
-        float fores = clamp(dot(Nw, vec3(0.0, -TILT_SIN, TILT_COS)), 0.35, 1.0);
-        vel = vec2(vel.x, vel.y * fores);
-        vec2 trem = TREMBLE_AMP * panic * (1.0 + TREMBLE_BASS * uBass)
-            * vec2(sin(age * 23.0 + fi * 9.0), cos(age * 29.0 + fi * 4.0));
-        pos += trem;
-        // 等值面不越过锅口内沿（真实几何：水平半径 ≤ 1）
-        float maxR = 1.0 - 2.3 * rad - 0.05;
-        if (maxR > 0.0) {
-            float pl = length(pos);
-            if (pl > maxR) {
-                pos *= maxR / pl;
-            }
-        } else {
-            continue;
-        }
+#ifdef PAN_NO_STATE_TEX
+        PanDrop st = dropState(fi, ts, sd);
+#else
+        PanDrop st = fetchDrop(i);
+#endif
+        if (st.rr < FIELD_EPS) continue;
         // 各向异性距离：y 方向除以 fores → 等值面在屏幕上是 x 半径 r、
         // y 半径 r×fores 的椭圆（贴壁的水滴被斜视压扁，真 3D 的必然结果）
-        vec2 d = vec2(p.x - pos.x, (p.y - pos.y) / fores);
-        float spd = length(vel);
-        float k = clamp(spd * SPEED_STRETCH, 0.0, 0.6);
-        vec2 vh = vel / max(spd, 1e-4);
-        float dpar = dot(d, vh) * (1.0 - 0.24 * k);
-        float dperp = dot(d, vec2(-vh.y, vh.x)) * (1.0 + 0.18 * k);
+        vec2 d = vec2(p.x - st.pos.x, (p.y - st.pos.y) / st.fores);
+        float dpar = dot(d, st.vh) * (1.0 - 0.24 * st.k);
+        float dperp = dot(d, vec2(-st.vh.y, st.vh.x)) * (1.0 + 0.18 * st.k);
         float dlen2 = dpar * dpar + dperp * dperp + 1e-6;
-        float wsize = smoothstep(WOB_SIZE_LO, WOB_SIZE_HI, rad);
-        // 沸腾度调制 wob 振幅（v10）：沸腾时形状剧烈变形——大珠在
-        // lifeK 中段 (0.5~0.9) 变形振幅 ×2+，濒死期 (lifeK>0.9) ×3 接近
-        // 爆裂态（飞溅条纹的视觉基础）
-        float boilShape = 1.0 + boilK * WOB_BOIL_AMP
-            * (0.5 + 1.5 * smoothstep(0.85, 0.99, lifeK));
-        float wamp = mix(WOB_SMALL_AMP, WOB_BIG_AMP, wsize) * boilShape;
-        float wrate = (0.6 + 0.9 * h2) * mix(1.8, 0.7, wsize)
-            * (1.0 + 0.6 * boilK * smoothstep(0.85, 0.99, lifeK));
         float da = atan(dperp, dpar);
         // 不规则类球体（v9，v12 性能：5 项谐波 → 3 项）+ 定向拉伸（泪滴形）
         // v13：加 hash 扇区扰动（把圆周分成 6 个扇区，每区一个随机凹凸值）
         // ——规则 sin 谐波是"规则花瓣"，叠加扇区 hash 才是"有机不规则"，
-        //   真实受热液滴是随机凹凸的，不是多边形
+        //   真实受热液滴是随机凹凸的，不是多边形。扇区索引依赖像素角度，
+        //   保留逐像素（每滴 1 次 hash）。
         float sector = floor(da * 3.0 / 3.14159265 + 3.0);   // 扇区索引 [0..6)
         float organic = hash11(sector * 13.0 + fi * 5.0 + sd) - 0.5;
-        float wob = 1.0 + wamp * (
-            0.46 * sin(2.0 * da + h1 * TAU + age * wrate)
-            + 0.32 * sin(3.0 * da + h4 * TAU - age * wrate * 1.31)
-            + 0.22 * sin(5.0 * da + h3 * TAU + age * wrate * 0.83)
+        float wob = 1.0 + st.wamp * (
+            0.46 * sin(2.0 * da + st.h1t + st.phase)
+            + 0.32 * sin(3.0 * da + st.h4t - st.phase * 1.31)
+            + 0.22 * sin(5.0 * da + st.h3t + st.phase * 0.83)
             + 0.30 * organic);
-        float dirA = h2 * TAU + age * (WOB_TURN * 0.5 + 0.12 * heatK);
-        wob *= 1.0 + wamp * WOB_STRETCH * (0.5 + 0.5 * cos(da - dirA));
+        wob *= 1.0 + st.wamp * WOB_STRETCH * (0.5 + 0.5 * cos(da - st.dirA));
         float d2 = dlen2 * wob * wob;
-        float w = rr / d2;
-        float sizzle = smoothstep(SIZZLE_FROM, 1.0, lifeK);
-        // v12 性能：sizzle 噪声从 vn(p*150)（per-pixel 4 次 hash）改为
-        // hash11（每滴 1 次，不依赖像素坐标）——濒死期液滴边缘沸腾抖动的
-        // 观感等价，成本降 4 倍（逐像素 × 逐滴循环里是主要热点之一）
-        w *= 1.0 + sizzle * (hash11(age * 7.0 + fi * 3.0 + sd * 0.01) - 0.5)
-            * SIZZLE_AMP;
+        float w = st.rr / d2;
+        w *= 1.0 + st.sizzleW;
         F += w;
         g += -2.0 * w * d / d2;
-        wRadSum += w * rad;
+        wRadSum += w * st.rad;
         wSum += w;
     }
     dropRad = wSum > 1e-5 ? wRadSum / wSum : R_MAIN_MIN;
@@ -785,10 +880,10 @@ vec3 outerColor(vec2 p, float pr, float sd, float wTop) {
     float outerBand = smoothstep(wTop, wTop + OUTER_W, pr);
     vec3 wall = vec3(0.09, 0.09, 0.10)
         * mix(1.3, 0.6, smoothstep(-0.5, 0.6, p.y));
-    // 台面：暖木色微噪 + 使用痕迹
+    // 台面：暖木色微噪 + 使用痕迹（v17：木纹是软背景，fbm→fbm3）
     vec3 counter = vec3(0.15, 0.115, 0.085)
         * (0.75 + 0.5 * vn(p * 22.0 + sd));
-    counter *= 0.85 + 0.3 * fbm(p * 3.0 + 31.0);
+    counter *= 0.85 + 0.3 * fbm3(p * 3.0 + 31.0);
     vec3 c = mix(wall, counter, outerBand);
     // 锅的落影（台面上椭圆软影）
     float shadow = exp(-pow((pr - (wTop + OUTER_W + 0.06)) * 3.2, 2.0));
@@ -802,6 +897,26 @@ void main() {
     vec2 q = sceneUV(vec2(0.5, 0.47));
     float aspect = aspectRatio();
 
+#ifndef PAN_NO_STATE_TEX
+    // 状态预通道分支：C++ 侧以 20×PAN_STATE_ROWS 小视口、uStateMode=1 调起，
+    // x=滴索引、y=槽号，每格写出 PanDrop 的一个 vec4（主 pass 见 fetchDrop）
+    if (uStateMode > 0.5 && uStateMode < 1.5) {
+        float fi = min(floor(vUV.x * float(DROPLET_COUNT)), float(DROPLET_COUNT - 1));
+        float slot = floor(vUV.y * float(PAN_STATE_ROWS));
+        PanDrop s = dropState(fi, ts, sd);
+        if (slot < 0.5) {
+            fragColor = vec4(s.pos, s.rr, s.rad);
+        } else if (slot < 1.5) {
+            fragColor = vec4(s.vh, s.k, s.fores);
+        } else if (slot < 2.5) {
+            fragColor = vec4(s.wamp, s.phase, s.dirA, s.sizzleW);
+        } else {
+            fragColor = vec4(s.h1t, s.h4t, s.h3t, 0.0);
+        }
+        return;
+    }
+#endif
+
     // ---- v15 真 3D：屏幕 → 锅面（光线-球面求交）----
     // s 空间：单位 = 锅口半径（1.0 = 锅口），原点 = 锅心的投影位置。
     // 注意**不再减 PAN_CENTER**——v8~v14 把锅心放在锅口椭圆中心是错的，
@@ -812,181 +927,207 @@ void main() {
     vec3 Ph, Nh;
     bool onPan = panHit(s, Ph, Nh);
     float pr = length(Ph.xy);          // 水平半径（0=锅心，1=锅口）
-    float depthZ = Ph.z;               // 深度（0=锅心，PAN_DEPTH=锅口）
     vec2 p = Ph.xy;                    // 水平投影（温度场/方位角仍按它取）
-
-    // 热空气扭曲（锅面全域）
-    float heat = smoothstep(1.0, 0.1, pr);
-    vec2 sw = s + (0.004 + 0.005 * heat)
-        * vec2(vn(s * 13.0 + ts * 1.1), vn(s * 13.0 + 31.0 - ts * 0.9));
-    vec3 Ph2, Nh2;
-    if (!panHit(sw, Ph2, Nh2)) { Ph2 = Ph; Nh2 = Nh; }
-    vec2 pw = sw;
 
     // 锅口椭圆（半径 1 的圆在斜视下的投影：半轴 (1, cosα)，中心 (0, D·sinα)）
     float rimE = length(vec2(s.x, (s.y - PAN_DEPTH * TILT_SIN) / TILT_COS));
     float panMask = onPan ? smoothstep(1.015, 0.985, rimE) : 0.0;
-
-    vec2 g;
-    float dropRad;
-    float F = field(pw, ts, sd, g, dropRad) * panMask;
-    F *= 1.0 + BEAT_BOIL * uBeat * sin(ts * 31.0);
-    float m = smoothstep(ISO_LO, ISO_HI, F);
-
-    // ---- 高度场法线：h = √(1−1/F)（球冠解析解）----
-    float Fin = max(F, 1.0);
-    // v16 扁平化 = 毛细长度（Bond number）物理，替代 v14 的固定 DROP_FLAT：
-    //   液滴厚度 h ≈ 2·l_c（与体积无关），球形上限 h=R
-    //   ⟹ hDome 上限 = min(1, 2·l_c / R)
-    //   · 小珠（R < l_c）→ 1（半球，表面张力主导）
-    //   · 大珠（R = 11mm）→ 0.48（摊成厚度恒定的扁饼，重力主导）
-    //   这就是莱顿弗罗斯特大液滴的真实形态——"锅底的一摊"，不是立起来的球
-    float flatK = min(1.0, 2.0 * CAPILLARY / max(dropRad, 2e-3));
-    float hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0)) * flatK;
-    float dh = 0.5 * flatK / (Fin * Fin * max(hDome, 0.035));
-    vec3 n = normalize(vec3(-g * dh, 1.0));
-
-    // ---- 贴合阴影（同一份场推出；背光侧更深）----
-    vec2 gn0 = g / (length(g) + 1e-4);
-    float azq = atan(pw.y, pw.x);
-    float awayWin = 0.5 - 0.5 * cos(azq - atan(WIN_DIR.y, WIN_DIR.x));
-    float ringSh = smoothstep(0.30, ISO_LO, F) * (1.0 - m) * panMask
-        * (0.75 + 0.5 * awayWin);
-    float ao = smoothstep(0.06, 0.30, F) * (1.0 - m) * panMask;
-
-    // v15：锅面（锅底 + 内壁，连续的球冠）由**真 3D 法线统一着色**。
-    // 删掉 v8~v14 的 innerWallColor 内壁环带合成——那是一大片被涂得比锅底
-    // 还亮的均匀灰（0.24~0.34 vs 锅底 0.227），宽度还是拍脑袋的 BOTTOM_FAR
-    // =0.58 撑出来的 42% 锅半径，视觉上就是"锅里装了 1/3 高的水"。真实几
-    // 何下内壁是背光面，法线朝内上方，反射暗环境 → 自然比锅底暗。
-    vec3 col = bg(Ph2, Nh2, ts);
-    col *= 1.0 - CONTACT_DARKEN * ringSh - AO_DARKEN * ao;
-    // 水珠可见域 = 整个命中锅面的区域（是否爬太高由 field() 的 θ_max 限制）
-    float dropMask = panMask;
-
-    // ---- 水珠：折射/反射能量混合 ----
-    vec3 V = vec3(0.0, 0.0, 1.0);
-    float ndv = max(dot(n, V), 0.0);
-    float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
-
-    vec2 ruv = pw + gn0 * (1.0 - n.z) * REFRACT_LEN;
-    // v12 性能优化：bg(ruv) 只算一次（原来折射 + 薄缘透光各调一次 = 2 次
-    // 完整 bg，含 tempField+fbm+envMap 各两遍）——合并为一次复用
-    // 折射取样复用主锅面几何（panHit 每像素调用 2 次已足够；软渲染下第 3
-    // 次调用会让 SwiftShader 崩，且折射取样点的深度差异肉眼不可辨）
-    vec3 bgRuv = bg(Ph2, Nh2, ts);
-    vec3 through = bgRuv * 1.35 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
-    through *= vec3(0.970, 0.985, 0.998);
-    through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.35, 1.0, 0.82));
-    // 折射体边缘压暗：接触线附近全反射 + 贴合阴影把光"关"在滴内，
-    // 轮廓因此清晰（v6 通体均匀亮 = 哑光玻璃珠的病根）
-    through *= 1.0 - RIM_DARK * smoothstep(0.45, 0.15, n.z);
-    through += WIN_COLOR * pow(ndv, 7.0) * FOCUS_GAIN;
-    // 薄缘透光（v9）：接触线最外缘一圈背景透亮——真实液滴边缘薄如透镜，
-    // 背景光从薄处穿过来。RIM_DARK 压暗的是 0.06~0.45 的内缘反射区（暗边），
-    // 这层亮线只贴 <0.06 的最外沿（n.z 越低越靠边缘），叠加出"暗边 + 亮线"
-    through += bgRuv * RIM_LIGHT
-        * (1.0 - smoothstep(0.06, 0.18, n.z));
-
-    vec3 refl = 2.0 * ndv * n - V;
-    vec3 mirrored = envMap(refl);
-
-    // 水珠漫反射（v9）：天空光 diffuse——纯镜面球不存在，表面有微漫
-    // 反射，暗侧不至于死黑（ndv 越朝上越亮，像湿润的水面被天光点亮）
-    vec3 dropDiff = envMap(vec3(0.0, 0.0, 1.0)) * ndv * DROP_DIFF;
-
-    float crescent = smoothstep(0.35, 0.10, n.z)
-        * pow(max(-dot(gn0, normalize(WIN_DIR.xy)), 0.0), 1.6);
-    float sparkle = pow(max(dot(refl, BULB_DIR), 0.0), 220.0)
-        * (0.6 + 0.4 * vn(pw * 180.0 + ts * 5.0));
-    // 灯泡泛光高光（v9）：中锐（pow 60）暖色高光——窗光针尖（pow 320）
-    // 之外的真实水珠还有一枚灯泡泛光，双层高光更接近实拍
-    float bulbGlow = pow(max(dot(refl, BULB_DIR), 0.0), 60.0)
-        * (0.65 + 0.35 * vn(pw * 60.0 + ts * 2.3));
-    // 窗光针尖高光：每颗水珠一枚（真实照片里水珠的"湿润感"几乎全在
-    // 这枚高光上；位置由法线决定，随形状游动自然滑移）
-    float glint = pow(max(dot(refl, WIN_DIR), 0.0), 320.0);
-    // 天光高光（v11）：中锐（pow 12）的顶部泛光——湿润水面被天光整体
-    // 点亮的那层光泽，弥补"纯镜面针尖 + 漫反射"之间的过渡档
-    float skyGlint = pow(max(dot(refl, vec3(0.0, 0.0, 1.0)), 0.0), 12.0)
-        * (0.7 + 0.3 * vn(pw * 90.0 + ts * 1.7));
-
-    vec3 drop = mix(through, mirrored, fres);
-    drop += dropDiff;
-    drop += WIN_COLOR * crescent * CRESCENT_GAIN;
-    drop += WIN_COLOR * glint * GLINT_GAIN;
-    drop += ROOM_SKY * skyGlint * SKY_GLINT;
-    drop += BULB_COLOR * (sparkle * SPARKLE_GAIN + bulbGlow * BULB_GLOW)
-        * (0.7 + 0.6 * uTreble);
-
-    // ---- 接触线薄膜干涉：蒸气垫 + 液滴薄缘的牛顿环虹彩 ----
-    float optPath = hDome * IRID_PATH_NM;
-    float iridZone = exp(-hDome * hDome * IRID_FALLOFF);
-    drop += thinFilm(optPath) * iridZone * IRID_GAIN * (0.55 + 0.45 * awayWin);
-
-    // 水珠只落在可见底面上（不爬上内壁/沿口）
-    col = mix(col, drop, m * dropMask);
-
-    // ---- 飞溅星芒（v10 简化实现）---- 
-    // 真实粒子系统需几何 shader / 多 pass，单 pass fragment 内做全套代价
-    // 太高；这里用"星芒"作为视觉近似：液滴边缘外的辐射状短亮线群（hash
-    // 噪声调向打破对称，6 角星芒 + 时间相位），只在液滴边缘薄带出现
-    // ——液滴"看起来"在往外溅小液滴。濒死期（m 边缘 + treble 高）触发更
-    // 强。真正的方向飞溅（沿速度方向）需要把 field 内部 vel 传出，超出
-    // 当前架构；视觉上星芒 + 噪点足够让用户感知"爆裂"
-    float splashBand = (1.0 - m) * smoothstep(0.0, 0.30, m); // 液滴边缘薄带
-    float splashAz = atan(pw.y, pw.x)
-        + vn(pw * 47.0 + sd) * 0.9   // 角度噪打破对称
-        + ts * 0.7;                   // 星芒慢转
-    float splashStar = pow(0.5 + 0.5 * cos(splashAz * 6.0), 22.0);
-    float splashNoise = vn(pw * 110.0 + ts * 4.0);  // 噪点增强飞溅密度感
-    col += WIN_COLOR * splashBand * (splashStar + 0.35 * splashNoise)
-        * SPLASH_GAIN * (0.6 + 0.6 * uTreble) * (1.0 - m) * panMask
-        * awayWin * dropMask;
-
-    // ---- 接触处白烟（v10）——每颗水珠周围小范围浓白雾，活跃时更浓----
-    // 沸腾的水珠在接触处先冒一小团白烟，再合并到锅口大蒸汽层。位置：
-    // 液滴边缘（m<1 的过渡带），半径比水珠大约 30%
-    // v12 性能：fbm → vn（白烟只需一阶噪声，fbm 4 倍频在此过度）
-    float localSteam = (1.0 - m) * smoothstep(0.05, 0.40, m)
-        * vn(pw * 9.0 + ts * 1.3 + vec2(sd));
-    vec3 whiteSteam = vec3(0.78, 0.80, 0.84);
-    col = mix(col, whiteSteam, localSteam * STEAM_LOCAL_GAIN
-        * (0.65 + 0.55 * uBass) * panMask * dropMask);
-
-    // ---- 焦散环：液滴透镜聚焦上方光，接触线外缘亮边（光侧，底面上）----
-    float caustic = exp(-pow((F - 0.80) / 0.12, 2.0));
-    col += WIN_COLOR * caustic * CAUSTIC_GAIN * (1.0 - m) * panMask
-        * awayWin * dropMask;
-
-    // ---- 锅沿卷边 / 外壁+台面（锅口之外环带；v15 用真实锅口椭圆 rimE）----
-    // 锅沿：rimE≈1 的一圈卷边高光；再外面是锅外壁 + 台面
+    // v17 掩模先行：锅沿/外壁掩模提前算出——锅椭圆之外 ~70% 像素的
+    // field()/bg()/水珠着色结果都会被 panMask/dropMask 归零，v16 以前这些
+    // 重活在全屏白算。现在只在掩模有效的像素上计算；阈值 0.004 以下的
+    // 混叠贡献 <0.4% 亮度，肉眼不可辨。
     float wallMask = (1.0 - panMask) * smoothstep(1.12, 1.0, rimE);
     float outerMask = smoothstep(1.0, 1.04, rimE);
-    vec3 wallC = wallColor(p, rimE, 1.0)
-        * (1.0 - 0.10 * heat * smoothstep(1.0, 1.18, rimE));
-    col = mix(col, wallC, wallMask);
-    col = mix(col, outerColor(p, rimE, sd, 1.0), outerMask);
+    float heat = smoothstep(1.0, 0.1, pr);
+
+    vec3 col = vec3(0.0);
+    float m = 0.0;
+    if (max(panMask, wallMask) > 0.004) {
+        // 热空气扭曲（锅面全域）
+        vec2 sw = s + (0.004 + 0.005 * heat)
+            * vec2(vn(s * 13.0 + ts * 1.1), vn(s * 13.0 + 31.0 - ts * 0.9));
+        vec3 Ph2, Nh2;
+        if (!panHit(sw, Ph2, Nh2)) { Ph2 = Ph; Nh2 = Nh; }
+        vec2 pw = sw;
+
+        // ---- 锅面域：元球场 + 高度场 + 贴合阴影（变量提升到本级供着色复用）----
+        float F = 0.0;
+        vec2 g = vec2(0.0);
+        float dropRad = R_MAIN_MIN;
+        float dh = 0.0;
+        float hDome = 0.0;
+        vec2 gn0 = vec2(1.0, 0.0);
+        float awayWin = 0.0;
+        float ringSh = 0.0;
+        float ao = 0.0;
+        if (panMask > 0.004) {
+            F = field(pw, ts, sd, g, dropRad) * panMask;
+            F *= 1.0 + BEAT_BOIL * uBeat * sin(ts * 31.0);
+            m = smoothstep(ISO_LO, ISO_HI, F);
+
+            // ---- 高度场法线：h = √(1−1/F)（球冠解析解）----
+            float Fin = max(F, 1.0);
+            // v16 扁平化 = 毛细长度（Bond number）物理，替代 v14 的固定 DROP_FLAT：
+            //   液滴厚度 h ≈ 2·l_c（与体积无关），球形上限 h=R
+            //   ⟹ hDome 上限 = min(1, 2·l_c / R)
+            //   · 小珠（R < l_c）→ 1（半球，表面张力主导）
+            //   · 大珠（R = 11mm）→ 0.48（摊成厚度恒定的扁饼，重力主导）
+            //   这就是莱顿弗罗斯特大液滴的真实形态——"锅底的一摊"，不是立起来的球
+            float flatK = min(1.0, 2.0 * CAPILLARY / max(dropRad, 2e-3));
+            hDome = sqrt(max(1.0 - 1.0 / Fin, 0.0)) * flatK;
+            dh = 0.5 * flatK / (Fin * Fin * max(hDome, 0.035));
+
+            // ---- 贴合阴影（同一份场推出；背光侧更深）----
+            gn0 = g / (length(g) + 1e-4);
+            float azq = atan(pw.y, pw.x);
+            awayWin = 0.5 - 0.5 * cos(azq - atan(WIN_DIR.y, WIN_DIR.x));
+            ringSh = smoothstep(0.30, ISO_LO, F) * (1.0 - m) * panMask
+                * (0.75 + 0.5 * awayWin);
+            ao = smoothstep(0.06, 0.30, F) * (1.0 - m) * panMask;
+        }
+
+        // v15：锅面（锅底 + 内壁，连续的球冠）由**真 3D 法线统一着色**。
+        // 删掉 v8~v14 的 innerWallColor 内壁环带合成——那是一大片被涂得比锅底
+        // 还亮的均匀灰（0.24~0.34 vs 锅底 0.227），宽度还是拍脑袋的 BOTTOM_FAR
+        // =0.58 撑出来的 42% 锅半径，视觉上就是"锅里装了 1/3 高的水"。真实几
+        // 何下内壁是背光面，法线朝内上方，反射暗环境 → 自然比锅底暗。
+        // v17：bg() 只算一次，结果（panBase）同时供锅底合成与水珠折射复用
+        // （v16 以前 bg 以相同入参被调用两次——v12 注释声称的"合并"实际没做）。
+        vec3 panBase = bg(Ph2, Nh2, ts);
+        col = panBase;
+        col *= 1.0 - CONTACT_DARKEN * ringSh - AO_DARKEN * ao;
+        // 水珠可见域 = 整个命中锅面的区域（是否爬太高由 field() 的 θ_max 限制）
+        float dropMask = panMask;
+
+        if (panMask > 0.004) {
+            vec3 n = normalize(vec3(-g * dh, 1.0));
+            // ---- 水珠：折射/反射能量混合 ----
+            vec3 V = vec3(0.0, 0.0, 1.0);
+            float ndv = max(dot(n, V), 0.0);
+            float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+
+            // v17：删掉从未参与采样的折射偏移 ruv（死代码），折射底色直接
+            // 复用 panBase——输出与 v16 逐像素等价
+            vec3 through = panBase * 1.35 + envMap(vec3(0.0, 0.0, 1.0)) * LENS_GAIN;
+            through *= vec3(0.970, 0.985, 0.998);
+            through *= exp(-(1.0 - n.z) * ABSORB_R * vec3(1.35, 1.0, 0.82));
+            // 折射体边缘压暗：接触线附近全反射 + 贴合阴影把光"关"在滴内，
+            // 轮廓因此清晰（v6 通体均匀亮 = 哑光玻璃珠的病根）
+            through *= 1.0 - RIM_DARK * smoothstep(0.45, 0.15, n.z);
+            through += WIN_COLOR * pow(ndv, 7.0) * FOCUS_GAIN;
+            // 薄缘透光（v9）：接触线最外缘一圈背景透亮——真实液滴边缘薄如透镜，
+            // 背景光从薄处穿过来。RIM_DARK 压暗的是 0.06~0.45 的内缘反射区（暗边），
+            // 这层亮线只贴 <0.06 的最外沿（n.z 越低越靠边缘），叠加出"暗边 + 亮线"
+            through += panBase * RIM_LIGHT
+                * (1.0 - smoothstep(0.06, 0.18, n.z));
+
+            vec3 refl = 2.0 * ndv * n - V;
+            vec3 mirrored = envMap(refl);
+
+            // 水珠漫反射（v9）：天空光 diffuse——纯镜面球不存在，表面有微漫
+            // 反射，暗侧不至于死黑（ndv 越朝上越亮，像湿润的水面被天光点亮）
+            vec3 dropDiff = envMap(vec3(0.0, 0.0, 1.0)) * ndv * DROP_DIFF;
+
+            float crescent = smoothstep(0.35, 0.10, n.z)
+                * pow(max(-dot(gn0, normalize(WIN_DIR.xy)), 0.0), 1.6);
+            float sparkle = pow(max(dot(refl, BULB_DIR), 0.0), 220.0)
+                * (0.6 + 0.4 * vn(pw * 180.0 + ts * 5.0));
+            // 灯泡泛光高光（v9）：中锐（pow 60）暖色高光——窗光针尖（pow 320）
+            // 之外的真实水珠还有一枚灯泡泛光，双层高光更接近实拍
+            float bulbGlow = pow(max(dot(refl, BULB_DIR), 0.0), 60.0)
+                * (0.65 + 0.35 * vn(pw * 60.0 + ts * 2.3));
+            // 窗光针尖高光：每颗水珠一枚（真实照片里水珠的"湿润感"几乎全在
+            // 这枚高光上；位置由法线决定，随形状游动自然滑移）
+            float glint = pow(max(dot(refl, WIN_DIR), 0.0), 320.0);
+            // 天光高光（v11）：中锐（pow 12）的顶部泛光——湿润水面被天光整体
+            // 点亮的那层光泽，弥补"纯镜面针尖 + 漫反射"之间的过渡档
+            float skyGlint = pow(max(dot(refl, vec3(0.0, 0.0, 1.0)), 0.0), 12.0)
+                * (0.7 + 0.3 * vn(pw * 90.0 + ts * 1.7));
+
+            vec3 drop = mix(through, mirrored, fres);
+            drop += dropDiff;
+            drop += WIN_COLOR * crescent * CRESCENT_GAIN;
+            drop += WIN_COLOR * glint * GLINT_GAIN;
+            drop += ROOM_SKY * skyGlint * SKY_GLINT;
+            drop += BULB_COLOR * (sparkle * SPARKLE_GAIN + bulbGlow * BULB_GLOW)
+                * (0.7 + 0.6 * uTreble);
+
+            // ---- 接触线薄膜干涉：蒸气垫 + 液滴薄缘的牛顿环虹彩 ----
+            float optPath = hDome * IRID_PATH_NM;
+            float iridZone = exp(-hDome * hDome * IRID_FALLOFF);
+            drop += thinFilm(optPath) * iridZone * IRID_GAIN * (0.55 + 0.45 * awayWin);
+
+            // 水珠只落在可见底面上（不爬上内壁/沿口）
+            col = mix(col, drop, m * dropMask);
+
+            // ---- 飞溅星芒（v10 简化实现）---- 
+            // 真实粒子系统需几何 shader / 多 pass，单 pass fragment 内做全套代价
+            // 太高；这里用"星芒"作为视觉近似：液滴边缘外的辐射状短亮线群（hash
+            // 噪声调向打破对称，6 角星芒 + 时间相位），只在液滴边缘薄带出现
+            // ——液滴"看起来"在往外溅小液滴。濒死期（m 边缘 + treble 高）触发更
+            // 强。真正的方向飞溅（沿速度方向）需要把 field 内部 vel 传出，超出
+            // 当前架构；视觉上星芒 + 噪点足够让用户感知"爆裂"
+            float splashBand = (1.0 - m) * smoothstep(0.0, 0.30, m); // 液滴边缘薄带
+            float splashAz = atan(pw.y, pw.x)
+                + vn(pw * 47.0 + sd) * 0.9   // 角度噪打破对称
+                + ts * 0.7;                   // 星芒慢转
+            float splashStar = pow(0.5 + 0.5 * cos(splashAz * 6.0), 22.0);
+            float splashNoise = vn(pw * 110.0 + ts * 4.0);  // 噪点增强飞溅密度感
+            col += WIN_COLOR * splashBand * (splashStar + 0.35 * splashNoise)
+                * SPLASH_GAIN * (0.6 + 0.6 * uTreble) * (1.0 - m) * panMask
+                * awayWin * dropMask;
+
+            // ---- 接触处白烟（v10）——每颗水珠周围小范围浓白雾，活跃时更浓----
+            // 沸腾的水珠在接触处先冒一小团白烟，再合并到锅口大蒸汽层。位置：
+            // 液滴边缘（m<1 的过渡带），半径比水珠大约 30%
+            float localSteam = (1.0 - m) * smoothstep(0.05, 0.40, m)
+                * vn(pw * 9.0 + ts * 1.3 + vec2(sd));
+            vec3 whiteSteam = vec3(0.78, 0.80, 0.84);
+            col = mix(col, whiteSteam, localSteam * STEAM_LOCAL_GAIN
+                * (0.65 + 0.55 * uBass) * panMask * dropMask);
+
+            // ---- 焦散环：液滴透镜聚焦上方光，接触线外缘亮边（光侧，底面上）----
+            float caustic = exp(-pow((F - 0.80) / 0.12, 2.0));
+            col += WIN_COLOR * caustic * CAUSTIC_GAIN * (1.0 - m) * panMask
+                * awayWin * dropMask;
+        }
+    }
+
+    // ---- 锅沿卷边 / 外壁+台面（锅口之外环带；v15 用真实锅口椭圆 rimE）----
+    // 锅沿：rimE≈1 的一圈卷边高光；再外面是锅外壁 + 台面。
+    // v17：各自只在掩模有效的像素上计算（v16 以前全屏求值后按 0 权混入）
+    if (wallMask > 0.004) {
+        vec3 wallC = wallColor(p, rimE, 1.0)
+            * (1.0 - 0.10 * heat * smoothstep(1.0, 1.18, rimE));
+        col = mix(col, wallC, wallMask);
+    }
+    if (outerMask > 0.004) {
+        col = mix(col, outerColor(p, rimE, sd, 1.0), outerMask);
+    }
 
     // ---- 蒸汽：从锅口整个开口面升起（v8 修正位置）----
     // 源强 = 锅口椭圆内部（锅心最强、沿口衰减、锅外为零——蒸汽是从锅里
     // 冒出来的，不是从远侧沿一条线喷）；高度越高越散、越淡。
+    // v17：源强为 0 的像素跳过蒸汽纹理计算（锅外/锅侧大半屏），缕纹
+    // fbm→fbm3（软特征降阶）。
     float openR = rimE;                             // 锅口归一化坐标（v15 真椭圆）
     float src = smoothstep(1.10, 0.45, openR);      // 开口面内部为源（锅心最强）
-    float baseY = PAN_DEPTH * TILT_SIN + RY * 0.20; // 源起点：锅口平面高度
-    float hA = clamp((q.y - baseY) / (0.68 - baseY), 0.0, 1.0);
-    float sx = s.x;
-    float spread = exp(-sx * sx * mix(3.0, 1.2, hA));  // 越高越散开
-    // 竖缕纹理随时间上移 + 域扭曲（蒸汽不是竖直细条，是扭动的气柱）
-    vec2 wq = vec2(q.x * 8.0 + sd, q.y * 3.0 - ts * STEAM_RISE);
-    wq += vec2(vn(wq * 1.7 + ts * 0.35), vn(wq * 1.9 - ts * 0.31));
-    float wisp = smoothstep(0.42, 0.72, fbm(wq));
-    float dens = src * spread * wisp * smoothstep(0.0, 0.08, hA)
-        * (1.0 - 0.72 * hA);
-    vec3 steamCol = vec3(0.68, 0.71, 0.76)
-        * (0.75 + 0.45 * smoothstep(0.25, -0.35, q.x));  // 窗侧逆光更亮
-    col = mix(col, steamCol, dens * STEAM_ALPHA * (0.8 + 0.5 * uBass));
-    col += steamCol * dens * 0.10;
+    if (src > 0.003) {
+        float baseY = PAN_DEPTH * TILT_SIN + RY * 0.20; // 源起点：锅口平面高度
+        float hA = clamp((q.y - baseY) / (0.68 - baseY), 0.0, 1.0);
+        float sx = s.x;
+        float spread = exp(-sx * sx * mix(3.0, 1.2, hA));  // 越高越散开
+        // 竖缕纹理随时间上移 + 域扭曲（蒸汽不是竖直细条，是扭动的气柱）
+        vec2 wq = vec2(q.x * 8.0 + sd, q.y * 3.0 - ts * STEAM_RISE);
+        wq += vec2(vn(wq * 1.7 + ts * 0.35), vn(wq * 1.9 - ts * 0.31));
+        float wisp = smoothstep(0.42, 0.72, fbm3(wq));
+        float dens = src * spread * wisp * smoothstep(0.0, 0.08, hA)
+            * (1.0 - 0.72 * hA);
+        vec3 steamCol = vec3(0.68, 0.71, 0.76)
+            * (0.75 + 0.45 * smoothstep(0.25, -0.35, q.x));  // 窗侧逆光更亮
+        col = mix(col, steamCol, dens * STEAM_ALPHA * (0.8 + 0.5 * uBass));
+        col += steamCol * dens * 0.10;
+    }
 
     // ---- 照片后期链 ----
     col = filmic(col);

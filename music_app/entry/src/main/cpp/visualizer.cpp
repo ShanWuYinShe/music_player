@@ -9,6 +9,15 @@
  * 所有视觉在 fragment shader 逐像素解算，运算量只与像素数相关。
  * 拖尾反馈：FBO 纹理 ping-pong，上一帧结果作为 uPrev 采样。
  *
+ * 内部分辨率按场景区分（kPresetScale）：pan/aurora 逐像素成本高且形态
+ * 柔软，更低内部比例上屏线性放大视觉近无损；切风格触发反馈纹理重建时，
+ * 先把旧帧 blit 拷贝到新尺寸纹理，保留 uTransition 交叉淡化的旧画面。
+ *
+ * pan 状态预通道：每颗水珠的状态是每帧常量，主 pass 之前先用同一份
+ * pan.frag 以 20×4 小视口（uStateMode=1）把状态写进 RGBA16F 纹理，
+ * 主循环 texelFetch 取用（见 pan.frag 头注释）。依赖浮点颜色缓冲可渲染
+ * 扩展；不支持时以 PAN_NO_STATE_TEX 编译期开关退回逐像素路径。
+ *
  * shader 源码：磁盘上 cpp/shaders 目录下的 .frag 文件（GLSL ES 1.00，与
  * shader_playground 预览同源），由 CMake 在构建期经
  * tools/gen_shader_header.py 转成 GLES3 头文件 shader_src.h（生成到构建目录，
@@ -28,6 +37,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 
 #undef LOG_TAG
@@ -37,6 +47,20 @@ namespace {
 
 // 全屏三角形顶点（3 个点即可覆盖整个视口，fragment 承担全部工作）
 const float kQuad[] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+
+// pan 在 SHADER_SCENES（fractal,pan,aurora,spectrum）中的槽位；状态预通道
+// 只对 pan 生效。顺序变更须同步 CMakeLists.txt / VisualizerCore.ets /
+// playground presets.ts（pipelineConsistency.test.ts 有跨端断言）。
+constexpr int kVizPresetPan = 1;
+// pan 状态纹理尺寸：宽 = DROPLET_COUNT(20)、高 = PAN_STATE_ROWS(4)，
+// 与 pan.frag 内的常量一一对应（改那边必须同步这里）。
+constexpr int kPanStateTexW = 20;
+constexpr int kPanStateTexH = 4;
+
+// 各场景内部分辨率比例（相对表面尺寸）：pan/aurora 逐像素负载高、形态
+// 柔软，更低比例上屏放大视觉近无损；fractal/spectrum 维持 1/2。
+// 切风格引起比例变化时，反馈纹理经 blit 拷贝重建（保留交叉淡化旧画面）。
+constexpr float kPresetScale[kVizPresetCount] = {0.5f, 0.45f, 0.40f, 0.5f};
 
 EGLConfig gEglConfig = nullptr;
 EGLContext gEglContext = nullptr;
@@ -53,6 +77,8 @@ struct SceneLocs {
     GLint treble = -1;
     GLint transition = -1;
     GLint prev = -1;
+    GLint stateMode = -1;   // pan 专用：uStateMode（其他场景无此 uniform，恒 -1）
+    GLint state = -1;       // pan 专用：uState 采样器
 };
 
 GLuint gProgramScene[kVizPresetCount] = {0};
@@ -75,6 +101,12 @@ int gFlip = 0;
 // 内部渲染目标分辨率(半: fragment 负载降 4 倍,上屏线性放大柔化)
 int gRenderW = 0;
 int gRenderH = 0;
+
+// pan 状态预通道资源：RGBA16F 纹理 + FBO（20×4）；gStateMode 含义与
+// pan.frag 的 uStateMode 对齐：2=主 pass 读状态纹理，0=回退逐像素。
+GLuint gFboState = 0;
+GLuint gTexState = 0;
+int gStateMode = 0;
 
 GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
@@ -116,8 +148,20 @@ GLuint LinkProgram(GLuint vs, GLuint fs, SceneLocs* locs) {
         locs->treble = glGetUniformLocation(prog, "uTreble");
         locs->transition = glGetUniformLocation(prog, "uTransition");
         locs->prev = glGetUniformLocation(prog, "uPrev");
+        locs->stateMode = glGetUniformLocation(prog, "uStateMode");
+        locs->state = glGetUniformLocation(prog, "uState");
     }
     return prog;
+}
+
+/** pan 回退变体源码：#version 必须保持首行，把编译期开关插到它之后 */
+std::string WithPanStateDisabled(const char* src) {
+    std::string s(src);
+    size_t nl = s.find('\n');
+    if (nl == std::string::npos) {
+        return s;
+    }
+    return s.substr(0, nl + 1) + "#define PAN_NO_STATE_TEX 1\n" + s.substr(nl + 1);
 }
 
 void SwapFbo() {
@@ -205,15 +249,60 @@ void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
     gTexW = 0;
     gTexH = 0;
 
+    // pan 状态预通道资源：RGBA16F 颜色缓冲。ES3.0 核心不保证浮点格式可
+    // 渲染，查 EXT_color_buffer_float（32F+16F）/EXT_color_buffer_half_float
+    // （16F）；任一可用且 FBO 完整性通过才启用（gStateMode=2），否则以
+    // PAN_NO_STATE_TEX 编译 pan 回退变体（逐像素路径，见 pan.frag）
+    const char* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    bool floatColor = exts != nullptr &&
+        (strstr(exts, "EXT_color_buffer_float") != nullptr ||
+         strstr(exts, "EXT_color_buffer_half_float") != nullptr);
+    if (floatColor) {
+        glGenTextures(1, &gTexState);
+        glBindTexture(GL_TEXTURE_2D, gTexState);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, kPanStateTexW, kPanStateTexH, 0,
+            GL_RGBA, GL_HALF_FLOAT, nullptr);
+        glGenFramebuffers(1, &gFboState);
+        glBindFramebuffer(GL_FRAMEBUFFER, gFboState);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D, gTexState, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            OH_LOG_WARN(LOG_APP, "[%s] RGBA16F FBO incomplete, pan falls back",
+                LOG_TAG);
+            glDeleteFramebuffers(1, &gFboState);
+            gFboState = 0;
+            glDeleteTextures(1, &gTexState);
+            gTexState = 0;
+            floatColor = false;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    } else {
+        OH_LOG_WARN(LOG_APP, "[%s] no float color buffer ext, pan falls back",
+            LOG_TAG);
+    }
+    gStateMode = floatColor ? 2 : 0;
+
     // 顶点 shader 编译一次，供全部 program 复用
     GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
     if (!vs) {
         OH_LOG_ERROR(LOG_APP, "[%s] vertex shader compile failed", LOG_TAG);
         return;
     }
-    // 每个场景一个 program（程序清单由 CMake 的 SHADER_SCENES 决定）
+    // 每个场景一个 program（程序清单由 CMake 的 SHADER_SCENES 决定）；
+    // pan 在无浮点 FBO 时编译带 PAN_NO_STATE_TEX 的回退变体（同一份源码
+    // 插一个编译期开关，两条路径的寄存器压力互不影响）
     for (int i = 0; i < kVizPresetCount; i++) {
-        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragScene[i]);
+        const char* sceneSrc = kFragScene[i];
+        std::string fallbackSrc;
+        if (i == kVizPresetPan && gStateMode != 2) {
+            fallbackSrc = WithPanStateDisabled(sceneSrc);
+            sceneSrc = fallbackSrc.c_str();
+        }
+        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, sceneSrc);
         if (!fs) {
             OH_LOG_ERROR(LOG_APP, "[%s] scene %{public}d compile failed", LOG_TAG, i);
             glDeleteShader(vs);
@@ -269,6 +358,10 @@ void VizOnSurfaceChanged(OH_NativeXComponent* component, void* window) {
 void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window) {
     OH_LOG_INFO(LOG_APP, "[%s] surface destroyed", LOG_TAG);
     gReady = false;
+    // 状态预通道资源随 context 一并失效，标记复位（下次 created 重建）
+    gStateMode = 0;
+    gFboState = 0;
+    gTexState = 0;
     if (gEglDisplay != EGL_NO_DISPLAY) {
         eglMakeCurrent(gEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (gEglSurface != EGL_NO_SURFACE) {
@@ -284,6 +377,56 @@ void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window) {
     }
 }
 
+/** 在 newSize 重建两块反馈纹理；若旧纹理有效则先把旧帧 blit 拷贝过去
+ *  （线性重采样），保住 uTransition 交叉淡化依赖的旧画面——切风格改变
+ *  内部分辨率时，淡化源不落空、不闪花 */
+void ResizeFeedbackTextures(int newW, int newH) {
+    GLuint newTex[2] = {0, 0};
+    GLuint newFbo[2] = {0, 0};
+    for (int i = 0; i < 2; i++) {
+        glGenTextures(1, &newTex[i]);
+        glBindTexture(GL_TEXTURE_2D, newTex[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, newW, newH, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glGenFramebuffers(1, &newFbo[i]);
+        glBindFramebuffer(GL_FRAMEBUFFER, newFbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D, newTex[i], 0);
+    }
+    // 旧帧内容拷贝（首次初始化时旧纹理为 1×1 占位，拷贝无意义但无害）
+    if (gProgramBlit != 0 && gTexW > 1 && gTexH > 1) {
+        glBindVertexArray(gVao);
+        glUseProgram(gProgramBlit);
+        glViewport(0, 0, newW, newH);
+        for (int i = 0; i < 2; i++) {
+            glBindFramebuffer(GL_FRAMEBUFFER, newFbo[i]);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, gTex[i]);
+            glUniform1i(gBlitTex, 0);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
+        glBindVertexArray(0);
+    }
+    // 替换旧资源（id 已随本次 glTexImage2D 重定义失效，直接覆盖）
+    for (int i = 0; i < 2; i++) {
+        if (gTex[i] != 0) {
+            glDeleteTextures(1, &gTex[i]);
+        }
+        if (gFbo[i] != 0) {
+            glDeleteFramebuffers(1, &gFbo[i]);
+        }
+        gTex[i] = newTex[i];
+        gFbo[i] = newFbo[i];
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gTexW = newW;
+    gTexH = newH;
+}
+
 void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
                      double presetLock, double transition) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
@@ -297,25 +440,40 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     if (idx < 0 || idx >= kVizPresetCount) {
         idx = 0;
     }
-    // 内部目标分辨率: 显示 1/2(移动 GPU fragment 负载减 4 倍,上屏放大柔化)
-    gRenderW = gWidth / 2;
-    gRenderH = gHeight / 2;
-    // 反馈纹理按内部尺寸初始化/重建
+    // 内部目标分辨率：按场景比例（pan/aurora 低一档，上屏线性放大柔化）
+    gRenderW = std::max(1, static_cast<int>(gWidth * kPresetScale[idx]));
+    gRenderH = std::max(1, static_cast<int>(gHeight * kPresetScale[idx]));
+    // 反馈纹理按内部尺寸初始化/重建（切风格变比例时旧帧 blit 保留）
     if (gTexW != gRenderW || gTexH != gRenderH) {
-        for (int i = 0; i < 2; i++) {
-            glBindTexture(GL_TEXTURE_2D, gTex[i]);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, gRenderW, gRenderH, 0,
-                GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        }
-        gTexW = gRenderW;
-        gTexH = gRenderH;
+        ResizeFeedbackTextures(gRenderW, gRenderH);
     }
-    glViewport(0, 0, gRenderW, gRenderH);
     glBindVertexArray(gVao);
+    const SceneLocs& loc = gLocs[idx];
+
+    // pass S（仅 pan）：状态预通道——20×4 小视口，uStateMode=1，把每颗
+    // 水珠的常量状态写进 RGBA16F 纹理（主 pass 循环 texelFetch 取用）。
+    // 80 像素开销可忽略；uPrev 绑定反馈纹理仅为采样器合法，写出分支不采样
+    if (idx == kVizPresetPan && gStateMode == 2) {
+        glBindFramebuffer(GL_FRAMEBUFFER, gFboState);
+        glViewport(0, 0, kPanStateTexW, kPanStateTexH);
+        glUseProgram(gProgramScene[idx]);
+        glUniform1f(loc.t, static_cast<float>(t));
+        glUniform1f(loc.seed, static_cast<float>(seed));
+        glUniform1f(loc.beat, static_cast<float>(beat));
+        glUniform1f(loc.bass, static_cast<float>(bass));
+        glUniform1f(loc.treble, static_cast<float>(treble));
+        glUniform1f(loc.transition, static_cast<float>(transition));
+        glUniform1f(loc.stateMode, 1.0f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
+        glUniform1i(loc.prev, 0);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+
     // pass A：场景 + 反馈拖尾 -> 当前 FBO 纹理（采样另一张上一帧纹理）
+    glViewport(0, 0, gRenderW, gRenderH);
     glBindFramebuffer(GL_FRAMEBUFFER, gFbo[gFlip]);
     glUseProgram(gProgramScene[idx]);
-    const SceneLocs& loc = gLocs[idx];
     glUniform1f(loc.t, static_cast<float>(t));
     glUniform1f(loc.seed, static_cast<float>(seed));
     glUniform2f(loc.res, static_cast<float>(gRenderW), static_cast<float>(gRenderH));
@@ -323,6 +481,15 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     glUniform1f(loc.bass, static_cast<float>(bass));
     glUniform1f(loc.treble, static_cast<float>(treble));
     glUniform1f(loc.transition, static_cast<float>(transition));
+    if (idx == kVizPresetPan) {
+        // 2=读状态纹理（常规）；0=回退逐像素（无浮点 FBO 的设备）
+        glUniform1f(loc.stateMode, gStateMode == 2 ? 2.0f : 0.0f);
+        if (gStateMode == 2) {
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, gTexState);
+            glUniform1i(loc.state, 1);
+        }
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
     glUniform1i(loc.prev, 0);

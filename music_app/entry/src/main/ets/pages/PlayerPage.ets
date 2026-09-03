@@ -17,10 +17,13 @@ interface QueueEntry {
 }
 
 /**
- * 播放页：全屏 MilkDrop 可视化背景 + 浮动控件 /
- * 大封面舞台（Poweramp 式：封面浮于可视化之上，点击封面切纯可视化全屏，
- * 顶栏按钮双态切换）/ 进度与音量 / 收藏与定时 / 主控制区 / 播放队列半模态。
- * 进入时系统栏字色切浅色以融合深底，离开时按深浅模式恢复。
+ * 播放页：舞台双态互斥设计——同一时刻只有一种视觉主体。
+ * 封面舞台（默认）：模糊放大的封面做氛围背景 + Poweramp 式大封面，
+ *   可视化停渲染不烧 GPU（此前封面浮于全速可视化之上，两套视觉互相
+ *   竞争且大部分渲染被遮挡，属设计矛盾）；
+ * 可视化舞台：纯全屏 MilkDrop 可视化 + 控件，点击画面切风格；
+ * 进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
+ * 顶栏按钮或点击封面切换；进入时系统栏字色切浅色以融合深底，离开恢复。
  */
 @ComponentV2
 export struct PlayerPage {
@@ -36,7 +39,8 @@ export struct PlayerPage {
   @Local isQueueOpen: boolean = false;
   /** 当前可视化风格号（顶栏按钮与背景点击共用） */
   @Local vizPreset: number = 0;
-  /** 舞台双态：true 大封面（默认，Poweramp 习惯）；false 纯可视化全屏 */
+  /** 舞台双态（互斥）：true 封面舞台（默认，Poweramp 习惯，可视化停渲染）；
+   * false 纯可视化全屏 */
   @Local coverMode: boolean = true;
   private volumeBeforeMute: number = 1;
 
@@ -91,11 +95,14 @@ export struct PlayerPage {
 
   build() {
     Stack({ alignContent: Alignment.Top }) {
-      // 全屏可视化底景：MilkDrop 风格频谱流动层，延伸至系统栏下自然融合
+      // 全屏可视化（可视化舞台的视觉主体）：MilkDrop 风格频谱流动层，
+      // 延伸至系统栏下自然融合。封面模式下停帧并隐藏——封面与可视化
+      // 互斥：XComponent 保持挂载（避免 EGL 重建黑屏坑），切回即恢复
       VisualizerView({
         player: this.player,
         variant: 'full',
         presetIndex: this.vizPreset,
+        active: !this.coverMode,
         onPresetChange: (next: number): void => {
           this.vizPreset = next;
           this.toastPreset(next);
@@ -103,7 +110,41 @@ export struct PlayerPage {
       })
         .width('100%')
         .height('100%')
+        .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+      // 封面舞台氛围背景（仅封面模式渲染）：模糊放大的封面做环境光，
+      // 叠深色遮罩保证前景可读——封面即舞台光源，无可视化渲染；无封面
+      // 时回落暖黑渐变。静态光栅，仅切歌时重绘一次
+      if (this.coverMode) {
+        Stack() {
+          if (this.song !== null && this.song.coverPath !== '') {
+            Image(this.song.coverPath)
+              .width('146%')
+              .height('146%')
+              .objectFit(ImageFit.Cover)
+              .blur(50)
+              .opacity(0.55)
+          } else {
+            Column()
+              .width('100%')
+              .height('100%')
+              .linearGradient({
+                angle: 135,
+                colors: [['#231C11', 0], ['#0C0A09', 0.55], ['#060504', 1]]
+              })
+          }
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('rgba(8,6,4,0.52)')
+        }
+        .width('100%')
+        .height('100%')
+        .clip(true)
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        .transition(TransitionEffect.OPACITY.animation({ duration: 280, curve: Curve.EaseOut }))
+      }
 
       Column() {
         // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）
@@ -138,7 +179,7 @@ export struct PlayerPage {
         .height(48)
         .padding({ left: 8, right: 8 })
 
-        // 上部大舞台：封面模式展示 Poweramp 式大封面（浮于可视化底景上，
+        // 上部大舞台：封面模式展示 Poweramp 式大封面（底衬模糊封面氛围，
         // 暂停时轻微缩小变暗）；点击封面进入纯可视化全屏。可视化模式点击
         // 画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
