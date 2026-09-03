@@ -129,6 +129,9 @@ void SwapFbo() {
 
 void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
     OH_LOG_INFO(LOG_APP, "[%s] surface created", LOG_TAG);
+    if (gReady && gEglDisplay != EGL_NO_DISPLAY) {
+        return; // 幂等:created 与 show 双路径都可能触发初始化
+    }
     uint64_t w = 0, h = 0;
     OH_NativeXComponent_GetXComponentSize(component, window, &w, &h);
     gWidth = static_cast<int>(w);
@@ -197,6 +200,10 @@ void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gTex[i], 0);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // 反馈纹理尺寸标记重置:renderFrame 首帧据此重建纹理——旧 context 的
+    // 纹理 id 已随 eglTerminate 失效,残留尺寸会跳过重建采样到脏数据
+    gTexW = 0;
+    gTexH = 0;
 
     // 顶点 shader 编译一次，供全部 program 复用
     GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
@@ -235,6 +242,20 @@ void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
     gReady = true;
     OH_LOG_INFO(LOG_APP, "[%s] GLES init ok, size=%{public}dx%{public}d, presets=%{public}d",
         LOG_TAG, gWidth, gHeight, kVizPresetCount);
+}
+
+void VizOnSurfaceShow(OH_NativeXComponent* component, void* window) {
+    if (!gReady || gEglDisplay == EGL_NO_DISPLAY) {
+        OH_LOG_INFO(LOG_APP, "[%s] surface show -> init", LOG_TAG);
+        VizOnSurfaceCreated(component, window);
+        return;
+    }
+    // 已就绪:同步最新尺寸(surface 变化经 changed 处理,这里兜底)
+    uint64_t w = 0, h = 0;
+    if (OH_NativeXComponent_GetXComponentSize(component, window, &w, &h) == 0) {
+        gWidth = static_cast<int>(w);
+        gHeight = static_cast<int>(h);
+    }
 }
 
 void VizOnSurfaceChanged(OH_NativeXComponent* component, void* window) {

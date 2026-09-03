@@ -32,6 +32,12 @@ void OnSurfaceChanged(OH_NativeXComponent* component, void* window) {
 void OnSurfaceDestroyed(OH_NativeXComponent* component, void* window) {
     VizOnSurfaceDestroyed(component, window);
 }
+// surface show 兜底:重进播放页时 XComponent 新实例的 created 事件早于
+// onLoad 注册(fallback register 不回放),而 show 事件晚于注册——由它补发
+// EGL 初始化(内部幂等),修复"第二次进入可视化必黑屏"。
+void OnSurfaceShow(OH_NativeXComponent* component, void* window) {
+    VizOnSurfaceShow(component, window);
+}
 
 // 框架保存回调结构指针, 必须静态存储直至 OnSurfaceDestroyed
 OH_NativeXComponent_Callback gCallback = {
@@ -47,6 +53,9 @@ void TryRegisterWith(OH_NativeXComponent* component) {
     }
     int32_t ret = OH_NativeXComponent_RegisterCallback(component, &gCallback);
     OH_LOG_INFO(LOG_APP, "[%s] RegisterCallback ret=%{public}d", LOG_TAG, ret);
+    // show 兜底注册(created 丢失时的第二初始化路径)
+    ret = OH_NativeXComponent_RegisterSurfaceShowCallback(component, OnSurfaceShow);
+    OH_LOG_INFO(LOG_APP, "[%s] RegisterSurfaceShowCallback ret=%{public}d", LOG_TAG, ret);
 }
 
 napi_value Undefined(napi_env env) {
