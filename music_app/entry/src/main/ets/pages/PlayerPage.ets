@@ -21,8 +21,8 @@ interface QueueEntry {
  * 封面舞台（默认）：模糊放大的封面做氛围背景 + Poweramp 式大封面，
  *   可视化停渲染不烧 GPU（此前封面浮于全速可视化之上，两套视觉互相
  *   竞争且大部分渲染被遮挡，属设计矛盾）；
- * 可视化舞台：纯全屏 MilkDrop 可视化 + 控件，点击画面切风格；
- * 进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
+ * 可视化舞台：纯全屏 MilkDrop 可视化 + 控件（顶/底垫暗色渐变保证可读），
+ *   点击画面切风格；进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
  * 交互对齐 Poweramp（官方 Player UI 手势）：封面/可视化区**左右滑动切歌**
  * （上一首/下一首，封面跟手位移）、**点按封面返回曲库**（Poweramp 的
  * tap-on-cover 跳库行为）；封面↔可视化舞台经顶栏按钮切换。
@@ -170,21 +170,51 @@ export struct PlayerPage {
         .transition(TransitionEffect.OPACITY.animation({ duration: 280, curve: Curve.EaseOut }))
       }
 
+      // 可视化模式可读性衬底（仅可视化舞台渲染）：顶栏与底部控制面板后垫
+      // 暗色渐变——Poweramp 可视化模式下控件压暗背景保证可读；不拦截手势
+      // （可视化区点击切风格、左右滑切歌照常生效）
+      if (!this.coverMode) {
+        Column() {
+          Column()
+            .width('100%')
+            .height(132)
+            .linearGradient({
+              angle: 180,
+              colors: [['rgba(5,4,3,0.58)', 0], ['rgba(5,4,3,0)', 1]]
+            })
+          Blank()
+          Column()
+            .width('100%')
+            .height(380)
+            .linearGradient({
+              angle: 0,
+              colors: [['rgba(5,4,3,0.80)', 0], ['rgba(5,4,3,0)', 1]]
+            })
+        }
+        .width('100%')
+        .height('100%')
+        .hitTestBehavior(HitTestMode.None)
+        .transition(TransitionEffect.OPACITY.animation({ duration: 280, curve: Curve.EaseOut }))
+      }
+
       Column() {
         // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）。
         // 可视化风格菜单只在可视化舞台出现——封面模式与可视化互斥，此时
         // 切风格无作用，展示属多余入口
         Row() {
-          SymbolGlyph($r('sys.symbol.chevron_left'))
-            .fontSize(24)
+          // Poweramp 语义：播放页是自下而上的覆盖层，返回用下箭头（收起）
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(26)
             .fontColor([$r('app.color.viz_fg')])
-            .padding(12)
+            .padding(10)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => this.navPathStack.pop())
           Blank()
           SymbolGlyph(this.coverMode ? $r('sys.symbol.waveform') : $r('sys.symbol.picture'))
             .fontSize(20)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => {
               this.coverMode = !this.coverMode;
             })
@@ -193,12 +223,14 @@ export struct PlayerPage {
               .fontSize(22)
               .fontColor([$r('app.color.viz_fg')])
               .padding(12)
+              .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
               .bindMenu(this.VizMenu())
           }
           SymbolGlyph($r('sys.symbol.list_bullet'))
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => {
               this.isQueueOpen = true;
             })
@@ -208,8 +240,8 @@ export struct PlayerPage {
         .padding({ left: 8, right: 8 })
 
         // 上部大舞台：封面模式展示 Poweramp 式大封面（底衬模糊封面氛围，
-        // 暂停时轻微缩小变暗）；点击封面进入纯可视化全屏。可视化模式点击
-        // 画面切风格（由 VisualizerView 内部处理）。
+        // 暂停时轻微缩小变暗）；左右滑动切歌、点按返回曲库（Poweramp 手势）。
+        // 可视化模式点击画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
           Column() {
             Stack() {
@@ -217,7 +249,7 @@ export struct PlayerPage {
                 Image(this.song.coverPath)
                   .width('100%')
                   .height('100%')
-                  .borderRadius(26)
+                  .borderRadius(16)
                   .objectFit(ImageFit.Cover)
                   .interpolation(ImageInterpolation.Medium)
               } else {
@@ -231,20 +263,20 @@ export struct PlayerPage {
                 }
                 .width('100%')
                 .height('100%')
-                .borderRadius(26)
+                .borderRadius(16)
                 .backgroundColor('rgba(255,255,255,0.06)')
                 .justifyContent(FlexAlign.Center)
               }
             }
             .aspectRatio(1)
-            .width('74%')
+            .width('84%')
             .clip(true)
-            .scale(this.isPlaying ? { x: 1, y: 1 } : { x: 0.93, y: 0.93 })
-            .opacity(this.isPlaying ? 1.0 : 0.72)
+            .scale(this.isPlaying ? { x: 1, y: 1 } : { x: 0.94, y: 0.94 })
+            .opacity(this.isPlaying ? 1.0 : 0.7)
             .animation({ duration: 360, curve: Curve.EaseOut })
             // Poweramp 招牌手势：封面左右滑动切歌（跟手位移，松手判定±阈值）
             .translate({ x: this.coverDragX })
-            .shadow({ radius: 42, color: 'rgba(0,0,0,0.55)', offsetY: 14 })
+            .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
             .gesture(
               PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
                 .onActionUpdate((e: GestureEvent): void => {
@@ -270,15 +302,15 @@ export struct PlayerPage {
 
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
         Column() {
-          Column({ space: 5 }) {
+          Column({ space: 6 }) {
             Text(this.song ? this.song.title : '未在播放')
-              .fontSize(24)
+              .fontSize(22)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.song ? this.song.artist : '')
-              .fontSize(15)
+              .fontSize(14)
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -293,6 +325,7 @@ export struct PlayerPage {
                 }
               }
               .fontSize(11)
+              .letterSpacing(0.8)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             }
@@ -316,48 +349,58 @@ export struct PlayerPage {
             .padding({ left: 2, right: 2 })
           }
           .width('100%')
-          .margin({ top: 20 })
+          .margin({ top: 16 })
 
-          // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢
+          // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
+          // 全部带按压回弹 clickEffect）
           Row({ space: 30 }) {
           SymbolGlyph(playModeSymbol(this.player.playMode))
-            .fontSize(26)
+            .fontSize(24)
             .fontColor([$r('app.color.viz_fg')])
+            .padding(6)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => {
               this.player.cyclePlayMode();
               promptAction.showToast({ message: playModeLabel(this.player.playMode) });
             })
 
           SymbolGlyph($r('sys.symbol.backward_end_fill'))
-            .fontSize(34)
+            .fontSize(32)
             .fontColor([$r('app.color.viz_fg')])
+            .padding(6)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.player.previous())
 
           Stack({ alignContent: Alignment.Center }) {
             SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-              .fontSize(36)
+              .fontSize(38)
               .fontColor([$r('app.color.paper')])
           }
-          .width(72)
-          .height(72)
-          .borderRadius(36)
+          .width(76)
+          .height(76)
+          .borderRadius(38)
           .backgroundColor($r('app.color.accent'))
-          .shadow({ radius: 16, color: 'rgba(0,0,0,0.35)', offsetY: 2 })
+          .shadow({ radius: 18, color: 'rgba(0,0,0,0.4)', offsetY: 3 })
+          .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
           .onClick(() => this.player.togglePlay())
 
           SymbolGlyph($r('sys.symbol.forward_end_fill'))
-            .fontSize(34)
+            .fontSize(32)
             .fontColor([$r('app.color.viz_fg')])
+            .padding(6)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.player.next())
 
           SymbolGlyph(this.isFavorite() ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
-            .fontSize(26)
+            .fontSize(24)
             .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.viz_fg')])
+            .padding(6)
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.toggleFavorite())
         }
         .justifyContent(FlexAlign.SpaceEvenly)
         .width('100%')
-        .margin({ top: 18 })
+        .margin({ top: 14 })
 
         // 副控制：音量 + 定时关闭
         Row({ space: 10 }) {
@@ -401,7 +444,7 @@ export struct PlayerPage {
           .bindMenu(this.SleepMenu())
         }
         .width('100%')
-        .margin({ top: 16 })
+        .margin({ top: 12 })
         .padding({ left: 28, right: 28 })
         }
         // 控制面板整体水平边距与底部收尾
