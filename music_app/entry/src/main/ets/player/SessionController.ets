@@ -37,7 +37,8 @@ export class SessionController {
     }
   }
 
-  /** 通知媒体中心当前曲目元数据 */
+  /** 通知媒体中心当前曲目元数据；本地曲目带封面（mediaImage 支持
+   * 本地路径，锁屏/通知栏展示专辑封面），在线曲目无封面文件则省略 */
   async updateMetadata(song: SongRecord): Promise<void> {
     if (!this.session) {
       return;
@@ -47,7 +48,9 @@ export class SessionController {
         assetId: song.id,
         title: song.title,
         artist: song.artist,
-        duration: song.duration
+        album: song.album !== '' ? song.album : undefined,
+        duration: song.duration > 0 ? song.duration : undefined,
+        mediaImage: song.coverPath !== '' ? song.coverPath : undefined
       };
       await this.session.setAVMetadata(metadata);
     } catch (err) {

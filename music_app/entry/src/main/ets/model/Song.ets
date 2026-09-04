@@ -21,10 +21,3 @@ export interface SongRecord {
   /** 网易云付费曲目（服务端未配置登录 cookie 时仅 30~60 秒试听） */
   vip?: boolean;
 }
-
-/**
- * 判断两条歌曲记录是否同曲（用于导入去重）
- */
-export function sameSong(a: SongRecord, b: SongRecord): boolean {
-  return a.id === b.id;
-}

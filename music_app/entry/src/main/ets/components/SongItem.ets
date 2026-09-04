@@ -1,20 +1,51 @@
 import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
+import { TextSegment, splitHighlight } from '../common/LibraryFilter';
 import { EqIndicator } from './EqIndicator';
 
 const COVER_SIZE = 48;
 const CURRENT_COLOR = $r('app.color.accent');
 
 /**
- * 歌曲列表项：封面 / 歌名 / 歌手 + 当前播放高亮（EQ 跳动指示）+ VIP 徽标
+ * 歌曲列表项：封面 / 歌名 / 歌手（搜索关键词高亮）+ 当前播放高亮
+ * （EQ 跳动指示）+ VIP 徽标
  */
 @ComponentV2
 export struct SongItem {
   @Param @Require song: SongRecord;
   @Param isCurrent: boolean = false;
   @Param isPlaying: boolean = false;
+  /** 搜索关键词（大小写不敏感高亮命中片段，空串不高亮） */
+  @Param keyword: string = '';
   @Event onItemClick: (id: string) => void = () => {
   };
+
+  /** 歌名/歌手命中片段（高亮渲染用） */
+  @Computed
+  get titleSegments(): TextSegment[] {
+    return splitHighlight(this.song.title, this.keyword);
+  }
+
+  @Computed
+  get artistSegments(): TextSegment[] {
+    return splitHighlight(this.song.artist, this.keyword);
+  }
+
+  /** 分段渲染：命中片段以 accent 着色，其余继承 Text 颜色 */
+  @Builder
+  HighlightText(segments: TextSegment[], baseColor: ResourceColor, fontSize: number,
+    fontWeight: FontWeight) {
+    Text() {
+      ForEach(segments, (seg: TextSegment, idx: number) => {
+        Span(seg.text)
+          .fontColor(seg.hit ? CURRENT_COLOR : baseColor)
+          .fontWeight(seg.hit ? FontWeight.Medium : fontWeight)
+          .fontSize(fontSize)
+      }, (seg: TextSegment, idx: number) => `${idx}_${seg.text}`)
+    }
+    .maxLines(1)
+    .textOverflow({ overflow: TextOverflow.Ellipsis })
+  }
 
   build() {
     Row({ space: 12 }) {
@@ -43,16 +74,12 @@ export struct SongItem {
       // 歌名 / 歌手
       Column({ space: 4 }) {
         Row({ space: 6 }) {
-          Text(this.song.title)
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          this.HighlightText(this.titleSegments,
+            this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'), 16, FontWeight.Medium)
           // 网易云付费曲目徽标（未登录时为 30 秒试听，在线页横幅统一说明）
           if (this.song.vip === true) {
             Text('VIP')
-              .fontSize(9)
+              .fontSize(10)
               .fontWeight(FontWeight.Medium)
               .fontColor(CURRENT_COLOR)
               .padding({ left: 4, right: 4, top: 1, bottom: 1 })
@@ -61,11 +88,7 @@ export struct SongItem {
           }
         }
         .alignItems(VerticalAlign.Center)
-        Text(this.song.artist)
-          .fontSize(13)
-          .fontColor($r('app.color.ink_soft'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        this.HighlightText(this.artistSegments, $r('app.color.ink_soft'), 13, FontWeight.Normal)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)

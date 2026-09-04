@@ -6,9 +6,7 @@
     "mainElement": "EntryAbility",
     "srcEntry": "./ets/entryability/AppAbilityStage.ets",
     "deviceTypes": [
-      "phone",
-      "tablet",
-      "2in1"
+      "phone"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,

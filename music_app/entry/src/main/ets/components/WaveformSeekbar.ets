@@ -65,8 +65,10 @@ export struct WaveformSeekbar {
       }, (h: number, index: number) => `${index}_${h.toFixed(3)}`)
     }
     .width('100%')
-    .height(BAR_MAX_VP)
+    // 触控热区达标（≥40vp）：柱体仍 ≤30vp 视觉高度，容器上下留白居中
+    .height(40)
     .alignItems(VerticalAlign.Center)
+    .accessibilityText('播放进度，点按或拖动调节')
     .onAreaChange((_old: Area, area: Area) => {
       this.widthVp = area.width as number;
     })

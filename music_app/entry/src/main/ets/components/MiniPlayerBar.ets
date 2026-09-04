@@ -22,6 +22,8 @@ export struct MiniPlayerBar {
   @Param @Require info: MiniInfo;
   @Event onTapOpen: () => void = () => {
   };
+  /** 迷你条是否在屏幕可见区：不可见（如切到播放页）时停掉频谱动画省电 */
+  @Local barVisible: boolean = true;
 
   private progressPercent(): number {
     if (this.player.duration <= 0) {
@@ -35,8 +37,8 @@ export struct MiniPlayerBar {
     Column() {
         Stack({ alignContent: Alignment.TopStart }) {
           // 全卡片频谱背景（先声明垫底；固定高度与内容行一致，'100%' 会
-          // 与 Stack 高度互引把迷你条撑高）
-          VisualizerView({ player: this.player, variant: 'mini' })
+          // 与 Stack 高度互引把迷你条撑高）；随可见性启停渲染
+          VisualizerView({ player: this.player, variant: 'mini', active: this.barVisible })
             .width('100%')
             .height(BAR_HEIGHT)
 
@@ -78,16 +80,21 @@ export struct MiniPlayerBar {
             SymbolGlyph(this.info.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(26)
               .fontColor([$r('app.color.ink')])
+              .padding(7)
+              .accessibilityText(this.info.isPlaying ? '暂停' : '播放')
               .onClick(() => this.player.togglePlay())
 
             SymbolGlyph($r('sys.symbol.forward_end_fill'))
               .fontSize(26)
               .fontColor([$r('app.color.ink')])
+              .padding(7)
+              .accessibilityText('下一首')
               .onClick(() => this.player.next())
           }
           .width('100%')
           .height(BAR_HEIGHT)
           .padding({ left: 16, right: 16 })
+          .accessibilityText(`正在播放：${this.info.title}，${this.info.artist}，点按打开播放页`)
           .onClick(() => this.onTapOpen())
 
           // 实时进度细线
@@ -99,6 +106,10 @@ export struct MiniPlayerBar {
             .opacity(this.info.isPlaying ? 0.5 : 0.3)
         }
         .width('100%')
+        // 离开可见区（进播放页/切后台）停掉频谱动画，回来自动恢复
+        .onVisibleAreaChange([0.0, 1.0], (isExpanding: boolean, currentRatio: number) => {
+          this.barVisible = isExpanding && currentRatio >= 1.0;
+        })
       }
     .width('100%')
     .clip(true)

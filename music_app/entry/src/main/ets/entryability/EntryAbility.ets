@@ -1,7 +1,6 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
-import display from '@ohos.display';
 import { appStore } from '../viewmodel/AppStore';
 
 const DOMAIN: number = 0x0000;
@@ -31,7 +30,7 @@ export default class EntryAbility extends UIAbility {
       }
       // 避让区高度须在页面加载完成后读取：窗口刚创建时 avoid area 尚未
       // 就绪（实测读到 0）。@Trace 字段赋值后已渲染的页面自动刷新。
-      this.readSafeArea(windowStage);
+      appStore.readSafeArea();
       hilog.info(DOMAIN, TAG, 'Succeeded in loading content.');
     });
   }
@@ -53,20 +52,6 @@ export default class EntryAbility extends UIAbility {
       appStore.applyWindowChrome();
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setup immersive window failed: %{public}s', JSON.stringify(err));
-    }
-  }
-
-  /** 读取系统栏/导航条避让高度（vp）存入 AppStore，供各页面统一避让 */
-  private readSafeArea(windowStage: window.WindowStage): void {
-    try {
-      const win = windowStage.getMainWindowSync();
-      const sys = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-      const nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-      const density = display.getDefaultDisplaySync().densityPixels;
-      appStore.safeTopVp = sys.topRect.height / density;
-      appStore.safeBottomVp = nav.bottomRect.height / density;
-    } catch (err) {
-      hilog.error(DOMAIN, TAG, 'read safe area failed: %{public}s', JSON.stringify(err));
     }
   }
 

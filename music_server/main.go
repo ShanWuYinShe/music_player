@@ -230,9 +230,11 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 	// 开箱体验:q 为空时在本地曲库之后追加网易「新歌速递」推荐——「在线」
 	// 列表是"在线可播的一切"而非纯服务器目录,服务器曲库只有寥寥几首时
 	// 在线页仍有内容可听(推荐结果带 VIP 标记,客户端按登录态提示试听)。
+	// snapshot 返回的是与 s.library 共享底层数组的只读视图:append 前必须
+	// 拷贝,否则上游结果会越过 len 写进共享数组,并发请求下构成数据竞争。
 	if query == "" && s.netease.enabled() && len(matched) < limit {
 		ctx, cancel := context.WithTimeout(r.Context(), neteaseUpstreamTimeout)
-		matched = append(matched, s.netease.discover(ctx)...)
+		matched = append(append([]Song(nil), matched...), s.netease.discover(ctx)...)
 		cancel()
 	}
 	total := len(matched)
@@ -290,34 +292,52 @@ func (s *musicServer) handleStream(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(entry.relPath), entry.modTime, f)
 }
 
-// snapshot 返回当前曲库切片(必要时先刷新);返回值是共享底层数组的只读视图,
-// 调用方只做截断与遍历,不得修改元素。
+// snapshot 返回当前曲库切片(与 s.library 共享底层数组的只读视图,调用方
+// 只做截断与遍历,追加内容前必须拷贝)。首次访问同步扫描保证首请求可用;
+// 索引过期时触发后台刷新并先返回旧数据——大曲库全量扫描耗时,不让请求
+// 跟着等;刷新失败同样推进 scannedAt(冷却一个 TTL 再试),避免失败风暴。
 func (s *musicServer) snapshot() []Song {
 	s.mu.RLock()
-	if time.Since(s.scannedAt) < scanTTL {
+	scanned := s.scannedAt
+	library := s.library
+	s.mu.RUnlock()
+
+	if scanned.IsZero() {
+		// 首次访问:同步扫描,保证冷启动的首个请求能拿到曲库。
+		if err := s.refreshLibraryOnce(); err != nil {
+			return nil
+		}
+		s.mu.RLock()
 		defer s.mu.RUnlock()
 		return s.library
 	}
-	s.mu.RUnlock()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// 双重检查:等锁期间可能已被其他请求刷新。
-	if time.Since(s.scannedAt) >= scanTTL {
-		library, byID, err := scanLibrary(s.config.LibraryDir)
-		if err != nil {
-			// 扫描失败时保留旧索引继续服务,只记日志。
-			log.Printf("scan library: %v", err)
-		} else {
-			s.library = library
-			s.byID = byID
-			s.scannedAt = time.Now()
-		}
+	if time.Since(scanned) >= scanTTL {
+		go s.refreshLibraryOnce()
 	}
-	return s.library
+	return library
 }
 
-// refreshLibrary 强制扫描一次(启动自检/library-review 用)。
+// refreshLibraryOnce 刷新曲库索引(带双检查,并发调用只扫一次);扫描失败
+// 保留旧索引并推进时间戳(冷却一个 TTL),只记日志不报错。
+func (s *musicServer) refreshLibraryOnce() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.scannedAt.IsZero() && time.Since(s.scannedAt) < scanTTL {
+		return nil
+	}
+	library, byID, err := scanLibrary(s.config.LibraryDir)
+	if err != nil {
+		log.Printf("scan library: %v", err)
+		s.scannedAt = time.Now()
+		return err
+	}
+	s.library = library
+	s.byID = byID
+	s.scannedAt = time.Now()
+	return nil
+}
+
+// refreshLibrary 强制同步扫描一次(启动自检/library-review 用)。
 func (s *musicServer) refreshLibrary() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -452,12 +472,6 @@ func stripSerialPrefix(name string) string {
 // writeError 输出业务错误(消息可返回客户端)。
 func writeError(w http.ResponseWriter, msg string, code int) {
 	writeJSON(w, code, map[string]string{"error": msg})
-}
-
-// writeInternalError 只返回固定文案,真实错误进日志,避免泄露内部状态。
-func writeInternalError(w http.ResponseWriter, err error) {
-	log.Printf("internal error: %v", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal error"})
 }
 
 func writeJSON(w http.ResponseWriter, code int, payload any) {

@@ -1,18 +1,20 @@
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { SortMode } from '../common/LibraryFilter';
 
 const TAG = 'UserData';
 const DOMAIN = 0x0004;
 
 const KEY_FAVORITE_IDS = 'favorite_ids';
 const KEY_RECENT_IDS = 'recent_ids';
+const KEY_SORT_MODE = 'library_sort_mode';
 
 /** 最近播放记录条数上限 */
 export const RECENT_LIMIT = 200;
 
 /**
- * 用户行为数据：喜欢的歌曲、最近播放。
- * 以 id 数组持久化于 preferences；@Trace 字段直接驱动 UI 刷新。
+ * 用户行为数据：喜欢的歌曲、最近播放、曲库排序偏好。
+ * 持久化于 preferences；@Trace 字段直接驱动 UI 刷新。
  */
 @ObservedV2
 export class UserData {
@@ -20,6 +22,8 @@ export class UserData {
   @Trace favoriteIds: string[] = [];
   /** 最近播放的歌曲 id（最新播放在前） */
   @Trace recentIds: string[] = [];
+  /** 曲库排序方式（重启恢复） */
+  @Trace sortMode: SortMode = SortMode.DEFAULT;
 
   private pref: preferences.Preferences | null = null;
 
@@ -27,6 +31,27 @@ export class UserData {
     this.pref = pref;
     this.favoriteIds = this.readStringArray(KEY_FAVORITE_IDS);
     this.recentIds = this.readStringArray(KEY_RECENT_IDS);
+    const sort = this.pref.getSync(KEY_SORT_MODE, SortMode.DEFAULT) as number;
+    if (sort === SortMode.TITLE || sort === SortMode.ARTIST || sort === SortMode.DURATION
+      || sort === SortMode.DEFAULT) {
+      this.sortMode = sort as SortMode;
+    }
+  }
+
+  /** 更新曲库排序并持久化（重启恢复） */
+  setSortMode(mode: SortMode): void {
+    this.sortMode = mode;
+    if (!this.pref) {
+      return;
+    }
+    try {
+      this.pref.putSync(KEY_SORT_MODE, mode);
+      this.pref.flush().catch((err: Object) => {
+        hilog.warn(DOMAIN, TAG, 'flush sort mode failed: %{public}s', JSON.stringify(err));
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'persist sort mode failed: %{public}s', JSON.stringify(err));
+    }
   }
 
   isFavorite(id: string): boolean {

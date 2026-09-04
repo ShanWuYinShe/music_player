@@ -2,15 +2,15 @@ import { describe, it, expect } from '@ohos/hypium';
 import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMode';
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
-import { LibraryTab, SortMode, filterAndSort } from '../main/ets/common/LibraryFilter';
+import { LibraryTab, SortMode, filterAndSort, splitHighlight, TextSegment } from '../main/ets/common/LibraryFilter';
 import {
   ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL,
   songsUrl, providersUrl, parseOnlineSongs, parseOnlineProviders,
   OnlineSongItem, OnlineSongsResponse
 } from '../main/ets/source/OnlineApi';
 import {
-  PRESET_COUNT, PRESET_SPAN_MS, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
-  beatEnvelope, bpmFromSeed, presetAt, hslToRgb
+  PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
+  beatEnvelope, bpmFromSeed, hslToRgb
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 
@@ -354,24 +354,35 @@ export default function LocalUnitSuite() {
       expect(bpmFromSeed(1) >= 90 && bpmFromSeed(1) <= 150).assertTrue();
     });
 
-    it('presetRotatesBySpan', 0, () => {
-      expect(PRESET_COUNT).assertEqual(4);
-      expect(VIZ_PRESET_NAMES.length).assertEqual(PRESET_COUNT);
-      const s = presetAt(0, 42);
-      expect(s.index >= 0 && s.index < PRESET_COUNT).assertTrue();
-      expect(presetAt(PRESET_SPAN_MS - 1, 42).index).assertEqual(s.index);
 
-      // 远离 t=0 clamp 边界，连续 span 必须能到达全部场景。
-      const t0 = PRESET_COUNT * PRESET_SPAN_MS;
-      const seen: boolean[] = new Array(PRESET_COUNT).fill(false);
-      for (let i = 0; i < PRESET_COUNT; i++) {
-        seen[presetAt(t0 + i * PRESET_SPAN_MS, 42).index] = true;
+    it('splitHighlightSegments', 0, () => {
+      // 空关键词：整段未命中
+      const none = splitHighlight('晨光旋律', '');
+      expect(none.length).assertEqual(1);
+      expect(none[0].text).assertEqual('晨光旋律');
+      expect(none[0].hit).assertFalse();
+      // 单次命中：前后未命中段保留
+      const one = splitHighlight('晨光旋律', '光旋');
+      expect(one.length).assertEqual(3);
+      expect(one[0].text + one[1].text + one[2].text).assertEqual('晨光旋律');
+      expect(one[1].hit).assertTrue();
+      expect(one[0].hit || one[2].hit).assertFalse();
+      // 多次命中 + 大小写不敏感
+      const many = splitHighlight('abcAbcABC', 'ab');
+      let hits = 0;
+      let joined = '';
+      for (const seg of many as TextSegment[]) {
+        joined += seg.text;
+        if (seg.hit) {
+          hits++;
+        }
       }
-      for (const reached of seen) {
-        expect(reached).assertTrue();
-      }
-      expect(presetAt(t0 + PRESET_COUNT * PRESET_SPAN_MS, 42).index)
-        .assertEqual(presetAt(t0, 42).index);
+      expect(joined).assertEqual('abcAbcABC');
+      expect(hits).assertEqual(3);
+      // 无命中：单段
+      const miss = splitHighlight('晨光旋律', '雨后');
+      expect(miss.length).assertEqual(1);
+      expect(miss[0].hit).assertFalse();
     });
 
     it('hslToRgbKnownValues', 0, () => {

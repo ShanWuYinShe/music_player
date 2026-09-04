@@ -62,7 +62,8 @@ struct Index {
   pathStack: NavPathStack = new NavPathStack();
   @Local searchText: string = '';
   @Local tab: LibraryTab = LibraryTab.ALL;
-  @Local sortMode: SortMode = SortMode.DEFAULT;
+  /** 曲库排序方式：初始值来自持久化偏好，变更即落盘（重启恢复） */
+  @Local sortMode: SortMode = appStore.userData.sortMode;
   @Local scanning: boolean = false;
   @Local sourceTab: SourceTab = SourceTab.LOCAL;
   @Local onlineLoading: boolean = false;
@@ -195,12 +196,14 @@ struct Index {
               .fontSize(22)
               .fontColor([$r('app.color.ink')])
               .padding(10)
+              .accessibilityText('导入音乐')
               .onClick(() => this.importFromPicker())
           }
           SymbolGlyph($r('sys.symbol.gearshape'))
             .fontSize(22)
             .fontColor([$r('app.color.ink')])
             .padding(10)
+            .accessibilityText('设置')
             .onClick(() => this.pathStack.pushPathByName('settings', null))
         }
         .width('100%')
@@ -246,7 +249,7 @@ struct Index {
               placeholder: this.sourceTab === SourceTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
             })
               .layoutWeight(1)
-              .height(34)
+              .constraintSize({ minHeight: 34 })
               .fontSize(14)
               .placeholderFont({ size: 14 })
               .placeholderColor($r('app.color.ink_faint'))
@@ -277,6 +280,8 @@ struct Index {
               SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
                 .fontSize(15)
                 .fontColor([$r('app.color.ink_faint')])
+                .padding(4)
+                .accessibilityText('清空搜索')
                 .onClick(() => {
                   this.searchText = '';
                   if (this.sourceTab === SourceTab.ONLINE) {
@@ -287,7 +292,8 @@ struct Index {
             }
           }
           .layoutWeight(1)
-          .height(38)
+          // minHeight 替代固定高度：系统大字体时搜索框随内容撑高不截断
+          .constraintSize({ minHeight: 38 })
           .borderRadius(19)
           .backgroundColor($r('app.color.surface_alt'))
           .padding({ left: 12, right: 12 })
@@ -387,6 +393,7 @@ struct Index {
             song: song,
             isCurrent: song.id === appStore.player.currentSongId,
             isPlaying: appStore.player.isPlaying,
+            keyword: this.searchText,
             onItemClick: (id: string) => appStore.player.playSong(id)
           })
             .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
@@ -553,31 +560,37 @@ struct Index {
           symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.DEFAULT)
         })
           .onClick(() => {
-            this.sortMode = SortMode.DEFAULT;
+            this.changeSortMode(SortMode.DEFAULT);
           })
         MenuItem({
           content: sortLabel(SortMode.TITLE),
           symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.TITLE)
         })
           .onClick(() => {
-            this.sortMode = SortMode.TITLE;
+            this.changeSortMode(SortMode.TITLE);
           })
         MenuItem({
           content: sortLabel(SortMode.ARTIST),
           symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.ARTIST)
         })
           .onClick(() => {
-            this.sortMode = SortMode.ARTIST;
+            this.changeSortMode(SortMode.ARTIST);
           })
         MenuItem({
           content: sortLabel(SortMode.DURATION),
           symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.DURATION)
         })
           .onClick(() => {
-            this.sortMode = SortMode.DURATION;
+            this.changeSortMode(SortMode.DURATION);
           })
       }
     }
+  }
+
+  /** 切换排序并持久化（重启恢复） */
+  private changeSortMode(mode: SortMode): void {
+    this.sortMode = mode;
+    appStore.userData.setSortMode(mode);
   }
 
   /** 原生菜单勾选图标：激活项出勾，非激活传 undefined */

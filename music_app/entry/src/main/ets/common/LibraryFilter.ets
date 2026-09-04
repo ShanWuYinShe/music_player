@@ -118,3 +118,36 @@ export function filterAndSort(songs: SongRecord[], opts: FilterOptions): SongRec
   }
   return result;
 }
+
+/** 高亮分段：命中片段与普通片段 */
+export interface TextSegment {
+  text: string;
+  hit: boolean;
+}
+
+/**
+ * 按关键词把文本切分为命中/未命中分段（大小写不敏感），搜索结果
+ * 高亮渲染用。关键词为空返回整段未命中。
+ */
+export function splitHighlight(text: string, keyword: string): TextSegment[] {
+  const q = keyword.trim().toLowerCase();
+  if (q === '') {
+    return [{ text: text, hit: false }];
+  }
+  const segments: TextSegment[] = [];
+  const lower = text.toLowerCase();
+  let cursor = 0;
+  while (cursor <= text.length) {
+    const hit = lower.indexOf(q, cursor);
+    if (hit < 0) {
+      segments.push({ text: text.substring(cursor), hit: false });
+      break;
+    }
+    if (hit > cursor) {
+      segments.push({ text: text.substring(cursor, hit), hit: false });
+    }
+    segments.push({ text: text.substring(hit, hit + q.length), hit: true });
+    cursor = hit + q.length;
+  }
+  return segments;
+}

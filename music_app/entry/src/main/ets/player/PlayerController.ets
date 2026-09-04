@@ -248,7 +248,7 @@ export class PlayerController {
     this.persistState();
   }
 
-  /** 进度拖拽（毫秒） */
+  /** 进度拖拽（毫秒）；拖完即持久化断点，拖动后直接杀进程也不丢进度 */
   seek(positionMs: number): void {
     if (this.player && this.isPrepared) {
       try {
@@ -257,6 +257,7 @@ export class PlayerController {
         hilog.warn(DOMAIN, TAG, 'seek failed: %{public}s', JSON.stringify(err));
       }
       this.currentTime = positionMs;
+      this.persistState();
     }
   }
 
@@ -525,7 +526,11 @@ export class PlayerController {
     } else if (state === 'prepared') {
       this.isPrepared = true;
       this.errorStreak = 0; // 任一曲加载成功即解除熔断计数
-      if (player.duration > 0) {
+      if (player.duration > 0 && player.duration !== song.duration) {
+        // 仅在「首次获得时长」（原值为 0）时才整体替换数组并广播刷新：
+        // @Trace 数组元素字段变化不触发 UI（已踩坑），整刷会让大曲库下
+        // 每次切歌都全量重建列表；时长已知（非 0）的曲目直接跳过。
+        const firstDuration = song.duration <= 0;
         this.duration = player.duration;
         if (isNetworkUrl(song.fileName)) {
           // 在线曲目不落本地库，直接改对象字段并整体替换数组引用刷新列表
@@ -536,14 +541,18 @@ export class PlayerController {
           // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
           this.songs = this.library.getAllSongs().slice();
         }
-        this.rebuildIndex(this.songs);
-        // 时长属 SongRecord 普通字段，列表 '--:--' → 时长的刷新须广播：
-        // 在线列表展示已与队列解耦（Index.onlineSongs 直持对象引用），
-        // 数组替换不再触发其重算，靠订阅方 reload 兜底
-        this.notifyState();
-        // 时长回填后再刷新一次媒体中心元数据（锁屏进度更准确）
-        this.session.updateMetadata(song);
+        if (firstDuration) {
+          this.rebuildIndex(this.songs);
+          // 时长属 SongRecord 普通字段，列表 '--:--' → 时长的刷新须广播：
+          // 在线列表展示已与队列解耦（Index.onlineSongs 直持对象引用），
+          // 数组替换不再触发其重算，靠订阅方 reload 兜底
+          this.notifyState();
+        }
+      } else if (player.duration > 0) {
+        this.duration = player.duration;
       }
+      // 时长回填后刷新媒体中心元数据（锁屏标题/封面/时长保持准确）
+      this.session.updateMetadata(song);
       this.applyVolume();
       // 续播：先跳到断点再开播
       if (this.pendingSeekMs > 0 && (player.duration <= 0 || this.pendingSeekMs < player.duration)) {

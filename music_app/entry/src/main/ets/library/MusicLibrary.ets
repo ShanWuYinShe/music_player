@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { util } from '@kit.ArkTS';
+import { taskpool, util } from '@kit.ArkTS';
 import { SongRecord } from '../model/Song';
 import { parseId3Async } from './Id3Parser';
 
@@ -19,6 +19,17 @@ export interface ImportResult {
   failed: number;
 }
 const utf8Decoder = util.TextDecoder.create('utf-8');
+
+/** 索引落盘任务入口（taskpool 子线程执行，大曲库全量写盘不阻塞主线程） */
+@Concurrent
+function writeLibraryFile(path: string, text: string): void {
+  const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+  try {
+    fs.writeSync(file.fd, text);
+  } finally {
+    fs.closeSync(file);
+  }
+}
 
 /**
  * 本地音乐库：管理沙盒内音乐文件与索引持久化。
@@ -153,16 +164,6 @@ export class MusicLibrary {
     this.save();
   }
 
-  /** 曲库总时长（毫秒），未播放过的曲目按 0 计 */
-  totalDurationMs(): number {
-    let total = 0;
-    for (const song of this.songs) {
-      if (song.duration > 0) {
-        total += song.duration;
-      }
-    }
-    return total;
-  }
 
   /** 删除目录内全部文件（保留目录本身） */
   private removeDirContents(dir: string): void {
@@ -389,9 +390,27 @@ export class MusicLibrary {
     if (!this.context) {
       return;
     }
+    // 序列化在主线程（几十 ms 级），落盘移入 taskpool 子线程——大曲库
+    // 全量写盘不再阻塞 UI；任务失败回退主线程同步写，保证不丢索引
+    const text = JSON.stringify(this.songs);
+    const path = this.libraryPath();
     try {
-      const file = fs.openSync(this.libraryPath(), fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-      fs.writeSync(file.fd, JSON.stringify(this.songs));
+      const task = new taskpool.Task(writeLibraryFile, path, text);
+      taskpool.execute(task).catch((err: Object) => {
+        hilog.warn(DOMAIN, TAG, 'async save failed, fallback: %{public}s', JSON.stringify(err));
+        this.writeFileSync(path, text);
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'taskpool save unavailable, fallback: %{public}s', JSON.stringify(err));
+      this.writeFileSync(path, text);
+    }
+  }
+
+  /** 主线程同步写盘（taskpool 失败时的回退路径） */
+  private writeFileSync(path: string, text: string): void {
+    try {
+      const file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, text);
       fs.closeSync(file);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'save library failed: %{public}s', JSON.stringify(err));
@@ -410,8 +429,10 @@ export class MusicLibrary {
       fs.closeSync(file);
       const text = utf8Decoder.decodeWithStream(new Uint8Array(buffer));
       const parsed: SongRecord[] = JSON.parse(text) as SongRecord[];
-      // 过滤已丢失文件的记录
-      this.songs = parsed.filter((song) => fs.accessSync(`${this.musicDir()}/${song.fileName}`));
+      // 过滤已丢失文件的记录：一次列目录建文件名集合，替代逐记录 accessSync
+      // （启动主线程 N 次系统调用，大曲库下明显拖慢冷启动）
+      const existing = new Set<string>(fs.listFileSync(this.musicDir()));
+      this.songs = parsed.filter((song) => existing.has(song.fileName));
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load library failed: %{public}s', JSON.stringify(err));
       this.songs = [];

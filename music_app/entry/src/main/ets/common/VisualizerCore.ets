@@ -6,9 +6,6 @@
  * 同一输入恒定输出，保证暂停/切歌回放时视觉连续。
  */
 
-/** preset 轮换周期：每个图形风格展示时长 */
-export const PRESET_SPAN_MS = 18000;
-
 /**
  * 手机端 shader preset 清单。顺序必须与 cpp/CMakeLists.txt 的 SHADER_SCENES
  * 以及 shader_playground/src/presets.ts 一致。
@@ -28,11 +25,6 @@ export const PRESET_COUNT = VIZ_PRESET_NAMES.length;
  * VIZ_PRESET_NAMES 一致。
  */
 export const VIZ_FRAME_INTERVAL_MS: number[] = [25, 25, 40, 25];
-
-export interface PresetSpan {
-  index: number;
-  startMs: number;
-}
 
 /** FNV-1a 32 位哈希，把曲目 id 折成无符号整数种子 */
 export function seedFromId(id: string): number {
@@ -92,13 +84,6 @@ export function bpmFromSeed(seed: number): number {
   return 90 + Math.floor(hash01(seed + 0x5f3a) * 61);
 }
 
-/** 当前时刻落在哪个 preset（含该 preset 的起始时刻），seed 决定轮换起点 */
-export function presetAt(tMs: number, seed: number): PresetSpan {
-  const offset = Math.floor(hash01(seed + 0x9e37) * PRESET_COUNT) * PRESET_SPAN_MS;
-  const idx = Math.floor(Math.max(0, tMs - offset) / PRESET_SPAN_MS);
-  return { index: idx % PRESET_COUNT, startMs: offset + idx * PRESET_SPAN_MS } as PresetSpan;
-}
-
 function hue2rgb(p: number, q: number, t: number): number {
   let tt = t;
   if (tt < 0) {
@@ -135,7 +120,3 @@ export function hslToRgb(h: number, s: number, l: number): number[] {
   ];
 }
 
-/** 生成 Canvas fillStyle 的 rgb() 字符串 */
-export function rgbStyle(rgb: number[]): string {
-  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-}

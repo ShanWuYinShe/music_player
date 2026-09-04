@@ -38,6 +38,7 @@ export struct SettingsPage {
         .height(40)
         .borderRadius(20)
         .backgroundColor($r('app.color.surface_alt'))
+        .accessibilityText('返回')
         .justifyContent(FlexAlign.Center)
         .onClick(() => this.navPathStack.pop())
 

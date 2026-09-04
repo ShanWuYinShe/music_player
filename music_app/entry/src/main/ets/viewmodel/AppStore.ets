@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import display from '@ohos.display';
 import { MusicLibrary } from '../library/MusicLibrary';
 import { PlayerController } from '../player/PlayerController';
 import { OnlineSource } from '../source/MusicSource';
@@ -56,6 +57,27 @@ export class AppStore {
     this.userData.init(this.pref);
     this.library.init(context);
     await this.player.init(context, this.pref);
+  }
+
+  /**
+   * 重读状态栏/导航条避让高度：启动后页面加载完成、以及系统配置变更
+   * （旋转/折叠展开，AppAbilityStage 回调）时调用——避让值不随窗口
+   * 自动刷新，过期会造成布局错位。
+   */
+  readSafeArea(): void {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return;
+    }
+    window.getLastWindow(ctx).then((win) => {
+      const sys = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      const nav = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+      const density = display.getDefaultDisplaySync().densityPixels;
+      this.safeTopVp = sys.topRect.height / density;
+      this.safeBottomVp = nav.bottomRect.height / density;
+    }).catch((err: Object) => {
+      hilog.warn(DOMAIN, TAG, 'read safe area failed: %{public}s', JSON.stringify(err));
+    });
   }
 
   /** 刷新在线源能力摘要（网易云登录态）；失败静默保留旧值（提示非关键路径） */

@@ -1,4 +1,4 @@
-import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier, curves } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -52,9 +52,13 @@ export struct PlayerPage {
   /** swipe 判定阈值（vp）：位移超过才切歌——与点击/轻扫误触区分 */
   private static readonly SWIPE_THRESHOLD: number = 60;
 
-  /** Poweramp 手势：横向滑动结束的切歌判定（左滑下一首 / 右滑上一首） */
+  /** Poweramp 手势：横向滑动结束的切歌判定（左滑下一首 / 右滑上一首）。
+   * 封面位移以弹簧曲线回弹归零（HarmonyOS 手势动效规范：跟手场景以
+   * 物理模型收尾），避免瞬间消失的生硬感 */
   private onSwipeEnd(offsetX: number): void {
-    this.coverDragX = 0;
+    this.getUIContext().animateTo({ curve: curves.springMotion(0.4, 0.8) }, () => {
+      this.coverDragX = 0;
+    });
     if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
       this.player.next();
     } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
@@ -193,6 +197,7 @@ export struct PlayerPage {
             .fontSize(26)
             .fontColor([$r('app.color.viz_fg')])
             .padding(10)
+            .accessibilityText('收起播放页')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => this.navPathStack.pop())
           Blank()
@@ -200,6 +205,7 @@ export struct PlayerPage {
             .fontSize(20)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
+            .accessibilityText(this.coverMode ? '切换到可视化视图' : '切换到封面视图')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => {
               this.coverMode = !this.coverMode;
@@ -209,6 +215,7 @@ export struct PlayerPage {
               .fontSize(22)
               .fontColor([$r('app.color.viz_fg')])
               .padding(12)
+              .accessibilityText('可视化风格列表')
               .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
               .bindMenu(this.VizMenu())
           }
@@ -216,6 +223,7 @@ export struct PlayerPage {
             .fontSize(22)
             .fontColor([$r('app.color.viz_fg')])
             .padding(12)
+            .accessibilityText('播放队列')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => {
               this.isQueueOpen = true;
@@ -346,12 +354,13 @@ export struct PlayerPage {
           .margin({ top: 16 })
 
           // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
-          // 全部带按压回弹 clickEffect）
+          // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
           Row({ space: 30 }) {
           SymbolGlyph(playModeSymbol(this.player.playMode))
             .fontSize(24)
             .fontColor([$r('app.color.viz_fg')])
-            .padding(6)
+            .padding(8)
+            .accessibilityText(`播放模式，当前${playModeLabel(this.player.playMode)}`)
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => {
               this.player.cyclePlayMode();
@@ -362,6 +371,7 @@ export struct PlayerPage {
             .fontSize(32)
             .fontColor([$r('app.color.viz_fg')])
             .padding(6)
+            .accessibilityText('上一首')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.player.previous())
 
@@ -375,6 +385,7 @@ export struct PlayerPage {
           .height(76)
           .borderRadius(38)
           .backgroundColor($r('app.color.accent'))
+          .accessibilityText(this.isPlaying ? '暂停' : '播放')
           .shadow({ radius: 18, color: 'rgba(0,0,0,0.4)', offsetY: 3 })
           .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
           .onClick(() => this.player.togglePlay())
@@ -383,13 +394,15 @@ export struct PlayerPage {
             .fontSize(32)
             .fontColor([$r('app.color.viz_fg')])
             .padding(6)
+            .accessibilityText('下一首')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.player.next())
 
           SymbolGlyph(this.isFavorite() ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
             .fontSize(24)
             .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.viz_fg')])
-            .padding(6)
+            .padding(8)
+            .accessibilityText(this.isFavorite() ? '取消喜欢' : '喜欢')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.toggleFavorite())
         }
@@ -402,6 +415,9 @@ export struct PlayerPage {
           SymbolGlyph(this.volumeIcon())
             .fontSize(20)
             .fontColor([$r('app.color.viz_fg')])
+            .padding(10)
+            .accessibilityText(this.player.volume > 0 ? '静音' : '恢复音量')
+            .margin({ left: -10 })
             .onClick(() => this.toggleMute())
 
           Slider({
@@ -432,10 +448,12 @@ export struct PlayerPage {
                 .fontColor($r('app.color.accent'))
             }
           }
-          .height(30)
-          .borderRadius(15)
+          // minHeight 替代固定高度：触控热区达标（≥40vp），系统大字体时随内容撑高
+          .constraintSize({ minHeight: 40 })
+          .borderRadius(20)
           .backgroundColor('rgba(255,255,255,0.08)')
-          .padding({ left: 10, right: 10 })
+          .padding({ left: 12, right: 12 })
+          .accessibilityText('定时关闭')
           .bindMenu(this.SleepMenu())
         }
         .width('100%')
