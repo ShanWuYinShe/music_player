@@ -30,6 +30,10 @@ export class AppStore {
   readonly onlineSource: OnlineSource = new OnlineSource();
   /** 主 Ability 上下文（页面取 window 设置系统栏样式用） */
   abilityContext: common.UIAbilityContext | null = null;
+  /** 播放页舞台沉浸标记：true 期间窗口 chrome 恒定深色舞台态——舞台底色
+   * 恒深，系统切换深浅模式（AppAbilityStage 重应用 chrome）时不得把系统栏
+   * 字色自适应成深字压在深舞台上（会不可见） */
+  stageImmersion: boolean = false;
   /** 全局恒定全屏布局下的状态栏/导航条避让高度（vp），页面加载完成后读入 */
   @Trace safeTopVp: number = 0;
   @Trace safeBottomVp: number = 0;
@@ -66,11 +70,16 @@ export class AppStore {
   }
 
   /**
-   * 窗口兜底色与系统栏字色随系统深浅模式自适应：按当前模式的资源值解析后应用。
-   * 启动（EntryAbility.onWindowStageCreate）与系统配置变更（AppAbilityStage）
-   * 时调用；播放页进入时覆盖为深色舞台沉浸态，退出时经本方法恢复自适应。
+   * 窗口兜底色与系统栏字色的唯一出口：播放页舞台沉浸期间恒定深色舞台态，
+   * 其余时候按当前系统模式的资源值自适应。启动（EntryAbility）、系统配置
+   * 变更（AppAbilityStage）与播放页进出（PlayerPage 经 stageImmersion 标记）
+   * 都经本方法应用。
    */
   applyWindowChrome(): void {
+    if (this.stageImmersion) {
+      this.applyStageChrome();
+      return;
+    }
     const ctx = this.abilityContext;
     if (ctx === null) {
       return;
@@ -87,6 +96,25 @@ export class AppStore {
       });
     }).catch((err: Object) => {
       hilog.warn(DOMAIN, TAG, 'apply window chrome failed: %{public}s', JSON.stringify(err));
+    });
+  }
+
+  /** 播放页舞台沉浸态 chrome：舞台恒定深底，兜底色与系统栏字色固定深底浅字 */
+  private applyStageChrome(): void {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return;
+    }
+    window.getLastWindow(ctx).then((win) => {
+      win.setWindowBackgroundColor('#0C0A09');
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#00000000',
+        navigationBarColor: '#00000000',
+        statusBarContentColor: '#F2EFE9',
+        navigationBarContentColor: '#F2EFE9'
+      });
+    }).catch((err: Object) => {
+      hilog.warn(DOMAIN, TAG, 'apply stage chrome failed: %{public}s', JSON.stringify(err));
     });
   }
 

@@ -22,12 +22,15 @@
   （page_bg #F7F4EE / surface #FFFFFF / accent #A8791F 深金），`dark/element/color.json`=
   深色板（page_bg #121212 / surface #1D1C1A / accent #DBA84E 亮金），全部 UI 颜色经
   `$r('app.color.*')` 引用由资源限定符自动切换，代码不得写死色值；`viz_*` 四个舞台
-  token 两套板保持相同——播放页封面/可视化舞台恒定深底浅字（媒体播放页惯例），
-  进入播放页时 `applyImmersion` 固定深色 window chrome、退出经
-  `appStore.applyWindowChrome()` 恢复自适应。window 兜底色与系统栏字色的唯一入口是
-  `AppStore.applyWindowChrome`（`resourceManager.getColorSync` 按当前模式解析），启动
-  （EntryAbility）与系统配置变更（`AppAbilityStage.onConfigurationUpdate`——UIAbility
-  无此回调，全局配置变更只通知 AbilityStage）都会重应用。弹层（`components/MenuPanel.ets`
+  token 两套板保持相同——播放页封面/可视化舞台恒定深底浅字（媒体播放页惯例）：
+  `applyImmersion` 只维护 `AppStore.stageImmersion` 标记（进入置位/退出清除），
+  `applyWindowChrome` 据此分流——舞台沉浸期间应用恒定深色舞台 chrome，其余时候
+  按当前模式自适应。window 兜底色与系统栏字色的唯一入口是
+  `AppStore.applyWindowChrome`（自适应分支经 `resourceManager.getColorSync` 按
+  当前模式解析），启动（EntryAbility）、系统配置变更
+  （`AppAbilityStage.onConfigurationUpdate`——UIAbility 无此回调，全局配置变更
+  只通知 AbilityStage）与播放页进出都会重应用；标记保证在播放页期间切系统
+  深浅时系统栏字色不会被自适应成深字压在深舞台上（不可见）。弹层（`components/MenuPanel.ets`
   菜单容器 / `bindSheet` / `AlertDialog`）一律用实心自适应底色（menu_bg/surface），
   **不要用 `backgroundBlurStyle` 材质**——其色随系统深浅翻转，与文字色错配会在浅色
   模式下浅底浅字（已踩坑）；accent 底上的前景图标/文字固定用 `on_accent`，`paper`

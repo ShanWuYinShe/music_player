@@ -1,4 +1,4 @@
-import { promptAction, window } from '@kit.ArkUI';
+import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -80,36 +80,19 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态：进入时窗口兜底色/系统栏字色固定为深色舞台（封面/可视化
-   * 舞台底色恒定深，不随系统深浅切换，viz_* 舞台 token 同理恒定）；
-   * 离开时经 applyWindowChrome 恢复为随系统模式自适应的首页 chrome。
+   * 播放页沉浸态：只维护 stageImmersion 标记并经 applyWindowChrome 统一出口
+   * 应用——进入置位后应用恒定深色舞台 chrome（封面/可视化舞台底色恒定深，
+   * viz_* 舞台 token 同理恒定），退出清除标记恢复随系统模式自适应；播放页
+   * 期间系统切换深浅模式时，AppAbilityStage 重应用的就是舞台态，不会把系统
+   * 栏字色自适应成深字压在深舞台上。
    * 画面延伸到系统栏下靠全局恒定的 setWindowLayoutFullScreen（EntryAbility
    * 启动即开启，组件级 expandSafeArea 无法让 Canvas 画进系统栏区域，真机踩坑）；
    * 页面不得开关全屏布局——异步恢复滞后会让返回首页时布局跳动。
    * 前景控件用 AppStore 预读的避让区高度自行留白。
    */
   private applyImmersion(enter: boolean): void {
-    if (!enter) {
-      appStore.applyWindowChrome();
-      return;
-    }
-    const ctx = appStore.abilityContext;
-    if (ctx === null) {
-      return;
-    }
-    window.getLastWindow(ctx).then((win) => {
-      // 舞台恒定深底:字色恒浅,沉浸时底色透明融合画面
-      const fg = '#F2EFE9';
-      win.setWindowBackgroundColor('#0C0A09');
-      win.setWindowSystemBarProperties({
-        statusBarColor: '#00000000',
-        navigationBarColor: '#00000000',
-        statusBarContentColor: fg,
-        navigationBarContentColor: fg
-      });
-    }).catch((err: Error) => {
-      console.info(`apply immersion failed: ${err.message}`);
-    });
+    appStore.stageImmersion = enter;
+    appStore.applyWindowChrome();
   }
 
   private toastPreset(index: number): void {
