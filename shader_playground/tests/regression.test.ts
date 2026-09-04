@@ -223,3 +223,16 @@ describe('aurora v15 倒影单帘（回归保护）', () => {
 		expect(auroraBody).toMatch(/float\s+fold\s*=\s*fbm3\(/);
 	});
 });
+
+describe('aurora v15.1 反馈单次采样（回归保护）', () => {
+	const aurora = readShader('aurora.frag');
+
+	test('反馈余晖每像素只采样一次 uPrev（色散三采样已删）', () => {
+		// 剥掉注释后：main 里 uPrev 的采样应只有 1 处（色散量 0.0009 本就
+		// 低于感知阈值，三次采样纯属浪费——移动 GPU 带宽敏感）
+		const body = aurora.replace(/^\s*\/\/.*$/gm, '');
+		const prevSamples = body.match(/texture2D\(\s*uPrev/g) ?? [];
+		expect(prevSamples).toHaveLength(1);
+		expect(body).not.toMatch(/FB_CHROMA/);
+	});
+});

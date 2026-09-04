@@ -60,6 +60,18 @@ describe('shader 管线跨端配置一致性', () => {
 		expect(view).not.toContain('export const PRESET_COUNT');
 		// id 从 0 起连续（preset 轮换与 shader 槽位索引依赖它）
 		expect(PRESETS.map((preset) => preset.id)).toEqual(PRESETS.map((_, i) => i));
+		// 场景级帧间隔数组与场景清单同长（VisualizerView 按 presetLock 索引）
+		const frameIntervals = capture(
+			core,
+			/export const VIZ_FRAME_INTERVAL_MS: number\[\] = \[([\s\S]*?)\];/,
+			'VisualizerCore.ets',
+		)
+			.split(',')
+			.map((v) => Number.parseFloat(v.trim()));
+		expect(frameIntervals).toHaveLength(PRESETS.length);
+		for (const v of frameIntervals) {
+			expect(Number.isFinite(v) && v >= 25 && v <= 50).toBe(true);
+		}
 	});
 
 	test('每场景内部渲染比例与端侧 kPresetScale 逐项对齐', () => {

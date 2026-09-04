@@ -23,7 +23,10 @@ interface QueueEntry {
  *   竞争且大部分渲染被遮挡，属设计矛盾）；
  * 可视化舞台：纯全屏 MilkDrop 可视化 + 控件，点击画面切风格；
  * 进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
- * 顶栏按钮或点击封面切换；进入时系统栏字色切浅色以融合深底，离开恢复。
+ * 交互对齐 Poweramp（官方 Player UI 手势）：封面/可视化区**左右滑动切歌**
+ * （上一首/下一首，封面跟手位移）、**点按封面返回曲库**（Poweramp 的
+ * tap-on-cover 跳库行为）；封面↔可视化舞台经顶栏按钮切换。
+ * 进入时系统栏字色切浅色以融合深底，离开恢复。
  */
 @ComponentV2
 export struct PlayerPage {
@@ -42,7 +45,22 @@ export struct PlayerPage {
   /** 舞台双态（互斥）：true 封面舞台（默认，Poweramp 习惯，可视化停渲染）；
    * false 纯可视化全屏 */
   @Local coverMode: boolean = true;
+  /** 封面跟手位移（Poweramp swipe 切歌）：拖动中绑定 translate，松手判定 */
+  @Local coverDragX: number = 0;
   private volumeBeforeMute: number = 1;
+
+  /** swipe 判定阈值（vp）：位移超过才切歌——与点击/轻扫误触区分 */
+  private static readonly SWIPE_THRESHOLD: number = 60;
+
+  /** Poweramp 手势：横向滑动结束的切歌判定（左滑下一首 / 右滑上一首） */
+  private onSwipeEnd(offsetX: number): void {
+    this.coverDragX = 0;
+    if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
+      this.player.next();
+    } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
+      this.player.previous();
+    }
+  }
 
   aboutToAppear(): void {
     this.applyImmersion(true);
@@ -112,6 +130,12 @@ export struct PlayerPage {
         .height('100%')
         .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（点击切风格由
+        // VisualizerView 内部 onClick 承担，PanGesture 位移阈值不冲突）
+        .gesture(
+          PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
+            .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
+        )
 
       // 封面舞台氛围背景（仅封面模式渲染）：模糊放大的封面做环境光，
       // 叠深色遮罩保证前景可读——封面即舞台光源，无可视化渲染；无封面
@@ -214,9 +238,23 @@ export struct PlayerPage {
             .scale(this.isPlaying ? { x: 1, y: 1 } : { x: 0.93, y: 0.93 })
             .opacity(this.isPlaying ? 1.0 : 0.72)
             .animation({ duration: 360, curve: Curve.EaseOut })
+            // Poweramp 招牌手势：封面左右滑动切歌（跟手位移，松手判定±阈值）
+            .translate({ x: this.coverDragX })
             .shadow({ radius: 42, color: 'rgba(0,0,0,0.55)', offsetY: 14 })
+            .gesture(
+              PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
+                .onActionUpdate((e: GestureEvent): void => {
+                  this.coverDragX = e.offsetX;
+                })
+                .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
+                .onActionCancel((): void => {
+                  this.coverDragX = 0;
+                })
+            )
             .onClick(() => {
-              this.coverMode = false;
+              // Poweramp tap-on-cover：返回曲库查看当前歌曲（进入可视化
+              // 改经顶栏按钮——两种舞台各自单一入口，不再混用点击语义）
+              this.navPathStack.pop();
             })
           }
           .layoutWeight(1)

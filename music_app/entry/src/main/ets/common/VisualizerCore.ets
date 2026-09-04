@@ -22,6 +22,13 @@ export const VIZ_PRESET_NAMES: string[] = [
 
 export const PRESET_COUNT = VIZ_PRESET_NAMES.length;
 
+/**
+ * 各场景绘帧最小间隔（ms）。默认 25（30fps 节流容差，见 VisualizerView）；
+ * 极光是慢流动场景，40ms（25fps）无感知差异、负载再降一档。顺序与
+ * VIZ_PRESET_NAMES 一致。
+ */
+export const VIZ_FRAME_INTERVAL_MS: number[] = [25, 25, 40, 25];
+
 export interface PresetSpan {
   index: number;
   startMs: number;

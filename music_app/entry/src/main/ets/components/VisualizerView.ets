@@ -4,11 +4,12 @@
  * 平台无频谱 API，频段能量由 VisualizerCore 合成（种子 = 曲目 id）。
  * full：XComponent(SURFACE)+GLES3 shader 管线，打包无限分形、热锅水珠、
  *   全屏极光、霓虹频谱四个场景；运算量只与像素数相关，内部按场景比例
- *   降采样（fractal/spectrum 1/2，pan 0.45、aurora 0.40——后两者逐像素
+ *   降采样（fractal/spectrum 1/2，pan 0.45、aurora 0.33——后两者逐像素
  *   成本高且形态柔软，更低比例上屏放大视觉近无损；pan 另有状态预通道，
  *   见 cpp/shaders/pan.frag）渲染后线性上屏，反馈纹理仅供拖尾场景采样。
  * mini：全宽金色频谱柱，垫于迷你条卡片底层（2D Canvas 双离屏 ping-pong）。
- * 帧驱动 displaySync 限 30fps，暂停后跑约 0.9s 收敛即停。
+ * 帧驱动 displaySync 限 30fps（场景级帧间隔见 VIZ_FRAME_INTERVAL_MS——
+ * 极光 25fps 仍无感），暂停后跑约 0.9s 收敛即停。
  * active=false（播放页封面模式）停帧不渲染——封面与可视化互斥，避免
  * 全速渲染被遮挡的画面。
  */
@@ -17,7 +18,8 @@ import displaySync from '@ohos.graphics.displaySync';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PlayerController } from '../player/PlayerController';
 import {
-  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, PRESET_COUNT
+  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, PRESET_COUNT,
+  VIZ_FRAME_INTERVAL_MS
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
@@ -34,10 +36,12 @@ interface XComponentVizContext {
 const OFFSCREEN_MAX_DIM = 300;
 /** 暂停后收敛动画时长（ms），之后停帧保留静帧 */
 const FADE_MS = 900;
-/** 绘帧最小间隔：须小于 displaySync 回调间隔 + 余量才能保证每次回调都
- * 落帧。高刷真机上 displaySync 超预期回调（30fps≈33.3ms），阈值取 25ms
- * 容差；此前 36ms 阈值把 33.3ms 回调成片跳过（实际 15fps 脉冲闪，已踩坑，
- * 与 2D 管线内容耗时 46ms 时"内容主导"的失败模式不同）。 */
+/** 绘帧最小间隔（默认档）：须小于 displaySync 回调间隔 + 余量才能保证每次
+ * 回调都落帧。高刷真机上 displaySync 超预期回调（30fps≈33.3ms），阈值取
+ * 25ms 容差；此前 36ms 阈值把 33.3ms 回调成片跳过（实际 15fps 脉冲闪，已
+ * 踩坑，与 2D 管线内容耗时 46ms 时"内容主导"的失败模式不同）。
+ * full 变体按场景取 VIZ_FRAME_INTERVAL_MS（aurora 40ms=25fps——慢场景
+ * 无感，真机 GPU 超载时同步 renderFrame 会阻塞 UI 线程，降帧率治本）。 */
 const FRAME_MIN_INTERVAL = 25;
 /** 风格参数演化周期（ms）：参数空间在此周期间平滑漂移，效果无穷演化 */
 const STYLE_PERIOD = 24000;
@@ -194,8 +198,12 @@ export struct VisualizerView {
       return;
     }
     const now = Date.now();
-    // 真机高刷屏上 displaySync 可能超预期回调，按 24fps 节流绘制
-    if (now - this.lastNow < FRAME_MIN_INTERVAL) {
+    // 真机高刷屏上 displaySync 可能超预期回调，按场景间隔节流绘制
+    // （full 用场景级帧间隔，aurora 40ms=25fps——慢场景无感、负载降一档）
+    const minInterval = this.variant === 'mini'
+      ? FRAME_MIN_INTERVAL
+      : (VIZ_FRAME_INTERVAL_MS[this.presetLock] ?? FRAME_MIN_INTERVAL);
+    if (now - this.lastNow < minInterval) {
       return;
     }
     const dt = Math.min(now - this.lastNow, 66);

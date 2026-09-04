@@ -43,7 +43,7 @@ export const PRESETS: Preset[] = [
 		name: 'aurora',
 		label: '全屏极光',
 		color: '#7af0a4',
-		renderScale: 0.4,
+		renderScale: 0.33,
 	},
 	{
 		id: 3,
