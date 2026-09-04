@@ -30,12 +30,19 @@
   当前模式解析），启动（EntryAbility）、系统配置变更
   （`AppAbilityStage.onConfigurationUpdate`——UIAbility 无此回调，全局配置变更
   只通知 AbilityStage）与播放页进出都会重应用；标记保证在播放页期间切系统
-  深浅时系统栏字色不会被自适应成深字压在深舞台上（不可见）。弹层（`components/MenuPanel.ets`
-  菜单容器 / `bindSheet` / `AlertDialog`）一律用实心自适应底色（menu_bg/surface），
-  **不要用 `backgroundBlurStyle` 材质**——其色随系统深浅翻转，与文字色错配会在浅色
-  模式下浅底浅字（已踩坑）；accent 底上的前景图标/文字固定用 `on_accent`，`paper`
-  只用于 ink 底；`TextInput` 必须显式设 fontColor/placeholderColor（默认色随系统
-  主题，浅色模式下会在深色输入底上形成深底深字不可见，已踩坑）
+  深浅时系统栏字色不会被自适应成深字压在深舞台上（不可见）。弹出菜单一律用原生
+  `Menu`/`MenuItem`/`MenuItemGroup` 组件（bindMenu/bindContextMenu 的 builder 内写
+  `Menu(){ MenuItem(...).onClick() }`）：磨砂材质、圆角、行高、字号、按压高亮、
+  分组分隔线全部系统托管，深浅色自动适配——**不要自绘菜单卡片**（实心底+描边+
+  重投影是 Android 风格，与系统割裂；`backgroundBlurStyle` 自绘玻璃的文字色错配
+  曾致浅色模式浅底浅字，已踩坑）；选中态勾选用 `symbolEndIcon: new
+  SymbolGlyphModifier($r('sys.symbol.checkmark'))`，分组标题用
+  `MenuItemGroup({ header: '字符串' })`；原生菜单无红色危险项语义，破坏性操作
+  （如从曲库删除）菜单项走 `AlertDialog` 二次确认（已按 surface 底+大圆角适配）。
+  `bindSheet`/`AlertDialog` 用实心自适应底色（surface）托管；accent 底上的前景
+  图标/文字固定用 `on_accent`，`paper` 只用于 ink 底；`TextInput` 必须显式设
+  fontColor/placeholderColor（默认色随系统主题，浅色模式下会在深色输入底上形成
+  深底深字不可见，已踩坑）
 
 ## 本地命令
 

@@ -1,11 +1,9 @@
 import { picker } from '@kit.CoreFileKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
 import { SongItem } from '../components/SongItem';
-import { MenuItemRow } from '../components/MenuItemRow';
-import { MenuPanel, MenuHeader, MenuDivider } from '../components/MenuPanel';
 import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
@@ -514,73 +512,100 @@ struct Index {
     }
   }
 
-  /** 长按歌曲菜单 */
+  /** 长按歌曲菜单：原生 Menu/MenuItem，磨砂底/圆角/行高/按压态由系统托管 */
   @Builder
   SongMenu(song: SongRecord) {
-    MenuPanel({ panelWidth: 204 }) {
-      MenuItemRow({
-        label: '下一首播放',
-        icon: $r('sys.symbol.list_bullet'),
-        onSelect: () => {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.list_bullet')),
+        content: '下一首播放'
+      })
+        .onClick(() => {
           const count = appStore.player.queueNext(song.id);
           promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
-        }
+        })
+      MenuItem({
+        symbolStartIcon: new SymbolGlyphModifier(
+          appStore.userData.isFavorite(song.id) ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart')),
+        content: appStore.userData.isFavorite(song.id) ? '取消喜欢' : '喜欢'
       })
-      MenuItemRow({
-        label: appStore.userData.isFavorite(song.id) ? '取消喜欢' : '喜欢',
-        icon: appStore.userData.isFavorite(song.id) ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'),
-        iconTint: appStore.userData.isFavorite(song.id) ? $r('app.color.accent') : null,
-        onSelect: () => {
+        .onClick(() => {
           const fav = appStore.userData.toggleFavorite(song.id);
           promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
-        }
-      })
-      if (this.sourceTab === SourceTab.LOCAL) {
-        MenuDivider()
-        MenuItemRow({
-          label: '从曲库删除',
-          icon: $r('sys.symbol.trash'),
-          danger: true,
-          onSelect: () => appStore.player.removeSong(song.id)
         })
+      if (this.sourceTab === SourceTab.LOCAL) {
+        MenuItem({
+          symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')),
+          content: '从曲库删除'
+        })
+          .onClick(() => this.confirmRemoveSong(song))
       }
     }
   }
 
-  /** 排序菜单 */
+  /** 排序菜单：MenuItemGroup 分组标题 + 原生勾选（当前排序项） */
   @Builder
   SortMenu() {
-    MenuPanel({ panelWidth: 190 }) {
-      MenuHeader({ title: '排序方式' })
-      MenuItemRow({
-        label: sortLabel(SortMode.DEFAULT),
-        active: this.sortMode === SortMode.DEFAULT,
-        onSelect: () => {
-          this.sortMode = SortMode.DEFAULT;
-        }
-      })
-      MenuItemRow({
-        label: sortLabel(SortMode.TITLE),
-        active: this.sortMode === SortMode.TITLE,
-        onSelect: () => {
-          this.sortMode = SortMode.TITLE;
-        }
-      })
-      MenuItemRow({
-        label: sortLabel(SortMode.ARTIST),
-        active: this.sortMode === SortMode.ARTIST,
-        onSelect: () => {
-          this.sortMode = SortMode.ARTIST;
-        }
-      })
-      MenuItemRow({
-        label: sortLabel(SortMode.DURATION),
-        active: this.sortMode === SortMode.DURATION,
-        onSelect: () => {
-          this.sortMode = SortMode.DURATION;
-        }
-      })
+    Menu() {
+      MenuItemGroup({ header: '排序方式' }) {
+        MenuItem({
+          content: sortLabel(SortMode.DEFAULT),
+          symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.DEFAULT)
+        })
+          .onClick(() => {
+            this.sortMode = SortMode.DEFAULT;
+          })
+        MenuItem({
+          content: sortLabel(SortMode.TITLE),
+          symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.TITLE)
+        })
+          .onClick(() => {
+            this.sortMode = SortMode.TITLE;
+          })
+        MenuItem({
+          content: sortLabel(SortMode.ARTIST),
+          symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.ARTIST)
+        })
+          .onClick(() => {
+            this.sortMode = SortMode.ARTIST;
+          })
+        MenuItem({
+          content: sortLabel(SortMode.DURATION),
+          symbolEndIcon: this.sortCheckIcon(this.sortMode === SortMode.DURATION)
+        })
+          .onClick(() => {
+            this.sortMode = SortMode.DURATION;
+          })
+      }
     }
+  }
+
+  /** 原生菜单勾选图标：激活项出勾，非激活传 undefined */
+  private sortCheckIcon(active: boolean): SymbolGlyphModifier | undefined {
+    return active ? new SymbolGlyphModifier($r('sys.symbol.checkmark')) : undefined;
+  }
+
+  /** 删除曲目二次确认：原生菜单无红色警示项，破坏性操作走确认对话框 */
+  private confirmRemoveSong(song: SongRecord): void {
+    AlertDialog.show({
+      title: '从曲库删除',
+      message: `将删除「${song.title}」及其音频文件，不可恢复。`,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      backgroundColor: $r('app.color.surface'),
+      cornerRadius: 24,
+      primaryButton: {
+        value: '取消',
+        fontColor: $r('app.color.ink_soft'),
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: $r('app.color.danger'),
+        action: () => appStore.player.removeSong(song.id)
+      }
+    });
   }
 
   /** 左滑操作：下一首播放 + 删除 */

@@ -1,11 +1,9 @@
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
 import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
-import { MenuItemRow } from '../components/MenuItemRow';
-import { MenuPanel, MenuHeader, MenuDivider } from '../components/MenuPanel';
 import { VisualizerView } from '../components/VisualizerView';
 import { WaveformSeekbar } from '../components/WaveformSeekbar';
 import { EqIndicator } from '../components/EqIndicator';
@@ -583,33 +581,26 @@ export struct PlayerPage {
     .padding({ top: 8, bottom: 12 })
   }
 
-  /** 定时关闭菜单 */
+  /** 定时关闭菜单：原生 Menu/MenuItem，MenuItemGroup 分组标题 */
   @Builder
   SleepMenu() {
-    MenuPanel({ panelWidth: 200 }) {
-      MenuHeader({ title: '定时关闭' })
-      MenuItemRow({
-        label: '15 分钟后停止',
-        onSelect: (): void => this.applySleepTimer(15)
-      })
-      MenuItemRow({
-        label: '30 分钟后停止',
-        onSelect: (): void => this.applySleepTimer(30)
-      })
-      MenuItemRow({
-        label: '60 分钟后停止',
-        onSelect: (): void => this.applySleepTimer(60)
-      })
+    Menu() {
+      MenuItemGroup({ header: '定时关闭' }) {
+        MenuItem({ content: '15 分钟后停止' })
+          .onClick((): void => this.applySleepTimer(15))
+        MenuItem({ content: '30 分钟后停止' })
+          .onClick((): void => this.applySleepTimer(30))
+        MenuItem({ content: '60 分钟后停止' })
+          .onClick((): void => this.applySleepTimer(60))
+      }
       if (this.player.sleepRemainSec >= 0) {
-        MenuDivider()
-        MenuItemRow({
-          label: '取消定时',
-          danger: true,
-          onSelect: () => {
-            this.player.cancelSleepTimer();
-            promptAction.showToast({ message: '已取消定时关闭' });
-          }
-        })
+        MenuItemGroup() {
+          MenuItem({ content: '取消定时' })
+            .onClick(() => {
+              this.player.cancelSleepTimer();
+              promptAction.showToast({ message: '已取消定时关闭' });
+            })
+        }
       }
     }
   }
@@ -617,18 +608,20 @@ export struct PlayerPage {
   /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
   @Builder
   VizMenu() {
-    MenuPanel({ panelWidth: 224 }) {
-      MenuHeader({ title: '可视化风格' })
-      ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
-        MenuItemRow({
-          label: `${index + 1}. ${name}`,
-          active: this.vizPreset === index,
-          onSelect: (): void => {
-            this.vizPreset = index;
-            this.toastPreset(index);
-          }
-        })
-      }, (name: string) => name)
+    Menu() {
+      MenuItemGroup({ header: '可视化风格' }) {
+        ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
+          MenuItem({
+            content: `${index + 1}. ${name}`,
+            symbolEndIcon: this.vizPreset === index
+              ? new SymbolGlyphModifier($r('sys.symbol.checkmark')) : undefined
+          })
+            .onClick((): void => {
+              this.vizPreset = index;
+              this.toastPreset(index);
+            })
+        }, (name: string) => name)
+      }
     }
   }
 
