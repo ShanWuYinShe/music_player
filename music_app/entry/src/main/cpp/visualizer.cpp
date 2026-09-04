@@ -60,7 +60,7 @@ constexpr int kPanStateTexH = 4;
 // 各场景内部分辨率比例（相对表面尺寸）：pan/aurora 逐像素负载高、形态
 // 柔软，更低比例上屏放大视觉近无损；fractal/spectrum 维持 1/2。
 // 切风格引起比例变化时，反馈纹理经 blit 拷贝重建（保留交叉淡化旧画面）。
-constexpr float kPresetScale[kVizPresetCount] = {0.5f, 0.45f, 0.40f, 0.5f};
+constexpr float kPresetScale[kVizPresetCount] = {0.5f, 0.45f, 0.33f, 0.5f};
 
 EGLConfig gEglConfig = nullptr;
 EGLContext gEglContext = nullptr;
