@@ -51,15 +51,13 @@ export struct VisualizerView {
   @Param @Require player: PlayerController;
   /** 'full' 播放页全屏；'mini' 迷你条内嵌 */
   @Param variant: string = 'full';
-  /** 当前风格号（父页面持有，切换按钮与背景点击共用同一数据源） */
+  /** 当前风格号（父页面持有，经顶栏魔法棒菜单切换；@Param 回流驱动渐变） */
   @Param presetIndex: number = 0;
   /** 舞台是否激活：false 时停帧不渲染（播放页封面模式——封面与可视化互斥，
    * 不再全速渲染被遮挡的画面）；XComponent/Canvas 保持挂载，恢复即续播 */
   @Param active: boolean = true;
   /** 风格过渡进度 0→1（切换后 1.5s 内新场景渐入，旧画面靠反馈余晖消散） */
   private presetTrans: number = 1;
-  /** 请求切换风格（背景点击触发；父页面更新 presetIndex 后经 @Param 回流） */
-  @Event onPresetChange: (next: number) => void = (): void => {};
 
   private displayCtx: CanvasRenderingContext2D =
     new CanvasRenderingContext2D(new RenderingContextSettings(true));
@@ -180,13 +178,6 @@ export struct VisualizerView {
       this.presetTrans = 0;   // 风格变化：启动渐入过渡（不清空反馈画布）
     }
     this.presetLock = next;
-  }
-
-  /** 点击可视化区域：循环切换到下一个风格（本地即时生效 + 通知父页面同步状态） */
-  private cyclePreset(): void {
-    const next = (this.presetLock + 1) % PRESET_COUNT;
-    this.presetLock = next;
-    this.onPresetChange(next);
   }
 
   private frame(): void {
@@ -509,6 +500,8 @@ export struct VisualizerView {
       // full：shader 渲染原生表面。XComponent(SURFACE) + EGL/GLES，
       // fragment shader 逐像素解算全部效果——运算量固定、参数驱动，
       // 无 Canvas 分块/位图放大等 CPU 管线与伪影。
+      // 注意：XComponent 原生表面区域不接受点击语义——可视化舞台的点击
+      // （回封面）由 PlayerPage 在前景层的舞台占位 Blank 上承担，见其注释
       Stack({ alignContent: Alignment.TopStart }) {
         XComponent({
           id: 'viz_full',
@@ -517,7 +510,6 @@ export struct VisualizerView {
         })
           .width('100%')
           .height('100%')
-          .onClick(() => this.cyclePreset())
           .onLoad((context) => {
             // 官方模板桥接：把 __NATIVE_XCOMPONENT_OBJ__ 包装对象传给 NAPI，
             // native 侧 napi_unwrap 解出 OH_NativeXComponent* 再注册回调

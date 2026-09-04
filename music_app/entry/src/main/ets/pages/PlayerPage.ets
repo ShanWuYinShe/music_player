@@ -21,7 +21,7 @@ interface QueueEntry {
  *   可视化停渲染不烧 GPU（此前封面浮于全速可视化之上，两套视觉互相
  *   竞争且大部分渲染被遮挡，属设计矛盾）；
  * 可视化舞台：纯全屏 MilkDrop 可视化 + 控件（顶/底垫暗色渐变保证可读），
- *   点击画面切风格；进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
+ *   点击画面回封面；进度与音量 / 收藏与定时 / 播放队列半模态两态共用。
  * 交互对齐 Poweramp（官方 Player UI 手势）：封面/可视化区**左右滑动切歌**
  * （上一首/下一首，封面跟手位移）；**点按大封面切入可视化舞台**（返回曲库
  * 走左上箭头或系统侧滑，返回路径唯一、不占内容区点击）；封面↔可视化舞台
@@ -103,23 +103,21 @@ export struct PlayerPage {
     Stack({ alignContent: Alignment.Top }) {
       // 全屏可视化（可视化舞台的视觉主体）：MilkDrop 风格频谱流动层，
       // 延伸至系统栏下自然融合。封面模式下停帧并隐藏——封面与可视化
-      // 互斥：XComponent 保持挂载（避免 EGL 重建黑屏坑），切回即恢复
+      // 互斥：XComponent 保持挂载（避免 EGL 重建黑屏坑），切回即恢复。
+      // 注意其原生表面区域不接收点击——可视化舞台"点画面回封面"由
+      // 前景层的舞台占位 Blank 承担（见下方 else 分支）
       VisualizerView({
         player: this.player,
         variant: 'full',
         presetIndex: this.vizPreset,
-        active: !this.coverMode,
-        onPresetChange: (next: number): void => {
-          this.vizPreset = next;
-          this.toastPreset(next);
-        }
+        active: !this.coverMode
       })
         .width('100%')
         .height('100%')
         .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（点击切风格由
-        // VisualizerView 内部 onClick 承担，PanGesture 位移阈值不冲突）
+        // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（PanGesture 位移
+        // 阈值 12vp 与点击不冲突：未达阈值的触摸由 onClick 承担）
         .gesture(
           PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
             .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
@@ -286,7 +284,14 @@ export struct PlayerPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
         } else {
+          // 可视化舞台的布局占位 + 点击目标：占住舞台区域（顶栏与控制面板
+          // 之间），点击即回封面——与封面点击进可视化对称。XComponent 原生
+          // 表面收不到点击（旧版"点画面切风格"在真机上无响应的根因），
+          // 点击必须绑在这个前景层占位上，不能绑到可视化组件里
           Blank()
+            .onClick(() => {
+              this.coverMode = true;
+            })
         }
 
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
