@@ -2,55 +2,55 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#121212"
+      "value": "#F7F4EE"
     },
     {
       "name": "page_bg",
-      "value": "#121212"
+      "value": "#F7F4EE"
     },
     {
       "name": "surface",
-      "value": "#1D1C1A"
+      "value": "#FFFFFF"
     },
     {
       "name": "surface_alt",
-      "value": "#282623"
+      "value": "#EDE8DC"
     },
     {
       "name": "ink",
-      "value": "#F2EFE9"
+      "value": "#201B12"
     },
     {
       "name": "ink_soft",
-      "value": "#A8A29A"
+      "value": "#6E675B"
     },
     {
       "name": "ink_faint",
-      "value": "#6E6960"
+      "value": "#A69E8E"
     },
     {
       "name": "paper",
-      "value": "#17150F"
+      "value": "#F7F4EE"
     },
     {
       "name": "accent",
-      "value": "#DBA84E"
+      "value": "#A8791F"
     },
     {
       "name": "on_accent",
-      "value": "#201807"
+      "value": "#241A06"
     },
     {
       "name": "danger",
-      "value": "#E08260"
+      "value": "#C4552E"
     },
     {
       "name": "line",
-      "value": "#2E2B26"
+      "value": "#E2DCCE"
     },
     {
-      "name": "menu_glass",
-      "value": "#E61D1C1A"
+      "name": "menu_bg",
+      "value": "#FFFFFF"
     },
     {
       "name": "viz_fg",

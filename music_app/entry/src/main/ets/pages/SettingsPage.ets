@@ -93,6 +93,11 @@ export struct SettingsPage {
           .width('100%')
           .fontSize(14)
           .backgroundColor($r('app.color.surface_alt'))
+          // 文字/占位/光标显式用自适应资源：默认文字色随系统主题走，
+          // 浅色模式下会在深色 surface_alt 底上形成深底深字（不可见）
+          .fontColor($r('app.color.ink'))
+          .placeholderColor($r('app.color.ink_faint'))
+          .caretColor($r('app.color.accent'))
           // 输入过程只更新内存，失焦/离开页面才持久化，避免每个按键写盘
           .onChange((value: string) => {
             this.urlInput = value;
@@ -199,8 +204,13 @@ export struct SettingsPage {
       message: count > 0 ? `将删除 ${count} 首歌曲及其音频文件，且不可恢复。` : '将清空喜欢与播放记录。',
       autoCancel: true,
       alignment: DialogAlignment.Center,
+      // 对话框底色默认随系统主题，浅色下与页面深色调割裂；显式用自适应
+      // surface + 大圆角与整包卡片风格统一，文字仍由系统按主题取色
+      backgroundColor: $r('app.color.surface'),
+      cornerRadius: 24,
       primaryButton: {
         value: '取消',
+        fontColor: $r('app.color.ink_soft'),
         action: () => {
         }
       },

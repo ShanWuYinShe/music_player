@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { MusicLibrary } from '../library/MusicLibrary';
@@ -8,6 +9,11 @@ import { UserData } from './UserData';
 
 const TAG = 'AppStore';
 const DOMAIN = 0x0004;
+
+/** 颜色数值(0xAARRGGBB)转 setWindowBackgroundColor 接受的 #AARRGGBB 字符串 */
+function toArgb(color: number): string {
+  return `#${(color >>> 0).toString(16).padStart(8, '0')}`;
+}
 
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
@@ -57,6 +63,31 @@ export class AppStore {
     } catch (err) {
       hilog.info(DOMAIN, TAG, 'fetch providers failed: %{public}s', JSON.stringify(err));
     }
+  }
+
+  /**
+   * 窗口兜底色与系统栏字色随系统深浅模式自适应：按当前模式的资源值解析后应用。
+   * 启动（EntryAbility.onWindowStageCreate）与系统配置变更（AppAbilityStage）
+   * 时调用；播放页进入时覆盖为深色舞台沉浸态，退出时经本方法恢复自适应。
+   */
+  applyWindowChrome(): void {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return;
+    }
+    const bg = ctx.resourceManager.getColorSync($r('app.color.page_bg').id);
+    const ink = ctx.resourceManager.getColorSync($r('app.color.ink').id);
+    window.getLastWindow(ctx).then((win) => {
+      win.setWindowBackgroundColor(toArgb(bg));
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#00000000',
+        navigationBarColor: '#00000000',
+        statusBarContentColor: toArgb(ink),
+        navigationBarContentColor: toArgb(ink)
+      });
+    }).catch((err: Object) => {
+      hilog.warn(DOMAIN, TAG, 'apply window chrome failed: %{public}s', JSON.stringify(err));
+    });
   }
 
   /** 保存在线源地址：存用户原始输入（trim），留空回落默认线上服务；值未变化不落盘 */

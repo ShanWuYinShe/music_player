@@ -18,10 +18,21 @@
 - UI 状态管理统一 V2 体系：`@ObservedV2`/`@Trace`（PlayerController）+ `@ComponentV2`/`@Param`/`@Local`；modelVersion 6.0.2 起 V2 组件**普通成员禁止父组件初始化**（回调用 `@Event`、入参用 `@Param`）；对象字面量必须对应 interface/class，回调集合用具名类实现；`@Trace` 数组元素字段变化不触发 UI，需整体替换数组引用
 - **真机 V2 渲染依赖大坑（Mate 60 Pro/API24 实测）**：全局单例 `appStore.player`（@ObservedV2）的 @Trace/@Computed 对 **if 分支条件与属性插值（fontColor/visibility 等）均不触发 UI 更新**，仅 Text 内容插值存活——表现为切歌后 mini bar 不出现、当前行高亮/EQ 不刷新、播放页歌名不跟随。**对策（现行架构）**：PlayerController 提供 `addStateListener/removeStateListener` 多播订阅（切歌/启停时 `notifyState()`），页面在 aboutToAppear 订阅并维护 **@Local 镜像**（Index 的 `mini: MiniInfo`、PlayerPage 的 `song`/`isPlaying`）驱动渲染；列表当前行高亮靠回调里 `songSource.reload` 强制重建 LazyForEach 项。**不要**在渲染层直接依赖 player 的响应式状态（进度时间等 Text 插值除外）
 - 播放页舞台双态**互斥**：封面模式（默认）以模糊放大的封面做氛围背景、`VisualizerView` 的 `active=false` 停帧 + visibility 隐藏（XComponent 不卸载，避免 EGL 重建黑屏坑），可视化模式才全屏渲染——不要恢复"封面浮于全速可视化之上"的旧设计；播放页手势对齐 Poweramp 官方 Player UI：封面与可视化区**左右滑动切歌**（封面跟手位移 coverDragX、松手 ±60vp 判定）、**点按封面返回曲库**（tap-on-cover 跳库行为，进入可视化只经顶栏按钮）——不要把封面 tap 改回切可视化；
-- 恒定深色主题（Poweramp 风格）：base/dark 两套 color.json 统一为深色板
-  （page_bg #121212 / surface #1D1C1A / accent #DBA84E 亮金），app 不随系统
-  深浅切换；EntryAbility 与 PlayerPage 的 window 兜底色/系统栏字色为硬编码
-  深色，勿按 colorMode 分支
+- 自适应深浅双主题（暖纸浅色 + Poweramp 深色）：`base/element/color.json`=浅色板
+  （page_bg #F7F4EE / surface #FFFFFF / accent #A8791F 深金），`dark/element/color.json`=
+  深色板（page_bg #121212 / surface #1D1C1A / accent #DBA84E 亮金），全部 UI 颜色经
+  `$r('app.color.*')` 引用由资源限定符自动切换，代码不得写死色值；`viz_*` 四个舞台
+  token 两套板保持相同——播放页封面/可视化舞台恒定深底浅字（媒体播放页惯例），
+  进入播放页时 `applyImmersion` 固定深色 window chrome、退出经
+  `appStore.applyWindowChrome()` 恢复自适应。window 兜底色与系统栏字色的唯一入口是
+  `AppStore.applyWindowChrome`（`resourceManager.getColorSync` 按当前模式解析），启动
+  （EntryAbility）与系统配置变更（`AppAbilityStage.onConfigurationUpdate`——UIAbility
+  无此回调，全局配置变更只通知 AbilityStage）都会重应用。弹层（`components/MenuPanel.ets`
+  菜单容器 / `bindSheet` / `AlertDialog`）一律用实心自适应底色（menu_bg/surface），
+  **不要用 `backgroundBlurStyle` 材质**——其色随系统深浅翻转，与文字色错配会在浅色
+  模式下浅底浅字（已踩坑）；accent 底上的前景图标/文字固定用 `on_accent`，`paper`
+  只用于 ink 底；`TextInput` 必须显式设 fontColor/placeholderColor（默认色随系统
+  主题，浅色模式下会在深色输入底上形成深底深字不可见，已踩坑）
 
 ## 本地命令
 

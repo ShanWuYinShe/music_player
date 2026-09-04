@@ -47,15 +47,10 @@ export default class EntryAbility extends UIAbility {
   private setupImmersiveWindow(windowStage: window.WindowStage): void {
     try {
       const win = windowStage.getMainWindowSync();
-      // app 恒定 Poweramp 深色主题，窗口兜底色与系统栏字色不随系统深浅切换
+      // 全屏布局恒定开启；窗口兜底色与系统栏字色随系统深浅模式自适应
+      // （深浅色板切换由资源限定符完成，见 base|dark/element/color.json）
       win.setWindowLayoutFullScreen(true);
-      win.setWindowBackgroundColor('#121212');
-      win.setWindowSystemBarProperties({
-        statusBarColor: '#00000000',
-        navigationBarColor: '#00000000',
-        statusBarContentColor: '#F2EFE9',
-        navigationBarContentColor: '#F2EFE9'
-      });
+      appStore.applyWindowChrome();
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setup immersive window failed: %{public}s', JSON.stringify(err));
     }

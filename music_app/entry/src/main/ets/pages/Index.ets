@@ -5,6 +5,7 @@ import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
 import { SongItem } from '../components/SongItem';
 import { MenuItemRow } from '../components/MenuItemRow';
+import { MenuPanel, MenuHeader, MenuDivider } from '../components/MenuPanel';
 import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
@@ -252,6 +253,7 @@ struct Index {
               .placeholderFont({ size: 14 })
               .placeholderColor($r('app.color.ink_faint'))
               .fontColor($r('app.color.ink'))
+              .caretColor($r('app.color.accent'))
               .backgroundColor(Color.Transparent)
               .padding(0)
               .onChange((value: string) => {
@@ -515,7 +517,7 @@ struct Index {
   /** 长按歌曲菜单 */
   @Builder
   SongMenu(song: SongRecord) {
-    Column({ space: 2 }) {
+    MenuPanel({ panelWidth: 204 }) {
       MenuItemRow({
         label: '下一首播放',
         icon: $r('sys.symbol.list_bullet'),
@@ -527,12 +529,14 @@ struct Index {
       MenuItemRow({
         label: appStore.userData.isFavorite(song.id) ? '取消喜欢' : '喜欢',
         icon: appStore.userData.isFavorite(song.id) ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'),
+        iconTint: appStore.userData.isFavorite(song.id) ? $r('app.color.accent') : null,
         onSelect: () => {
           const fav = appStore.userData.toggleFavorite(song.id);
           promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
         }
       })
       if (this.sourceTab === SourceTab.LOCAL) {
+        MenuDivider()
         MenuItemRow({
           label: '从曲库删除',
           icon: $r('sys.symbol.trash'),
@@ -541,18 +545,13 @@ struct Index {
         })
       }
     }
-    .width(196)
-    .padding(6)
-    .borderRadius(16)
-    .backgroundColor($r('app.color.menu_glass'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 排序菜单 */
   @Builder
   SortMenu() {
-    Column({ space: 2 }) {
+    MenuPanel({ panelWidth: 190 }) {
+      MenuHeader({ title: '排序方式' })
       MenuItemRow({
         label: sortLabel(SortMode.DEFAULT),
         active: this.sortMode === SortMode.DEFAULT,
@@ -582,12 +581,6 @@ struct Index {
         }
       })
     }
-    .width(160)
-    .padding(6)
-    .borderRadius(16)
-    .backgroundColor($r('app.color.menu_glass'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 左滑操作：下一首播放 + 删除 */
@@ -597,7 +590,7 @@ struct Index {
       Column() {
         SymbolGlyph($r('sys.symbol.forward_end_fill'))
           .fontSize(20)
-          .fontColor([$r('app.color.paper')])
+          .fontColor([$r('app.color.on_accent')])
       }
       .width(52)
       .height('100%')
@@ -614,7 +607,7 @@ struct Index {
         Column() {
           SymbolGlyph($r('sys.symbol.trash'))
             .fontSize(20)
-            .fontColor([$r('app.color.paper')])
+            .fontColor([$r('app.color.on_accent')])
         }
         .width(52)
         .height('100%')

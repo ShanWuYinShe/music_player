@@ -49,24 +49,24 @@
       "value": "#2E2B26"
     },
     {
-      "name": "menu_glass",
-      "value": "#E61D1C1A"
+      "name": "menu_bg",
+      "value": "#262320"
     },
     {
       "name": "viz_fg",
-      "value": "#EFEBDE"
+      "value": "#F3EFE4"
     },
     {
       "name": "viz_fg_soft",
-      "value": "#ACA594"
+      "value": "#C6C0B0"
     },
     {
       "name": "viz_fg_faint",
-      "value": "#767061"
+      "value": "#8E8878"
     },
     {
       "name": "viz_line",
-      "value": "#38342B"
+      "value": "#464135"
     }
   ]
 }

@@ -5,6 +5,7 @@ import { SongRecord } from '../model/Song';
 import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { MenuItemRow } from '../components/MenuItemRow';
+import { MenuPanel, MenuHeader, MenuDivider } from '../components/MenuPanel';
 import { VisualizerView } from '../components/VisualizerView';
 import { WaveformSeekbar } from '../components/WaveformSeekbar';
 import { EqIndicator } from '../components/EqIndicator';
@@ -79,25 +80,30 @@ export struct PlayerPage {
   }
 
   /**
-   * 播放页沉浸态：只切换系统栏透明与字色 + window 深色兜底。画面延伸到
-   * 系统栏下靠全局恒定的 setWindowLayoutFullScreen（EntryAbility 启动即
-   * 开启，组件级 expandSafeArea 无法让 Canvas 画进系统栏区域，真机踩坑）；
+   * 播放页沉浸态：进入时窗口兜底色/系统栏字色固定为深色舞台（封面/可视化
+   * 舞台底色恒定深，不随系统深浅切换，viz_* 舞台 token 同理恒定）；
+   * 离开时经 applyWindowChrome 恢复为随系统模式自适应的首页 chrome。
+   * 画面延伸到系统栏下靠全局恒定的 setWindowLayoutFullScreen（EntryAbility
+   * 启动即开启，组件级 expandSafeArea 无法让 Canvas 画进系统栏区域，真机踩坑）；
    * 页面不得开关全屏布局——异步恢复滞后会让返回首页时布局跳动。
    * 前景控件用 AppStore 预读的避让区高度自行留白。
    */
   private applyImmersion(enter: boolean): void {
+    if (!enter) {
+      appStore.applyWindowChrome();
+      return;
+    }
     const ctx = appStore.abilityContext;
     if (ctx === null) {
       return;
     }
     window.getLastWindow(ctx).then((win) => {
-      // app 恒定深色主题:字色恒浅,底色沉浸时透明、离开时回落页面深色
+      // 舞台恒定深底:字色恒浅,沉浸时底色透明融合画面
       const fg = '#F2EFE9';
-      const bg = enter ? '#0C0A09' : '#121212';
-      win.setWindowBackgroundColor(bg);
+      win.setWindowBackgroundColor('#0C0A09');
       win.setWindowSystemBarProperties({
-        statusBarColor: enter ? '#00000000' : bg,
-        navigationBarColor: enter ? '#00000000' : bg,
+        statusBarColor: '#00000000',
+        navigationBarColor: '#00000000',
         statusBarContentColor: fg,
         navigationBarContentColor: fg
       });
@@ -374,7 +380,8 @@ export struct PlayerPage {
           Stack({ alignContent: Alignment.Center }) {
             SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(38)
-              .fontColor([$r('app.color.paper')])
+              // accent 底上的前景固定用 on_accent：深浅两模式均为深色、对比受控
+              .fontColor([$r('app.color.on_accent')])
           }
           .width(76)
           .height(76)
@@ -461,6 +468,9 @@ export struct PlayerPage {
     .bindSheet(this.isQueueOpen, this.QueueSheet(), {
       height: SheetSize.MEDIUM,
       showClose: true,
+      // 半模态底色用自适应 surface：默认底随系统主题走，浅色模式下会与
+      // 内容层的恒定浅色文字冲突（浅底浅字不可见）
+      backgroundColor: $r('app.color.surface'),
       title: { title: '播放队列' },
       onDisappear: (): void => {
         this.isQueueOpen = false;
@@ -574,8 +584,9 @@ export struct PlayerPage {
             .width('100%')
             .padding({ left: 20, right: 20, top: 8, bottom: 8 })
             .borderRadius(12)
+            // sheet 底色为 surface，当前行高亮用更亮一档的 surface_alt 区分
             .backgroundColor(entry.song.id === (this.song?.id ?? '') ?
-              $r('app.color.surface') : Color.Transparent)
+              $r('app.color.surface_alt') : Color.Transparent)
             .onClick(() => this.player.playSong(entry.song.id))
           }
         }, (entry: QueueEntry) => `${entry.song.id}${entry.inserted ? '_q' : ''}`)
@@ -592,7 +603,8 @@ export struct PlayerPage {
   /** 定时关闭菜单 */
   @Builder
   SleepMenu() {
-    Column({ space: 2 }) {
+    MenuPanel({ panelWidth: 200 }) {
+      MenuHeader({ title: '定时关闭' })
       MenuItemRow({
         label: '15 分钟后停止',
         onSelect: (): void => this.applySleepTimer(15)
@@ -606,6 +618,7 @@ export struct PlayerPage {
         onSelect: (): void => this.applySleepTimer(60)
       })
       if (this.player.sleepRemainSec >= 0) {
+        MenuDivider()
         MenuItemRow({
           label: '取消定时',
           danger: true,
@@ -616,18 +629,13 @@ export struct PlayerPage {
         })
       }
     }
-    .width(180)
-    .padding(6)
-    .borderRadius(16)
-    .backgroundColor($r('app.color.menu_glass'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
   @Builder
   VizMenu() {
-    Column({ space: 2 }) {
+    MenuPanel({ panelWidth: 224 }) {
+      MenuHeader({ title: '可视化风格' })
       ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
         MenuItemRow({
           label: `${index + 1}. ${name}`,
@@ -639,12 +647,6 @@ export struct PlayerPage {
         })
       }, (name: string) => name)
     }
-    .width(220)
-    .padding(6)
-    .borderRadius(16)
-    .backgroundColor($r('app.color.menu_glass'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_REGULAR)
-    .shadow({ radius: 24, color: 'rgba(0,0,0,0.18)' })
   }
 
   private applySleepTimer(minutes: number): void {
