@@ -76,7 +76,7 @@ export struct SongItem {
         Row({ space: 6 }) {
           this.HighlightText(this.titleSegments,
             this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'), 16, FontWeight.Medium)
-          // 网易云付费曲目徽标（未登录时为 30 秒试听，在线页横幅统一说明）
+          // 网易云付费曲目徽标（未登录时播放页会追加「VIP 试听」标注）
           if (this.song.vip === true) {
             Text('VIP')
               .fontSize(10)

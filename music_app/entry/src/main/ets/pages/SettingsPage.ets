@@ -132,9 +132,10 @@ export struct SettingsPage {
         .layoutWeight(1)
 
         Button('清空')
-          .height(34)
+          // constraintSize 替代固定高度：热区达标（≥40vp），大字体不截断
+          .constraintSize({ minHeight: 40 })
           .fontSize(13)
-          .borderRadius(17)
+          .borderRadius(20)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.danger'))

@@ -622,7 +622,7 @@ export struct PlayerPage {
       }
       .layoutWeight(1)
       .width('100%')
-      .scrollBar(BarState.Off)
+      .scrollBar(BarState.Auto)
     }
     .width('100%')
     .height('100%')
@@ -643,7 +643,7 @@ export struct PlayerPage {
       }
       if (this.player.sleepRemainSec >= 0) {
         MenuItemGroup() {
-          MenuItem({ content: '取消定时' })
+          MenuItem({ content: `取消定时（剩 ${formatTime(this.player.sleepRemainSec * 1000)}）` })
             .onClick(() => {
               this.player.cancelSleepTimer();
               promptAction.showToast({ message: '已取消定时关闭' });
