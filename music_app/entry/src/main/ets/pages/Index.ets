@@ -234,28 +234,6 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 20, top: 8, bottom: 2 })
 
-        // 网易云 VIP 试听提示：只陈述用户可感知的结果（30 秒试听），不提
-        // 服务端术语（管理面板/扫码登录是管理员操作，用户解决不了）
-        if (this.sourceTab === SourceTab.ONLINE && appStore.neteaseEnabled && !appStore.neteaseLoggedIn) {
-          Row({ space: 8 }) {
-            SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
-              .fontSize(14)
-              .fontColor([$r('app.color.accent')])
-            Text('网易云 VIP 歌曲仅支持 30 秒试听')
-              .fontSize(11)
-              .fontColor($r('app.color.ink_soft'))
-              .layoutWeight(1)
-              .maxLines(2)
-          }
-          .alignItems(VerticalAlign.Top)
-          .width('100%')
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .borderRadius(12)
-          .backgroundColor($r('app.color.surface'))
-          .border({ width: 0.5, color: $r('app.color.line') })
-          .margin({ top: 4 })
-        }
-
         // 搜索 + 排序（在线列表为服务端顺序，隐藏排序入口）
         Row({ space: 10 }) {
           Row({ space: 6 }) {

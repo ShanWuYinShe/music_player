@@ -38,8 +38,7 @@ export class AppStore {
   /** 全局恒定全屏布局下的状态栏/导航条避让高度（vp），页面加载完成后读入 */
   @Trace safeTopVp: number = 0;
   @Trace safeBottomVp: number = 0;
-  /** 在线源能力：网易云源是否启用/已登录（未登录时付费曲仅试听，在线页提示用） */
-  @Trace neteaseEnabled: boolean = false;
+  /** 网易云源是否已登录（未登录时付费曲仅试听：试听曲不进缓存、播放页标注试听） */
   @Trace neteaseLoggedIn: boolean = false;
   private pref: preferences.Preferences | null = null;
   /** 在线源地址已变更待生效（首页 onPageShow 消费后重拉在线列表） */
@@ -83,11 +82,10 @@ export class AppStore {
     });
   }
 
-  /** 刷新在线源能力摘要（网易云登录态）；失败静默保留旧值（提示非关键路径） */
+  /** 刷新在线源能力摘要（网易云登录态）；失败静默保留旧值（标注非关键路径） */
   async refreshOnlineProviders(): Promise<void> {
     try {
       const state = await this.onlineSource.fetchProviders();
-      this.neteaseEnabled = state.neteaseEnabled;
       this.neteaseLoggedIn = state.neteaseLoggedIn;
     } catch (err) {
       hilog.info(DOMAIN, TAG, 'fetch providers failed: %{public}s', JSON.stringify(err));

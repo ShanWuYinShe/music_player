@@ -44,9 +44,8 @@ export interface OnlineProvidersResponse {
   providers?: OnlineProviderItem[];
 }
 
-/** 源能力摘要：网易云源是否可用/已登录（不可用时 hint 无意义） */
+/** 源能力摘要：网易云源是否已登录（决定付费曲是否仅试听） */
 export interface OnlineProviderState {
-  neteaseEnabled: boolean;
   neteaseLoggedIn: boolean;
 }
 
@@ -83,9 +82,9 @@ export function providersUrl(baseUrl: string): string {
 }
 
 /**
- * 解析源列表响应为源能力摘要：netease 源存在即 enabled，其 loggedIn 缺省
- * 视为 false。非法响应（空串/非 JSON/缺 providers）返回 null，调用方按
- * 「未知状态、不展示提示」处理。
+ * 解析源列表响应为源能力摘要：取 netease 源的 loggedIn（缺省视为
+ * false）。非法响应（空串/非 JSON/缺 providers）返回 null，调用方按
+ * 「未知状态」处理。
  */
 export function parseOnlineProviders(body: string): OnlineProviderState | null {
   if (body.trim() === '') {
@@ -100,10 +99,9 @@ export function parseOnlineProviders(body: string): OnlineProviderState | null {
   if (!parsed || !Array.isArray(parsed.providers)) {
     return null;
   }
-  const state: OnlineProviderState = { neteaseEnabled: false, neteaseLoggedIn: false };
+  const state: OnlineProviderState = { neteaseLoggedIn: false };
   for (const item of parsed.providers) {
     if (item && item.id === 'netease') {
-      state.neteaseEnabled = true;
       state.neteaseLoggedIn = item.loggedIn === true;
     }
   }

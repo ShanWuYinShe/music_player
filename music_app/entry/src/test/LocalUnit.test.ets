@@ -255,7 +255,6 @@ export default function LocalUnitSuite() {
       if (loggedIn === null) {
         expect(false).assertTrue();
       } else {
-        expect(loggedIn.neteaseEnabled).assertTrue();
         expect(loggedIn.neteaseLoggedIn).assertTrue();
       }
       // netease 存在但未登录（loggedIn 缺省视为 false）
@@ -263,15 +262,14 @@ export default function LocalUnitSuite() {
       if (anon === null) {
         expect(false).assertTrue();
       } else {
-        expect(anon.neteaseEnabled).assertTrue();
         expect(anon.neteaseLoggedIn).assertFalse();
       }
-      // 无 netease 源
+      // 无 netease 源：等价未登录
       const localOnly = parseOnlineProviders('{"providers":[{"id":"library"}]}');
       if (localOnly === null) {
         expect(false).assertTrue();
       } else {
-        expect(localOnly.neteaseEnabled).assertFalse();
+        expect(localOnly.neteaseLoggedIn).assertFalse();
       }
       // 非法响应返回 null
       expect(parseOnlineProviders('')).assertNull();
