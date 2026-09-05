@@ -36,6 +36,9 @@ export struct PlayerPage {
    * 真机上不触发，已踩坑；@Local 驱动的 if/插值可靠） */
   @Local song: SongRecord | null = null;
   @Local isPlaying: boolean = false;
+  /** 当前曲收藏态 @Local 镜像：userData 与 player 同为 @ObservedV2 全局单例，
+   * 真机上其 @Trace 对属性插值不触发 UI（同坑机制），收藏图标刷新走本镜像 */
+  @Local isFavoriteNow: boolean = false;
   private stateListener: () => void = (): void => {
   };
   /** 播放队列半模态开关 */
@@ -72,6 +75,7 @@ export struct PlayerPage {
       const id = this.player.currentSongId;
       this.song = id === '' ? null : this.player.getSong(id);
       this.isPlaying = this.player.isPlaying;
+      this.isFavoriteNow = id !== '' && appStore.userData.isFavorite(id);
     };
     this.stateListener(); // 进入即同步一次当前状态
     this.player.addStateListener(this.stateListener);
@@ -416,11 +420,11 @@ export struct PlayerPage {
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.player.next())
 
-          SymbolGlyph(this.isFavorite() ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
+          SymbolGlyph(this.isFavoriteNow ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
             .fontSize(24)
-            .fontColor([this.isFavorite() ? $r('app.color.accent') : $r('app.color.viz_fg')])
+            .fontColor([this.isFavoriteNow ? $r('app.color.accent') : $r('app.color.viz_fg')])
             .padding(8)
-            .accessibilityText(this.isFavorite() ? '取消喜欢' : '喜欢')
+            .accessibilityText(this.isFavoriteNow ? '取消喜欢' : '喜欢')
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => this.toggleFavorite())
         }
@@ -678,17 +682,13 @@ export struct PlayerPage {
     promptAction.showToast({ message: `将在 ${minutes} 分钟后暂停播放` });
   }
 
-  private isFavorite(): boolean {
-    const song = this.song;
-    return song !== null && appStore.userData.isFavorite(song.id);
-  }
-
   private toggleFavorite(): void {
     const song = this.song;
     if (!song) {
       return;
     }
     const fav = appStore.userData.toggleFavorite(song.id);
+    this.isFavoriteNow = fav; // @Trace 插值在真机不可靠，图标刷新显式走镜像
     promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
   }
 
