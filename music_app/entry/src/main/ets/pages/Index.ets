@@ -81,6 +81,11 @@ struct Index {
   private onlineRequestId: number = 0;
   /** LazyForEach 数据源 */
   private songSource: SongListDataSource = new SongListDataSource();
+  /** 列表滚动控制器：本地/在线各持一个（Scroller 不可绑定多个滚动组件） */
+  private localScroller: Scroller = new Scroller();
+  private onlineScroller: Scroller = new Scroller();
+  /** 远离顶部时在拇指区露出回顶按钮（onScrollIndex 驱动） */
+  @Local showBackTop: boolean = false;
 
   /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
@@ -209,13 +214,7 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 16, top: 14, bottom: 4 })
 
-        // 源切换：本地曲库 / 在线服务
-        Row({ space: 8 }) {
-          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
-          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
-        }
-        .width('100%')
-        .padding({ left: 20, right: 20, top: 6, bottom: 2 })
+        // 源切换 / 分类 / 排序已沉底到列表下方的拇指区功能条（唯一入口），顶部不再保留
 
         // 网易云未登录提示：VIP 歌曲仅试听片段（登录后自动消失）
         if (this.sourceTab === SourceTab.ONLINE && appStore.neteaseEnabled && !appStore.neteaseLoggedIn) {
@@ -280,7 +279,8 @@ struct Index {
               SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
                 .fontSize(15)
                 .fontColor([$r('app.color.ink_faint')])
-                .padding(4)
+                // padding 补足 40vp 热区（15 + 12×2 ≈ 39，视觉平衡取整）
+                .padding(12)
                 .accessibilityText('清空搜索')
                 .onClick(() => {
                   this.searchText = '';
@@ -298,36 +298,12 @@ struct Index {
           .backgroundColor($r('app.color.surface_alt'))
           .padding({ left: 12, right: 12 })
 
-          if (this.sourceTab === SourceTab.LOCAL) {
-            // 排序入口
-            Row({ space: 3 }) {
-              Text(sortLabel(this.sortMode))
-                .fontSize(13)
-                .fontColor($r('app.color.ink'))
-              SymbolGlyph($r('sys.symbol.chevron_down'))
-                .fontSize(12)
-                .fontColor([$r('app.color.ink_soft')])
-            }
-            .height(38)
-            .borderRadius(19)
-            .backgroundColor($r('app.color.surface'))
-            .padding({ left: 13, right: 11 })
-            .bindMenu(this.SortMenu())
-          }
+          // 排序入口已随功能条沉底到拇指区（唯一入口），搜索行不再保留
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
-        // 分类 Tab：全部 / 喜欢 / 最近（本地源语义，在线隐藏）
-        if (this.sourceTab === SourceTab.LOCAL) {
-          Row({ space: 8 }) {
-            this.TabChip(LibraryTab.ALL, '全部')
-            this.TabChip(LibraryTab.FAVORITES, '喜欢')
-            this.TabChip(LibraryTab.RECENT, '最近')
-          }
-          .width('100%')
-          .padding({ left: 20, right: 20, top: 10, bottom: 6 })
-        }
+        // 分类 Tab 已随功能条沉底到拇指区（唯一入口），顶部不再保留
 
         // 歌曲列表 / 空态
         if (this.filteredSongs.length === 0) {
@@ -346,7 +322,7 @@ struct Index {
         } else if (this.sourceTab === SourceTab.ONLINE) {
           // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
           Refresh({ refreshing: $$this.isRefreshing }) {
-            this.SongList()
+            this.SongList(this.onlineScroller)
           }
           .onRefreshing(() => {
             this.enterOnline(this.searchText.trim()).finally(() => {
@@ -355,8 +331,12 @@ struct Index {
           })
           .layoutWeight(1)
         } else {
-          this.SongList()
+          this.SongList(this.localScroller)
         }
+
+        // 底部功能条：源切换 + 分类 + 排序三合一（顶部旧入口已删，此为唯一入口），
+        // 沉底到拇指区；远离顶部时右侧露出回顶按钮
+        this.BottomToolbar()
 
         // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）
         if (this.mini !== null) {
@@ -385,8 +365,8 @@ struct Index {
    * OnlineStatusView 居中呈现加载态，有旧列表时保留展示（搜索框内
    * 小 loading 与下拉刷新指示反馈进行中），避免列表内容跳动 */
   @Builder
-  SongList() {
-    List({ space: 2 }) {
+  SongList(scroller: Scroller) {
+    List({ space: 2, scroller: scroller }) {
       LazyForEach(this.songSource, (song: SongRecord) => {
         ListItem() {
           SongItem({
@@ -411,7 +391,11 @@ struct Index {
     .width('100%')
     .layoutWeight(1)
     .padding({ left: 12, right: 12, bottom: 8 })
-    .scrollBar(BarState.Off)
+    .scrollBar(BarState.Auto)
+    .onScrollIndex((start: number) => {
+      // 远离顶部才在拇指区露出回顶按钮，回到顶部自动收起
+      this.showBackTop = start > 2;
+    })
   }
 
   /** 分类计数：在 Builder 内部读取 @Computed 状态以建立响应依赖（按值传参不刷新） */
@@ -425,11 +409,15 @@ struct Index {
       .fontSize(13)
       .fontColor(this.tab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
       .fontWeight(this.tab === tab ? FontWeight.Medium : FontWeight.Normal)
-      .padding({ left: 14, right: 14, top: 5, bottom: 5 })
+      // 上下 padding 补足 40vp 触控热区
+      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
       .borderRadius(15)
       .backgroundColor(this.tab === tab ? $r('app.color.accent') : $r('app.color.surface'))
+      .accessibilityText(`分类${label}`)
       .onClick(() => {
         this.tab = tab;
+        this.showBackTop = false;
+        this.localScroller.scrollToIndex(0);
       })
   }
 
@@ -445,10 +433,76 @@ struct Index {
         .fontColor(this.sourceTab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
         .fontWeight(this.sourceTab === tab ? FontWeight.Medium : FontWeight.Normal)
     }
-    .padding({ left: 14, right: 14, top: 5, bottom: 5 })
+    // 上下 padding 补足 40vp 触控热区
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
     .borderRadius(15)
     .backgroundColor(this.sourceTab === tab ? $r('app.color.accent') : $r('app.color.surface'))
+    .accessibilityText(`切换到${label}`)
     .onClick(() => this.switchSource(tab))
+  }
+
+  /** 底部功能条：源切换 + 分类 + 排序三合一（顶部旧入口已删，此为唯一入口）。
+   * 横滑容纳全部 chip，远离顶部时右侧固定回顶按钮——触发器全部落在拇指区 */
+  @Builder
+  BottomToolbar() {
+    Row({ space: 8 }) {
+      Scroll() {
+        Row({ space: 8 }) {
+          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
+          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+          if (this.sourceTab === SourceTab.LOCAL) {
+            this.TabChip(LibraryTab.ALL, '全部')
+            this.TabChip(LibraryTab.FAVORITES, '喜欢')
+            this.TabChip(LibraryTab.RECENT, '最近')
+            this.SortButton()
+          }
+        }
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .layoutWeight(1)
+
+      if (this.showBackTop) {
+        SymbolGlyph($r('sys.symbol.arrow_up'))
+          .fontSize(18)
+          .fontColor([$r('app.color.on_accent')])
+          // 18 + 上下 padding 22 = 40vp 热区
+          .padding(11)
+          .borderRadius(20)
+          .backgroundColor($r('app.color.accent'))
+          .accessibilityText('回到顶部')
+          .onClick(() => {
+            this.activeScroller().scrollToIndex(0, true);
+          })
+      }
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 4, bottom: 8 })
+  }
+
+  /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口） */
+  @Builder
+  SortButton() {
+    Row({ space: 3 }) {
+      Text(sortLabel(this.sortMode))
+        .fontSize(13)
+        .fontColor($r('app.color.ink'))
+      SymbolGlyph($r('sys.symbol.chevron_down'))
+        .fontSize(12)
+        .fontColor([$r('app.color.ink_soft')])
+    }
+    // constraintSize 替代固定高度：热区达标（≥40vp），大字体时随内容撑高
+    .constraintSize({ minHeight: 40 })
+    .borderRadius(20)
+    .backgroundColor($r('app.color.surface'))
+    .padding({ left: 13, right: 11 })
+    .accessibilityText(`排序，当前${sortLabel(this.sortMode)}`)
+    .bindMenu(this.SortMenu())
+  }
+
+  /** 当前可见列表的滚动控制器（本地/在线二选一） */
+  private activeScroller(): Scroller {
+    return this.sourceTab === SourceTab.ONLINE ? this.onlineScroller : this.localScroller;
   }
 
   /** 在线列表状态视图（列表区域整体呈现，非顶部插行）：加载中 /
@@ -480,7 +534,8 @@ struct Index {
           .fontSize(12)
           .fontColor($r('app.color.ink_faint'))
         Button('重试')
-          .height(38)
+          // constraintSize 替代固定高度：热区达标，大字体不截断
+          .constraintSize({ minHeight: 40 })
           .fontSize(14)
           .borderRadius(19)
           .buttonStyle(ButtonStyleMode.NORMAL)
@@ -505,7 +560,8 @@ struct Index {
           .fontSize(12)
           .fontColor($r('app.color.ink_faint'))
         Button('重试')
-          .height(38)
+          // constraintSize 替代固定高度：热区达标，大字体不截断
+          .constraintSize({ minHeight: 40 })
           .fontSize(14)
           .borderRadius(19)
           .buttonStyle(ButtonStyleMode.NORMAL)
@@ -636,6 +692,7 @@ struct Index {
       .backgroundColor($r('app.color.accent'))
       .justifyContent(FlexAlign.Center)
       .margin({ left: 6 })
+      .accessibilityText('下一首播放')
       .onClick(() => {
         const count = appStore.player.queueNext(id);
         promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
@@ -653,7 +710,14 @@ struct Index {
         .backgroundColor($r('app.color.danger'))
         .justifyContent(FlexAlign.Center)
         .margin({ left: 6 })
-        .onClick(() => appStore.player.removeSong(id))
+        .accessibilityText('从曲库删除')
+        // 破坏性操作与长按菜单统一走二次确认，不得直删
+        .onClick(() => {
+          const song = appStore.player.getSong(id);
+          if (song) {
+            this.confirmRemoveSong(song);
+          }
+        })
       }
     }
     .height('100%')
@@ -686,14 +750,14 @@ struct Index {
 
       Row({ space: 12 }) {
         Button('导入音乐')
-          .height(42)
+          .constraintSize({ minHeight: 42 })
           .fontSize(15)
           .borderRadius(21)
           .backgroundColor($r('app.color.ink'))
           .fontColor($r('app.color.paper'))
           .onClick(() => this.importFromPicker())
         Button('载入演示曲目')
-          .height(42)
+          .constraintSize({ minHeight: 42 })
           .fontSize(15)
           .borderRadius(21)
           .buttonStyle(ButtonStyleMode.NORMAL)
@@ -705,7 +769,7 @@ struct Index {
     .width('100%')
     .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
-    .padding({ bottom: 60 })
+    // 空态按钮落在拇指区：不再上推 60vp
   }
 
   /** 搜索无结果 */
@@ -771,19 +835,21 @@ struct Index {
     }
   }
 
-  /** 切换曲目来源：本地回读曲库，在线重新拉取（重复点击在线等同刷新） */
+  /** 切换曲目来源：本地回读曲库，在线重新拉取（重复点击在线等同刷新）；
+   * 搜索词保留——切源不丢查询，切在线时直接按词搜 */
   private switchSource(tab: SourceTab): void {
     if (this.sourceTab === tab && tab === SourceTab.LOCAL) {
       return;
     }
     this.sourceTab = tab;
-    this.searchText = '';
+    this.showBackTop = false;
     this.cancelPendingSearch();
     if (tab === SourceTab.ONLINE) {
-      this.enterOnline('');
+      this.enterOnline(this.searchText.trim());
     } else {
       appStore.player.refreshSongs();
     }
+    this.activeScroller().scrollToIndex(0);
   }
 
   /** 在线搜索防抖：输入停顿后触发服务端搜索 */

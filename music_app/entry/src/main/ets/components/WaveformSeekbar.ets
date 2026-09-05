@@ -65,8 +65,9 @@ export struct WaveformSeekbar {
       }, (h: number, index: number) => `${index}_${h.toFixed(3)}`)
     }
     .width('100%')
-    // 触控热区达标（≥40vp）：柱体仍 ≤30vp 视觉高度，容器上下留白居中
-    .height(40)
+    // 触控热区加高到 48vp：柱体仍 ≤30vp 视觉高度，容器上下留白居中，
+    // 拇指拖动行程更从容（控制面板两侧收窄后宽度同步受益）
+    .height(48)
     .alignItems(VerticalAlign.Center)
     .accessibilityText('播放进度，点按或拖动调节')
     .onAreaChange((_old: Area, area: Area) => {

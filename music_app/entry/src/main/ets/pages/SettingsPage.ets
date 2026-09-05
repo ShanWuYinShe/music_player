@@ -176,6 +176,19 @@ export struct SettingsPage {
       .backgroundColor($r('app.color.surface'))
 
         Blank()
+
+        // 保存并测试连接：落到拇指区 bottom。以往只靠失焦/离页隐式保存，
+        // 配错地址要回首页拉列表才知道；此处显式保存 + 即时测连反馈。
+        // 离页兜底保存保留（防丢输入），UI 入口只有这一个，不重复
+        Button('保存并测试连接')
+          .width('100%')
+          .constraintSize({ minHeight: 46 })
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .borderRadius(23)
+          .backgroundColor($r('app.color.ink'))
+          .fontColor($r('app.color.paper'))
+          .onClick(() => this.saveAndTest())
       }
       .width('100%')
       .height('100%')
@@ -185,6 +198,20 @@ export struct SettingsPage {
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 保存并测试连接：先落盘地址（值未变内部早退），再用轻量 providers 接口
+   * 测连——成功/失败都在拇指区即时 toast，不用回首页才知道配错 */
+  private async saveAndTest(): Promise<void> {
+    appStore.saveOnlineBaseUrl(this.urlInput);
+    try {
+      await appStore.onlineSource.fetchProviders();
+      promptAction.showToast({ message: '服务连接正常' });
+    } catch (err) {
+      promptAction.showToast({
+        message: `连接失败：${err instanceof Error ? err.message : '未知错误'}`
+      });
+    }
   }
 
   private librarySummary(): string {

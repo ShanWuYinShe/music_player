@@ -188,7 +188,7 @@ export struct PlayerPage {
       }
 
       Column() {
-        // 顶部栏：返回 + 舞台视图切换 + 队列入口（歌名由主标题承担，避免重复）。
+        // 顶部栏：返回 + 舞台视图切换（队列入口已沉底到控制面板，此为唯一入口）。
         // 可视化风格菜单只在可视化舞台出现——封面模式与可视化互斥，此时
         // 切风格无作用，展示属多余入口
         Row() {
@@ -219,15 +219,6 @@ export struct PlayerPage {
               .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
               .bindMenu(this.VizMenu())
           }
-          SymbolGlyph($r('sys.symbol.list_bullet'))
-            .fontSize(22)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(12)
-            .accessibilityText('播放队列')
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
-            .onClick(() => {
-              this.isQueueOpen = true;
-            })
         }
         .width('100%')
         .height(48)
@@ -353,6 +344,33 @@ export struct PlayerPage {
           .width('100%')
           .margin({ top: 16 })
 
+          // 队列入口（顶栏旧入口已删，此为唯一入口）：沉底到拇指区。
+          // 不展示动态计数——player 的 @Trace 在真机上不驱动此类文本刷新，
+          // 静态文案避免过期数字误导，计数进 sheet 汇总行看
+          Row({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.list_bullet'))
+              .fontSize(16)
+              .fontColor([$r('app.color.viz_fg_soft')])
+            Text('播放队列')
+              .fontSize(13)
+              .fontColor($r('app.color.viz_fg_soft'))
+            Blank()
+            SymbolGlyph($r('sys.symbol.chevron_right'))
+              .fontSize(14)
+              .fontColor([$r('app.color.viz_fg_faint')])
+          }
+          .width('100%')
+          .constraintSize({ minHeight: 44 })
+          .borderRadius(12)
+          .backgroundColor('rgba(255,255,255,0.06)')
+          .padding({ left: 14, right: 12 })
+          .margin({ top: 10 })
+          .accessibilityText('打开播放队列')
+          .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.98 })
+          .onClick(() => {
+            this.isQueueOpen = true;
+          })
+
           // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
           // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
           Row({ space: 30 }) {
@@ -458,10 +476,11 @@ export struct PlayerPage {
         }
         .width('100%')
         .margin({ top: 12 })
-        .padding({ left: 28, right: 28 })
+        // 两侧收窄：给音量 Slider 与波形条留出拇指拖动行程
+        .padding({ left: 16, right: 16 })
         }
         // 控制面板整体水平边距与底部收尾
-        .padding({ left: 28, right: 28, bottom: 8 })
+        .padding({ left: 16, right: 16, bottom: 8 })
       }
         .width('100%')
         .height('100%')
@@ -530,6 +549,9 @@ export struct PlayerPage {
           Text('清空')
             .fontSize(12)
             .fontColor($r('app.color.ink_soft'))
+            // padding 补足 40vp 热区（原光秃文字几乎点不中）
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+            .accessibilityText('清空插播队列')
             .onClick(() => this.player.clearPlayNextQueue())
         }
         Blank()
@@ -593,6 +615,7 @@ export struct PlayerPage {
             // sheet 底色为 surface，当前行高亮用更亮一档的 surface_alt 区分
             .backgroundColor(entry.song.id === (this.song?.id ?? '') ?
               $r('app.color.surface_alt') : Color.Transparent)
+            .accessibilityText(`播放${entry.song.title}，${entry.song.artist}`)
             .onClick(() => this.player.playSong(entry.song.id))
           }
         }, (entry: QueueEntry) => `${entry.song.id}${entry.inserted ? '_q' : ''}`)
