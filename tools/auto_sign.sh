@@ -120,16 +120,22 @@ if [[ "$DO_INSTALL" -eq 1 ]]; then
   if [[ -z "$TARGETS" ]]; then
     die "没有已连接的设备/模拟器，请先启动（Emulator -start <name>）"
   fi
-  UDID="$("$HDC" shell bm get -u 2>/dev/null | grep -oE '[0-9A-F]{64}' | head -1 || true)"
-  if [[ -z "$UDID" ]]; then
-    warn "无法读取设备 UDID，跳过设备绑定校验"
-  elif ! python3 "$PARSE" "$PROFILE" "$UDID" 2>/dev/null; then
-    warn "当前设备（${UDID}）未绑定到 profile，安装会失败"
-    warn "请在 IDE 中连接该设备后重新自动签名（会把设备加入绑定列表）"
-    GUIDE
-    exit 1
+  # 本地模拟器无需 profile 设备绑定（实测未绑定也能安装成功，预检按真机
+  # 规则校验只会误报拦人），跳过
+  if [[ "$(echo "$TARGETS" | wc -l | tr -d ' ')" -eq 1 && "$TARGETS" == 127.0.0.1:* ]]; then
+    log "本地模拟器（${TARGETS}），跳过设备绑定校验"
   else
-    log "设备已绑定（${UDID}）"
+    UDID="$("$HDC" shell bm get -u 2>/dev/null | grep -oE '[0-9A-F]{64}' | head -1 || true)"
+    if [[ -z "$UDID" ]]; then
+      warn "无法读取设备 UDID，跳过设备绑定校验"
+    elif ! python3 "$PARSE" "$PROFILE" "$UDID" 2>/dev/null; then
+      warn "当前设备（${UDID}）未绑定到 profile，安装会失败"
+      warn "请在 IDE 中连接该设备后重新自动签名（会把设备加入绑定列表）"
+      GUIDE
+      exit 1
+    else
+      log "设备已绑定（${UDID}）"
+    fi
   fi
 fi
 

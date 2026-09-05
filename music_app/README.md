@@ -46,7 +46,7 @@ entry/src/main/
 ```bash
 export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
 export JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
-export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:$PATH"
+export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:$PATH"
 
 ohpm install
 hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
