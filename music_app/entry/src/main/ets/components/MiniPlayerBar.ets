@@ -22,6 +22,9 @@ export struct MiniPlayerBar {
   @Param @Require info: MiniInfo;
   @Event onTapOpen: () => void = () => {
   };
+  /** 迷你条下滑：单手够不到顶部时，把首页内容下拉悬停到拇指区（Reachability） */
+  @Event onPullDown: () => void = () => {
+  };
   /** 迷你条是否在屏幕可见区：不可见（如切到播放页）时停掉频谱动画省电 */
   @Local barVisible: boolean = true;
 
@@ -117,5 +120,14 @@ export struct MiniPlayerBar {
     .backgroundColor($r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.line') })
     .shadow({ radius: 16, color: 'rgba(0,0,0,0.30)', offsetY: 2 })
+    // 迷你条下滑 = 下拉悬停触发器：distance 阈值保证点按不受影响
+    .gesture(
+      PanGesture({ fingers: 1, direction: PanDirection.Vertical, distance: 30 })
+        .onActionEnd((e: GestureEvent): void => {
+          if (e.offsetY > 60) {
+            this.onPullDown();
+          }
+        })
+    )
   }
 }

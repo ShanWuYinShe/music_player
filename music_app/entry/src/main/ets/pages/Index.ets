@@ -86,6 +86,10 @@ struct Index {
   private onlineScroller: Scroller = new Scroller();
   /** 远离顶部时在拇指区露出回顶按钮（onScrollIndex 驱动） */
   @Local showBackTop: boolean = false;
+  /** 下拉悬停位移（vp）：>0 时整页内容下沉，顶部控件落入拇指区（同一套 UI 映射，无重复入口） */
+  @Local reachY: number = 0;
+  /** 页面可视高度（vp）：悬停目标位移按该值比例计算 */
+  private pageH: number = 800;
 
   /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
@@ -105,12 +109,18 @@ struct Index {
     // 上轮提交此处接线丢失（文本替换静默失败），导致 mini bar 永不出现——已回踩
     this.stateListener = (): void => {
       const song = appStore.player.currentSong;
+      const hadMini = this.mini !== null;
       this.mini = song === null ? null : {
         title: song.title,
         artist: song.artist,
         coverPath: song.coverPath,
         isPlaying: appStore.player.isPlaying
       };
+      // 迷你条首次出现时教一次下滑悬停（手势入口无可见控件，须告知）
+      if (!hadMini && this.mini !== null && !appStore.userData.hasSeenReachHint()) {
+        promptAction.showToast({ message: '在迷你条上向下滑，可把顶部拉下来单手操作', duration: 3000 });
+        appStore.userData.markReachHintSeen();
+      }
       // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动
       this.songSource.reload(this.filteredSongs);
     };
@@ -169,7 +179,8 @@ struct Index {
 
   build() {
     Navigation(this.pathStack) {
-      Stack() {
+      // alignContent=Bottom：悬停收起 pill 叠在底部中央（满幅子层不受影响）
+      Stack({ alignContent: Alignment.Bottom }) {
         // 全屏背景层：延伸至状态栏与导航条下方，消除顶部/底部割裂
         Column()
           .width('100%')
@@ -214,7 +225,14 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 16, top: 14, bottom: 4 })
 
-        // 源切换 / 分类 / 排序已沉底到列表下方的拇指区功能条（唯一入口），顶部不再保留
+        // 源切换（主模式）：放回标题下方紧凑分段；拇指区操作靠迷你条下滑悬停
+        // 映射到顶部（同一套 UI，无重复入口），底部不再堆控件
+        Row({ space: 8 }) {
+          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
+          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+        }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 8, bottom: 2 })
 
         // 网易云 VIP 试听提示：只陈述用户可感知的结果（30 秒试听），不提
         // 服务端术语（管理面板/扫码登录是管理员操作，用户解决不了）
@@ -299,13 +317,13 @@ struct Index {
           .backgroundColor($r('app.color.surface_alt'))
           .padding({ left: 12, right: 12 })
 
-          // 排序入口已随功能条沉底到拇指区（唯一入口），搜索行不再保留
+          // 排序入口在下方过滤器行（本地源语义），搜索行只放搜索
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
         // 列表过滤器（本地源语义，在线隐藏）：分类 + 排序是列表的就近过滤器，
-        // 用轻量文本风放搜索下方；主模式切换（本地/在线）在底部拇指区分段
+        // 用轻量文本风放搜索下方；主模式切换（本地/在线）在标题下方紧凑分段
         if (this.sourceTab === SourceTab.LOCAL) {
           Row({ space: 4 }) {
             this.TabChip(LibraryTab.ALL, '全部')
@@ -347,24 +365,40 @@ struct Index {
           this.SongList(this.localScroller)
         }
 
-        // 底部功能条：源切换 + 分类 + 排序三合一（顶部旧入口已删，此为唯一入口），
-        // 沉底到拇指区；远离顶部时右侧露出回顶按钮
-        this.BottomToolbar()
+        // 底部回顶：远离顶部时才在拇指区占位，回到顶部自动收起不留白
+        if (this.showBackTop) {
+          this.BottomToolbar()
+        }
 
-        // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）
+        // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）：
+        // 其上的下滑手势是下拉悬停的触发器（手在下半屏，映射操作顶部）
         if (this.mini !== null) {
           MiniPlayerBar({
             player: appStore.player,
             info: this.mini,
-            onTapOpen: () => this.pathStack.pushPathByName('player', null)
+            onTapOpen: () => this.pathStack.pushPathByName('player', null),
+            onPullDown: () => this.setReach(true)
           })
             .margin({ left: 12, right: 12, bottom: 12 })
         }
         }
         .width('100%')
         .height('100%')
-        // 全局恒定全屏布局：背景层已延伸进系统栏，前景内容按预读避让高度留白
+        // 全局恒定全屏布局：背景层已延伸进系统栏，前景内容按预读避让高度留白；
+        // 下拉悬停时整体下沉（translate 由 reachY 驱动，动画在 setReach 内指定）
         .padding({ top: appStore.safeTopVp, bottom: appStore.safeBottomVp })
+        .translate({ y: this.reachY })
+        .onAreaChange((_old: Area, area: Area) => {
+          const h = area.height as number;
+          if (h > 0) {
+            this.pageH = h;
+          }
+        })
+
+        // 悬停收起 pill：悬停态才叠在底部中央；内容整体下沉后它仍固定可点
+        if (this.reachY > 0) {
+          this.ReachExit()
+        }
       }
       .width('100%')
       .height('100%')
@@ -454,31 +488,54 @@ struct Index {
     .onClick(() => this.switchSource(tab))
   }
 
-  /** 底部源切换：主模式切换独占拇指区（居中两分段 + 情境回顶），
-   * 分类/排序已回顶部过滤器行，此处不再堆叠 */
+  /** 底部回顶（情境出现才占位）：底部常驻触发器只剩它 + 迷你条，
+   * 源/分类/排序已回顶部，悬停映射由迷你条下滑触发 */
   @Builder
   BottomToolbar() {
-    Row({ space: 8 }) {
+    Row() {
       Blank()
-      this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
-      this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
-      Blank()
-      if (this.showBackTop) {
-        SymbolGlyph($r('sys.symbol.arrow_up'))
-          .fontSize(18)
-          .fontColor([$r('app.color.on_accent')])
-          // 18 + 上下 padding 22 = 40vp 热区
-          .padding(11)
-          .borderRadius(20)
-          .backgroundColor($r('app.color.accent'))
-          .accessibilityText('回到顶部')
-          .onClick(() => {
-            this.activeScroller().scrollToIndex(0, true);
-          })
-      }
+      SymbolGlyph($r('sys.symbol.arrow_up'))
+        .fontSize(18)
+        .fontColor([$r('app.color.on_accent')])
+        // 18 + 上下 padding 22 = 40vp 热区
+        .padding(11)
+        .borderRadius(20)
+        .backgroundColor($r('app.color.accent'))
+        .accessibilityText('回到顶部')
+        .onClick(() => {
+          this.activeScroller().scrollToIndex(0, true);
+        })
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 4, bottom: 8 })
+  }
+
+  /** 下拉悬停开关：整页内容下沉 45% 高度，顶部控件落入拇指区；
+   * 同一套 UI 做位移映射，不复制入口，审美保持经典布局 */
+  private setReach(on: boolean): void {
+    const target = on ? Math.round(this.pageH * 0.45) : 0;
+    this.getUIContext().animateTo({ duration: 280, curve: Curve.EaseInOut }, () => {
+      this.reachY = target;
+    });
+  }
+
+  /** 悬停收起 pill：悬停态才叠在底部中央，点按回弹（不挡顶部操作区） */
+  @Builder
+  ReachExit() {
+    Row({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.chevron_up'))
+        .fontSize(14)
+        .fontColor([$r('app.color.on_accent')])
+      Text('收起')
+        .fontSize(13)
+        .fontColor($r('app.color.on_accent'))
+    }
+    .padding({ left: 16, right: 16, top: 11, bottom: 11 })
+    .borderRadius(20)
+    .backgroundColor($r('app.color.accent'))
+    .accessibilityText('收起悬停，回到正常布局')
+    .margin({ bottom: 40 })
+    .onClick(() => this.setReach(false))
   }
 
   /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口）。
