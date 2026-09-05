@@ -303,7 +303,19 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
-        // 分类 Tab 已随功能条沉底到拇指区（唯一入口），顶部不再保留
+        // 列表过滤器（本地源语义，在线隐藏）：分类 + 排序是列表的就近过滤器，
+        // 用轻量文本风放搜索下方；主模式切换（本地/在线）在底部拇指区分段
+        if (this.sourceTab === SourceTab.LOCAL) {
+          Row({ space: 4 }) {
+            this.TabChip(LibraryTab.ALL, '全部')
+            this.TabChip(LibraryTab.FAVORITES, '喜欢')
+            this.TabChip(LibraryTab.RECENT, '最近')
+            Blank()
+            this.SortButton()
+          }
+          .width('100%')
+          .padding({ left: 20, right: 20, top: 8, bottom: 4 })
+        }
 
         // 歌曲列表 / 空态
         if (this.filteredSongs.length === 0) {
@@ -409,10 +421,10 @@ struct Index {
       .fontSize(13)
       .fontColor(this.tab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
       .fontWeight(this.tab === tab ? FontWeight.Medium : FontWeight.Normal)
-      // 上下 padding 补足 40vp 触控热区
-      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+      // 轻量文本风：未选中透明底（选中才实心 accent），热区仍由 padding 保 40vp
+      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
       .borderRadius(15)
-      .backgroundColor(this.tab === tab ? $r('app.color.accent') : $r('app.color.surface'))
+      .backgroundColor(this.tab === tab ? $r('app.color.accent') : Color.Transparent)
       .accessibilityText(`分类${label}`)
       .onClick(() => {
         this.tab = tab;
@@ -441,27 +453,15 @@ struct Index {
     .onClick(() => this.switchSource(tab))
   }
 
-  /** 底部功能条：源切换 + 分类 + 排序三合一（顶部旧入口已删，此为唯一入口）。
-   * 横滑容纳全部 chip，远离顶部时右侧固定回顶按钮——触发器全部落在拇指区 */
+  /** 底部源切换：主模式切换独占拇指区（居中两分段 + 情境回顶），
+   * 分类/排序已回顶部过滤器行，此处不再堆叠 */
   @Builder
   BottomToolbar() {
     Row({ space: 8 }) {
-      Scroll() {
-        Row({ space: 8 }) {
-          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
-          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
-          if (this.sourceTab === SourceTab.LOCAL) {
-            this.TabChip(LibraryTab.ALL, '全部')
-            this.TabChip(LibraryTab.FAVORITES, '喜欢')
-            this.TabChip(LibraryTab.RECENT, '最近')
-            this.SortButton()
-          }
-        }
-      }
-      .scrollable(ScrollDirection.Horizontal)
-      .scrollBar(BarState.Off)
-      .layoutWeight(1)
-
+      Blank()
+      this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
+      this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+      Blank()
       if (this.showBackTop) {
         SymbolGlyph($r('sys.symbol.arrow_up'))
           .fontSize(18)
@@ -480,22 +480,21 @@ struct Index {
     .padding({ left: 12, right: 12, top: 4, bottom: 8 })
   }
 
-  /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口） */
+  /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口）。
+   * 轻量文本风（透明底），与分类同行右对齐 */
   @Builder
   SortButton() {
     Row({ space: 3 }) {
       Text(sortLabel(this.sortMode))
         .fontSize(13)
-        .fontColor($r('app.color.ink'))
+        .fontColor($r('app.color.ink_soft'))
       SymbolGlyph($r('sys.symbol.chevron_down'))
         .fontSize(12)
-        .fontColor([$r('app.color.ink_soft')])
+        .fontColor([$r('app.color.ink_faint')])
     }
     // constraintSize 替代固定高度：热区达标（≥40vp），大字体时随内容撑高
     .constraintSize({ minHeight: 40 })
-    .borderRadius(20)
-    .backgroundColor($r('app.color.surface'))
-    .padding({ left: 13, right: 11 })
+    .padding({ left: 12, right: 8 })
     .accessibilityText(`排序，当前${sortLabel(this.sortMode)}`)
     .bindMenu(this.SortMenu())
   }

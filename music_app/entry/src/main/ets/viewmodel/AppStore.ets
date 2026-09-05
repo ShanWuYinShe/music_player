@@ -56,6 +56,9 @@ export class AppStore {
     this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
     this.userData.init(this.pref);
     this.library.init(context);
+    // VIP 未登录试听片段不得进整曲缓存：登录后同一 key 会返回完整音频，
+    // 试听字节将污染缓存。闭包实时读取登录态，登录变化即时生效
+    this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
   }
 

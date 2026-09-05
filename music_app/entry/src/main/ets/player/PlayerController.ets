@@ -8,6 +8,7 @@ import { PlayMode, nextPlayMode } from '../model/PlayMode';
 import { MusicLibrary } from '../library/MusicLibrary';
 import { UserData } from '../viewmodel/UserData';
 import { SessionController, SessionHandlers } from './SessionController';
+import { OnlineCache } from './OnlineCache';
 
 const TAG = 'PlayerController';
 const DOMAIN = 0x0003;
@@ -65,6 +66,11 @@ export class PlayerController {
   private pendingSeekMs: number = 0;
   private pref: preferences.Preferences | null = null;
   private sleepTimerId: number = -1;
+  /** 在线音频整曲缓存：复播走本地 fd，不重复耗流量（init 时传入 context） */
+  private onlineCache: OnlineCache = new OnlineCache();
+  /** 在线曲目是否允许进缓存：VIP 未登录试听片段不得缓存（登录后试听字节
+   * 会污染完整音频），由 AppStore 按网易云登录态注入，默认全允许 */
+  isOnlineCacheable: (song: SongRecord) => boolean = () => true;
   /** 当前队列 id → SongRecord 索引（本地曲库或在线列表），playSong/currentSong 查找用 */
   private songIndex: Map<string, SongRecord> = new Map();
   /** 播放失败提示回调（页面注入 promptAction），null 时静默 */
@@ -101,6 +107,7 @@ export class PlayerController {
   async init(context: common.UIAbilityContext, pref: preferences.Preferences | null): Promise<void> {
     this.context = context;
     this.pref = pref;
+    this.onlineCache.init(context);
     this.refreshSongs();
     this.restorePlayMode();
     this.restoreLastSession();
@@ -456,8 +463,23 @@ export class PlayerController {
       this.player = player;
       this.registerPlayerEvents(player, gen, song);
       if (isNetworkUrl(song.fileName)) {
-        // 在线流媒体：url 属性原生支持 http(s) 网络协议，Range 分段由内核处理
-        player.url = song.fileName;
+        // 在线曲目：命中整曲缓存即走本地 fd（复播秒开、不重复耗流量），
+        // fd 生命周期与本地文件一致（release 时关闭）；未命中播 http 流，
+        // 同时后台整曲下载落盘供下次命中。首播体验无退化
+        const cachedPath = this.isOnlineCacheable(song) ? this.onlineCache.lookup(song.id) : '';
+        if (cachedPath !== '') {
+          const file = fs.openSync(cachedPath, fs.OpenMode.READ_ONLY);
+          this.currentFd = file.fd;
+          player.url = `fd://${file.fd}`;
+        } else {
+          player.url = song.fileName;
+          if (this.isOnlineCacheable(song)) {
+            const streamUrl = song.fileName;
+            const cacheKey = song.id;
+            const cacheGen = gen;
+            this.onlineCache.prefetch(cacheKey, streamUrl, () => cacheGen === this.generation);
+          }
+        }
       } else {
         // 本地文件必须走文件描述符（url 仅支持网络协议与 fd:// 协议）；
         // 赋值后状态迁移(initialized)为异步事件，prepare 须在 stateChange 回调中触发
