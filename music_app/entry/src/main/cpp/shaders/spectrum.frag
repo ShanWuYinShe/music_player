@@ -94,7 +94,9 @@ void main() {
     float tMs = uT;
     float ts = nowSec();
     float seed = fract(uSeed * 1.0e-7);            // 缩到 [0,1] 安全小 seed
-    vec2 q = vUV;
+    // uTilt 视差（设备倾斜）：柱阵/倒影/背景整体轻移，反馈与抖动仍用 vUV；
+    // 只进几何不进色相（防闪烁纪律）
+    vec2 q = vUV - uTilt * 0.03;
     float beat = beatEnv(tMs, seed);
     float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 

@@ -4,11 +4,11 @@
 // gen_shader_header.py）把它原样注入到每个场景"注入头之后、场景源之前"。
 // 场景文件直接使用这里的函数，**不要重复定义**（重复定义会编译报错）。
 //
-// uniform（uT/uSeed/uRes/uBeat/uBass/uTreble/uTransition/uPrev）与 vUV 由
+// uniform（uT/uSeed/uRes/uBeat/uBass/uTreble/uTilt/uTransition/uPrev）与 vUV 由
 // 注入头声明，本文件的函数直接读取。书写风格与场景源一致：GLSL ES 1.00
 // （texture2D / 无 #version），词汇替换由工具链统一完成。
 //
-// 行号换算：编译器报错行号 − 注入头行数(12) − 本文件行数 = 场景源文件行号。
+// 行号换算：编译器报错行号 − 注入头行数(13) − 本文件行数 = 场景源文件行号。
 // 报错行号落在本文件区间内时，工具会标注为 common.glsl 的行号。
 
 #define TAU 6.2831853

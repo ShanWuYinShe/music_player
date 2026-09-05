@@ -505,7 +505,9 @@ vec3 auroraEmission(vec2 q, vec2 apex, float ts, float sd, float act,
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
-    vec2 q = sceneUV(vec2(0.5, 0.42));
+    // uTilt 视差（设备倾斜）：整场（天幕/雪原/倒影）反向轻移 = 相机视差；
+    // 只进几何不进色相（防闪烁纪律）
+    vec2 q = sceneUV(vec2(0.5, 0.42) - uTilt * 0.05);
     float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 
     // 活跃度（substorm 慢相位）：平静帘 ↔ 爆发

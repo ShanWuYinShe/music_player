@@ -15,11 +15,12 @@
  */
 
 import displaySync from '@ohos.graphics.displaySync';
+import sensor from '@ohos.sensor';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PlayerController } from '../player/PlayerController';
 import {
-  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, PRESET_COUNT,
-  VIZ_FRAME_INTERVAL_MS
+  seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, normalizeTilt,
+  PRESET_COUNT, VIZ_FRAME_INTERVAL_MS
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
 
@@ -77,6 +78,13 @@ export struct VisualizerView {
 
   private lastSongId = '';
   private seed = 0;
+  /** 设备倾斜（ORIENTATION 姿态角经 normalizeTilt+低通，[-1,1]）：每帧作
+   * shader uTilt——全场景相机视差；传感器不可用（模拟器/权限异常）保持
+   * 0，效果退化为现状 */
+  private tiltX = 0;
+  private tiltY = 0;
+  private sensorOn = false;
+  private tiltLogged = false;
   /** 当前风格号（仅点击可视化区域切换，无自动轮换） */
   private presetLock: number = 0;
   private beatPhase = 0;
@@ -96,6 +104,7 @@ export struct VisualizerView {
   aboutToDisappear(): void {
     this.disposed = true;
     this.stopLoop();
+    this.syncSensor();
     if (this.prevBitmap !== null) {
       this.prevBitmap.close();
       this.prevBitmap = null;
@@ -117,7 +126,43 @@ export struct VisualizerView {
     this.syncState();
   }
 
+  /** ORIENTATION 订阅启停：免权限姿态角（beta/gamma 欧拉角）→ 归一化
+   * 倾斜 → 低通去抖；'ui' 档 60ms 上报对慢速视差足够。失败仅记日志 */
+  private syncSensor(): void {
+    const want = this.variant !== 'mini' && this.active && !this.disposed && this.ready;
+    if (want && !this.sensorOn) {
+      try {
+        const cb = (data: sensor.OrientationResponse): void => {
+          const norm = normalizeTilt(data.beta, data.gamma);
+          // 低通：事件率 16Hz 下 ~0.2s 收敛，滤手抖
+          this.tiltX += (norm[0] - this.tiltX) * 0.12;
+          this.tiltY += (norm[1] - this.tiltY) * 0.12;
+          if (!this.tiltLogged) {
+            this.tiltLogged = true;
+            hilog.info(0x0004, 'VizView', 'orientation live, tilt=%{public}s',
+              `${norm[0].toFixed(2)},${norm[1].toFixed(2)}`);
+          }
+        };
+        sensor.on(sensor.SensorId.ORIENTATION, cb, { interval: 'ui' });
+        this.sensorOn = true;
+      } catch (err) {
+        hilog.warn(0x0004, 'VizView', 'orientation subscribe failed: %{public}s',
+          JSON.stringify(err));
+      }
+    } else if (!want && this.sensorOn) {
+      try {
+        // 不带 callback 注销本类型全部订阅（本组件只注册一份）
+        sensor.off(sensor.SensorId.ORIENTATION);
+      } catch (err) {
+        // 反订阅失败无需处理（组件销毁后系统自行回收）
+      }
+      this.sensorOn = false;
+    }
+  }
+
   private syncState(): void {
+    // 倾斜订阅跟随舞台激活态：只在 full 变体且 active 时耗传感器
+    this.syncSensor();
     if (this.disposed) {
       return;
     }
@@ -217,7 +262,8 @@ export struct VisualizerView {
       if (this.presetTrans < 1) {
         this.presetTrans = Math.min(1, this.presetTrans + dt / 1500);
       }
-      entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock, this.presetTrans);
+      entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock, this.presetTrans,
+        this.tiltX, this.tiltY);
       if (!playing && now > this.fadeDeadline) {
         this.stopLoop();
       }

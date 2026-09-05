@@ -894,7 +894,9 @@ vec3 outerColor(vec2 p, float pr, float sd, float wTop) {
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
-    vec2 q = sceneUV(vec2(0.5, 0.47));
+    // uTilt 视差（设备倾斜）：锅/珠/壁整体轻移——状态预通道按格子索引
+    // 写状态（不依赖 q），主 pass 整体平移不破坏锅珠相对位置；只进几何
+    vec2 q = sceneUV(vec2(0.5, 0.47) - uTilt * 0.04);
     float aspect = aspectRatio();
 
 #ifndef PAN_NO_STATE_TEX

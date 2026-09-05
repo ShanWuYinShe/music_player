@@ -26,6 +26,9 @@ export interface RenderParams {
 	bass: number;
 	treble: number;
 	transition: number;
+	/** 设备倾斜 [-1,1]（手机端 ORIENTATION 姿态角；playground 由指针位置映射） */
+	tiltX: number;
+	tiltY: number;
 	/** 内部分辨率比例（对应手机端 kPresetScale） */
 	renderScale: number;
 }
@@ -38,6 +41,7 @@ interface SceneUniforms {
 	bass: WebGLUniformLocation | null;
 	treble: WebGLUniformLocation | null;
 	transition: WebGLUniformLocation | null;
+	tilt: WebGLUniformLocation | null;
 	prev: WebGLUniformLocation | null;
 	/** pan 专用：uStateMode / uState（其他场景无此 uniform，恒 null） */
 	stateMode: WebGLUniformLocation | null;
@@ -114,6 +118,7 @@ function getSceneLocs(gl: WebGL2RenderingContext, p: WebGLProgram): SceneUniform
 		bass: gl.getUniformLocation(p, 'uBass'),
 		treble: gl.getUniformLocation(p, 'uTreble'),
 		transition: gl.getUniformLocation(p, 'uTransition'),
+		tilt: gl.getUniformLocation(p, 'uTilt'),
 		prev: gl.getUniformLocation(p, 'uPrev'),
 		stateMode: gl.getUniformLocation(p, 'uStateMode'),
 		state: gl.getUniformLocation(p, 'uState'),
@@ -395,6 +400,7 @@ export class VizRenderer {
 			gl.uniform1f(loc.bass, p.bass);
 			gl.uniform1f(loc.treble, p.treble);
 			gl.uniform1f(loc.transition, p.transition);
+			gl.uniform2f(loc.tilt, p.tiltX, p.tiltY);
 			gl.uniform1f(loc.stateMode, 1);
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, this.texAt(1 - this.flip));
@@ -412,6 +418,7 @@ export class VizRenderer {
 		gl.uniform1f(loc.bass, p.bass);
 		gl.uniform1f(loc.treble, p.treble);
 		gl.uniform1f(loc.transition, p.transition);
+		gl.uniform2f(loc.tilt, p.tiltX, p.tiltY);
 		// pan：2=读状态纹理（常规）；0=回退逐像素（无浮点 FBO 的上下文）
 		if (preset?.statePass) {
 			gl.uniform1f(loc.stateMode, this.stateTex ? 2 : 0);

@@ -3,7 +3,8 @@
  *
  * registerXComponent(nativeObject):
  *   解包 XComponent 的 OH_NativeXComponent 句柄并注册表面生命周期回调。
- * renderFrame(t, seed, playing, beat, bass, treble, presetLock, transition):
+ * renderFrame(t, seed, playing, beat, bass, treble, presetLock, transition,
+ *             tiltX, tiltY):
  *   同步渲染一帧（由 ArkTS displaySync 回调驱动）。
  * destroy():
  *   释放渲染资源（组件销毁时）。
@@ -84,13 +85,14 @@ napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
 }
 
 napi_value RenderFrame(napi_env env, napi_callback_info info) {
-    size_t argc = 8;
-    napi_value args[8] = {nullptr};
+    size_t argc = 10;
+    napi_value args[10] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 8) {
+    if (argc < 10) {
         return nullptr;
     }
     double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1, transition = 1;
+    double tiltX = 0, tiltY = 0;
     bool playing = false;
     napi_get_value_double(env, args[0], &t);
     napi_get_value_double(env, args[1], &seed);
@@ -100,7 +102,9 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     napi_get_value_double(env, args[5], &treble);
     napi_get_value_double(env, args[6], &presetLock);
     napi_get_value_double(env, args[7], &transition);
-    VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition);
+    napi_get_value_double(env, args[8], &tiltX);
+    napi_get_value_double(env, args[9], &tiltY);
+    VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition, tiltX, tiltY);
     return nullptr;
 }
 

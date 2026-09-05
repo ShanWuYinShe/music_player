@@ -9,7 +9,7 @@
   - texture2D → texture、attribute → in、gl_FragColor → fragColor
   - 场景共享公共库 common.glsl 走同一套置空/替换管线后，注入到
     "头之后、场景源之前"；场景源不得重复定义其中的函数。
-    行号换算：报错行号 − 头行数(12) − common 行数 = 场景源行号；
+    行号换算：报错行号 − 头行数(13) − common 行数 = 场景源行号；
     落在 common 区间内则是 common.glsl 自身行号。
 
 手机端（GLES 3.0）与 playground（WebGL2）因此共用同一份磁盘 GLSL 源文件。
@@ -32,11 +32,12 @@ FRAG_UNIFORMS = [
     "uBeat",
     "uBass",
     "uTreble",
+    "uTilt",
     "uTransition",
     "uPrev",
 ]
 
-# 行数必须与 glslPatch.ts 的 *_HEADER_LINES 一致（12 / 4 / 5）
+# 行数必须与 glslPatch.ts 的 *_HEADER_LINES 一致（13 / 4 / 5）
 FRAG_HEADER = (
     "#version 300 es\n"
     "precision highp float;\n"
@@ -46,6 +47,7 @@ FRAG_HEADER = (
     "uniform float uBeat;\n"
     "uniform float uBass;\n"
     "uniform float uTreble;\n"
+    "uniform vec2 uTilt;\n"
     "uniform float uTransition;\n"
     "uniform sampler2D uPrev;\n"
     "in vec2 vUV;\n"
@@ -181,7 +183,7 @@ def main() -> None:
 
     # 注入区行数（头 + common），编译报错行号减去它即场景源文件行号
     common_norm = common if common.endswith("\n") else common + "\n"
-    frag_injected = 12 + common_norm.count("\n")
+    frag_injected = 13 + common_norm.count("\n")
 
     var_name = {f: "kFragScene" + f.split(".")[0].capitalize() for f in scene_files}
     parts: list[str] = []
@@ -191,7 +193,7 @@ def main() -> None:
         " *\n"
         " * 源：entry/src/main/cpp/shaders/ 下的 GLSL ES 1.00 文件（与\n"
         " * shader_playground 预览、shader_playground/src/glslPatch.ts 同源）。\n"
-        f" * frag 注入区 {frag_injected} 行（头 12 + common.glsl {common_norm.count(chr(10))}），\n"
+        f" * frag 注入区 {frag_injected} 行（头 13 + common.glsl {common_norm.count(chr(10))}），\n"
         " * vert/blit 注入头 4/5 行；编译报错行号减去对应注入区行数即源文件行号。\n"
         " */\n"
         "\n"

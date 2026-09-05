@@ -41,6 +41,10 @@ const state = {
 
 	/** preset 切换后 0→1 渐入（复刻设备端 presetTrans） */
 	transition: 1.0,
+	/** 设备倾斜（真机来自 ORIENTATION 传感器）：预览用指针相对画布中心
+	 * 的偏移模拟，全部效果由此获得与手机一致的相机视差 */
+	tiltX: 0,
+	tiltY: 0,
 	paused: false,
 
 	lastWall: 0,
@@ -280,6 +284,8 @@ function renderFrame(): void {
 		bass,
 		treble,
 		transition: state.transition,
+		tiltX: state.tiltX,
+		tiltY: state.tiltY,
 		renderScale: preset?.renderScale ?? RENDER_SCALE,
 	});
 }
@@ -389,6 +395,14 @@ for (const p of PRESETS) {
 
 canvas.addEventListener('click', () => {
 	selectPreset((state.presetIndex + 1) % PRESETS.length, { restartTransition: true });
+});
+
+// 指针相对画布中心的偏移模拟真机倾斜（[-1,1]）：四个场景的 uTilt 相机视差
+// 在预览端即可感受（真机来源是 ORIENTATION 姿态角，归一化同量级）
+canvas.addEventListener('pointermove', (e) => {
+	const r = canvas.getBoundingClientRect();
+	state.tiltX = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
+	state.tiltY = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
 });
 
 window.addEventListener('keydown', (e) => {

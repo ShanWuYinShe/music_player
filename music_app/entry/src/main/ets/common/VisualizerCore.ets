@@ -120,3 +120,30 @@ export function hslToRgb(h: number, s: number, l: number): number[] {
   ];
 }
 
+
+/** 设备倾斜归一化满量程（度）：±40° 达 ±1，超过饱和 */
+const TILT_RANGE_DEG = 40.0;
+/** 设备倾斜死区（度）：手部微抖/桌面不平不触发视差 */
+const TILT_DEADZONE_DEG = 4.0;
+
+/**
+ * 设备姿态 → 归一化倾斜 [-1,1]×[-1,1]（ORIENTATION 传感器的 beta/gamma
+ * 欧拉角，绕 X/绕 Y）。死区内线性归零（过死区边沿连续），超出满量程饱和；
+ * 输出直接作 shader uTilt——相机视差只进几何（uv 偏移），不进色相/速度。
+ */
+export function normalizeTilt(beta: number, gamma: number): number[] {
+  return [tiltAxis(beta), tiltAxis(gamma)];
+}
+
+function tiltAxis(deg: number): number {
+  if (!Number.isFinite(deg)) {
+    return 0;
+  }
+  const a = Math.abs(deg);
+  if (a <= TILT_DEADZONE_DEG) {
+    return 0;
+  }
+  const span = TILT_RANGE_DEG - TILT_DEADZONE_DEG;
+  const k = Math.min((a - TILT_DEADZONE_DEG) / span, 1.0);
+  return deg < 0 ? -k : k;
+}

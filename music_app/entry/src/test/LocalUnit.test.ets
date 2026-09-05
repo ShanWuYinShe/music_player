@@ -10,7 +10,7 @@ import {
 } from '../main/ets/source/OnlineApi';
 import {
   PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
-  beatEnvelope, bpmFromSeed, hslToRgb
+  beatEnvelope, bpmFromSeed, hslToRgb, normalizeTilt
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 
@@ -298,6 +298,27 @@ export default function LocalUnitSuite() {
   });
 
   describe('VisualizerCoreTest', () => {
+    it('normalizeTiltDeadzoneAndSaturation', 0, () => {
+      // 死区内（|deg| <= 4）恒 0
+      expect(normalizeTilt(0, 0)[0]).assertEqual(0);
+      expect(normalizeTilt(3.9, -2)[0]).assertEqual(0);
+      expect(normalizeTilt(0, 4.0)[1]).assertEqual(0);
+      // 过死区连续：4.1 度只留极小残量
+      const just = normalizeTilt(0, 4.1)[1];
+      expect(just > 0).assertTrue();
+      expect(just < 0.01).assertTrue();
+      // 满量程 ±40 度 = ±1，超过饱和
+      expect(normalizeTilt(40, -40)[0]).assertEqual(1);
+      expect(normalizeTilt(40, -40)[1]).assertEqual(-1);
+      expect(normalizeTilt(120, -900)[0]).assertEqual(1);
+      expect(normalizeTilt(120, -900)[1]).assertEqual(-1);
+      // 中段线性：22 度 = (22-4)/36 ≈ 0.5
+      const mid = normalizeTilt(22, 0)[0];
+      expect(mid > 0.49 && mid < 0.51).assertTrue();
+      // 非法输入归零
+      expect(normalizeTilt(NaN, 10)[0]).assertEqual(0);
+    });
+
     it('seedIsDeterministicAndDistinct', 0, () => {
       expect(seedFromId('song-a')).assertEqual(seedFromId('song-a'));
       expect(seedFromId('song-a')).not().assertEqual(seedFromId('song-b'));

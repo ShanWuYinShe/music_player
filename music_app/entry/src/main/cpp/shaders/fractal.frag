@@ -193,7 +193,9 @@ float sparkField(vec2 p, float ts, float sd, inout vec3 col) {
 void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
-    vec2 q = sceneUV(vec2(0.5));
+    // uTilt 视差（设备倾斜）：场景整体反向轻移 = 相机随手机转动；
+    // 只进几何不进色相（防闪烁纪律），幅度 ≤5% 屏高
+    vec2 q = sceneUV(vec2(0.5) - uTilt * 0.05);
 
     // ---- 主体（永远在场）----
     vec3 bcol;
