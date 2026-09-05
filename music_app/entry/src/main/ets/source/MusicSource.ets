@@ -36,7 +36,7 @@ export class OnlineSource {
         usingCache: false
       });
       if (response.responseCode !== 200) {
-        throw new Error(`服务端响应 ${response.responseCode}`);
+        throw new Error(`服务异常 ${response.responseCode}`);
       }
       return parseOnlineSongs(this.baseUrl, `${response.result}`);
     } finally {
@@ -59,7 +59,7 @@ export class OnlineSource {
         usingCache: false
       });
       if (response.responseCode !== 200) {
-        throw new Error(`服务端响应 ${response.responseCode}`);
+        throw new Error(`服务异常 ${response.responseCode}`);
       }
       const state = parseOnlineProviders(`${response.result}`);
       if (state === null) {

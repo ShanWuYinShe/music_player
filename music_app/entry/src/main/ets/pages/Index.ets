@@ -216,13 +216,14 @@ struct Index {
 
         // 源切换 / 分类 / 排序已沉底到列表下方的拇指区功能条（唯一入口），顶部不再保留
 
-        // 网易云未登录提示：VIP 歌曲仅试听片段（登录后自动消失）
+        // 网易云 VIP 试听提示：只陈述用户可感知的结果（30 秒试听），不提
+        // 服务端术语（管理面板/扫码登录是管理员操作，用户解决不了）
         if (this.sourceTab === SourceTab.ONLINE && appStore.neteaseEnabled && !appStore.neteaseLoggedIn) {
           Row({ space: 8 }) {
             SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
               .fontSize(14)
               .fontColor([$r('app.color.accent')])
-            Text('网易云未登录：VIP 歌曲仅 30 秒试听，在服务器管理面板「音乐曲库」扫码登录可解锁')
+            Text('网易云 VIP 歌曲仅支持 30 秒试听')
               .fontSize(11)
               .fontColor($r('app.color.ink_soft'))
               .layoutWeight(1)
@@ -552,10 +553,10 @@ struct Index {
         SymbolGlyph($r('sys.symbol.music_note_list'))
           .fontSize(40)
           .fontColor([$r('app.color.ink_faint')])
-        Text('服务器曲库还是空的')
+        Text('在线曲库还没有内容')
           .fontSize(15)
           .fontColor($r('app.color.ink_soft'))
-        Text('向服务端曲库目录投放音频后，下拉这里重试')
+        Text('稍后再来看看，也可以下拉重试')
           .fontSize(12)
           .fontColor($r('app.color.ink_faint'))
         Button('重试')
