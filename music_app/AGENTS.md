@@ -30,12 +30,25 @@
   勿加回）；⑦AVSession `mediaImage` 直接支持本地封面路径字符串（锁屏封面，
   无需手动转 PixelMap）；⑧迷你条频谱经 `onVisibleAreaChange` 随可见性启停；
   ⑨避让区高度入口是 `AppStore.readSafeArea()`，配置变更（旋转/折叠展开，
-  `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点。
+  `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点；
+  ⑪首页用 Navigation 系统大标题（`NavigationCommonTitle{main,sub}` +
+  `titleMode(Free)`，随列表滚动折叠；大标题缩放只在 ResourceStr/CommonTitle
+  形态生效）+ `menus(CustomBuilder)` 挂导入/设置，内容区不再自绘标题；
+  ⑫本地/在线切换走 `Tabs`（`index` 单向受控 + `onChange` 进 `switchSource`，
+  点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证，
+  tabBar 用自绘胶囊）；⑬搜索框用系统 `Search`（受控 `value` + `onChange`/
+  `onSubmit`，清除键/键盘搜索键系统托管）；⑭迷你条为悬浮磨砂胶囊
+  （`backgroundBlurStyle(COMPONENT_THICK)` + radius 24 + token 投影；
+  `BlurStyle` 无 `BehindWindow`，窗内列表透出用 COMPONENT 系列）；
+  ⑮列表项卡片化（surface 底 + radius 18 + token 投影，按压缩放
+  `stateStyles({pressed})`），当前行 `accent_soft` 底 + accent 描边。
 - 播放页舞台双态**互斥**：封面模式（默认）以模糊放大的封面做氛围背景、`VisualizerView` 的 `active=false` 停帧 + visibility 隐藏（XComponent 不卸载，避免 EGL 重建黑屏坑），可视化模式才全屏渲染——不要恢复"封面浮于全速可视化之上"的旧设计；播放页手势对齐 Poweramp 官方 Player UI：封面与可视化区**左右滑动切歌**（封面跟手位移 coverDragX、松手 ±60vp 判定、松手弹簧曲线回弹）、舞台点击对称切换——**点按大封面切入可视化舞台、可视化舞台点画面回封面**（返回曲库只走左上箭头/系统侧滑——内容区点击不做导航，曾用 tap-on-cover 跳库，因轻扫切歌未达阈值被判成点击会误退回首页而废弃，用户决策 2026-09）；**XComponent(SURFACE) 原生表面区域收不到点击**（挂在 XComponent、其父容器、透明点击层、TapGesture 全都无效，真机实测），"点画面回封面"必须绑在前景内容层里舞台区域的占位 `Blank().onClick()` 上（旧"点画面循环切风格"在真机一直无响应的根因即此）；切可视化风格走顶栏魔法棒菜单；
 - 自适应深浅双主题（暖纸浅色 + Poweramp 深色）：`base/element/color.json`=浅色板
   （page_bg #F7F4EE / surface #FFFFFF / accent #A8791F 深金），`dark/element/color.json`=
   深色板（page_bg #121212 / surface #1D1C1A / accent #DBA84E 亮金），全部 UI 颜色经
-  `$r('app.color.*')` 引用由资源限定符自动切换，代码不得写死色值；`viz_*` 四个舞台
+  `$r('app.color.*')` 引用由资源限定符自动切换，代码不得写死色值；卡片体系另有
+  `accent_soft`（当前行底）/`card_shadow`（卡片投影）/`accent_shadow`（当前行光晕）
+  三 token，两套板同步值；`viz_*` 四个舞台
   token 两套板保持相同——播放页封面/可视化舞台恒定深底浅字（媒体播放页惯例）：
   `applyImmersion` 只维护 `AppStore.stageImmersion` 标记（进入置位/退出清除），
   `applyWindowChrome` 据此分流——舞台沉浸期间应用恒定深色舞台 chrome，其余时候

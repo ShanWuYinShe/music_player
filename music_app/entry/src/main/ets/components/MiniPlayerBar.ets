@@ -116,10 +116,14 @@ export struct MiniPlayerBar {
       }
     .width('100%')
     .clip(true)
-    .borderRadius(16)
+    .borderRadius(24)
+    // 悬浮磨砂胶囊：系统托管 blur 材质（深浅自动适配）+ 柔光投影；
+    // COMPONENT 系列模糊组件后的窗内内容（列表从条下滚过时透出），
+    // 频谱 Canvas 是内容层不受影响，文字经 ink token 在 blur 上保持可读
+    .backgroundBlurStyle(BlurStyle.COMPONENT_THICK)
     .backgroundColor($r('app.color.surface'))
     .border({ width: 0.5, color: $r('app.color.line') })
-    .shadow({ radius: 16, color: 'rgba(0,0,0,0.30)', offsetY: 2 })
+    .shadow({ radius: 20, color: $r('app.color.card_shadow'), offsetY: 4 })
     // 迷你条下滑 = 下拉悬停触发器：distance 阈值保证点按不受影响
     .gesture(
       PanGesture({ fingers: 1, direction: PanDirection.Vertical, distance: 30 })

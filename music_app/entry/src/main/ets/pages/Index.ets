@@ -181,52 +181,33 @@ struct Index {
     Navigation(this.pathStack) {
       // alignContent=Bottom：悬停收起 pill 叠在底部中央（满幅子层不受影响）
       Stack({ alignContent: Alignment.Bottom }) {
-        // 全屏背景层：延伸至状态栏与导航条下方，消除顶部/底部割裂
-        Column()
-          .width('100%')
-          .height('100%')
-          .backgroundColor($r('app.color.page_bg'))
-          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-
-        Column() {
-        // 标题区：大标题 + 曲目数副标题 + 设置入口
-        Row() {
-          Column({ space: 4 }) {
-            Text('音乐')
-              .fontSize(30)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('app.color.ink'))
-            Text(this.sourceTab === SourceTab.ONLINE
-              ? (this.onlineSongs.length > 0 ? `在线 · ${this.onlineSongs.length} 首歌曲` : '在线音乐')
-              : (appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐'))
-              .fontSize(13)
-              .fontColor($r('app.color.ink_soft'))
+        // 全屏背景层：延伸至状态栏与导航条下方，消除顶部/底部割裂；
+        // 播放中叠当前曲封面的模糊氛围层（低透明度，压暗不抢内容）
+        Stack() {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor($r('app.color.page_bg'))
+          if (this.mini !== null && this.mini.coverPath !== '') {
+            Image(this.mini.coverPath)
+              .width('120%')
+              .height('40%')
+              .position({ x: '-10%', y: 0 })
+              .blur(90)
+              .opacity(0.28)
           }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          if (this.sourceTab === SourceTab.LOCAL) {
-            // 本地曲库常驻导入入口：平台(API 24)已移除静默扫描公共媒体库的
-            // 权限与 API，AudioViewPicker 用户选择是唯一导入途径，不能只藏在空态
-            SymbolGlyph($r('sys.symbol.folder_badge_plus'))
-              .fontSize(22)
-              .fontColor([$r('app.color.ink')])
-              .padding(10)
-              .accessibilityText('导入音乐')
-              .onClick(() => this.importFromPicker())
-          }
-          SymbolGlyph($r('sys.symbol.gearshape'))
-            .fontSize(22)
-            .fontColor([$r('app.color.ink')])
-            .padding(10)
-            .accessibilityText('设置')
-            .onClick(() => this.pathStack.pushPathByName('settings', null))
         }
         .width('100%')
-        .padding({ left: 20, right: 16, top: 14, bottom: 4 })
+        .height('100%')
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+        .clip(true)
 
-        // 源切换（主模式）：放回标题下方紧凑分段；拇指区操作靠迷你条下滑悬停
-        // 映射到顶部（同一套 UI，无重复入口），底部不再堆控件
+        Column() {
+        // 标题由 Navigation 系统大标题承载（Free 模式随滚动折叠），
+        // 操作入口（导入/设置）挂 Navigation menus
+
+        // 源切换（主模式）：标题下方紧凑分段；点选走 switchSource 改受控
+        // index，列表区滑动由 Tabs onChange 回写同一入口
         Row({ space: 8 }) {
           this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
           this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
@@ -234,74 +215,48 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 20, top: 8, bottom: 2 })
 
-        // 搜索 + 排序（在线列表为服务端顺序，隐藏排序入口）
-        Row({ space: 10 }) {
-          Row({ space: 6 }) {
-            SymbolGlyph($r('sys.symbol.magnifyingglass'))
-              .fontSize(16)
-              .fontColor([$r('app.color.ink_faint')])
-            TextInput({
-              text: this.searchText,
-              placeholder: this.sourceTab === SourceTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
-            })
-              .layoutWeight(1)
-              .constraintSize({ minHeight: 34 })
-              .fontSize(14)
-              .placeholderFont({ size: 14 })
-              .placeholderColor($r('app.color.ink_faint'))
-              .fontColor($r('app.color.ink'))
-              .caretColor($r('app.color.accent'))
-              .backgroundColor(Color.Transparent)
-              .padding(0)
-              .onChange((value: string) => {
-                this.searchText = value;
-                if (this.sourceTab === SourceTab.ONLINE) {
-                  // 在线搜索由服务端完成（含网络源聚合），输入停顿后触发
+        // 系统搜索框（样式/清除键/键盘搜索键由系统托管，深浅自动适配）：
+        // 输入语义与旧自绘框一致（本地即时过滤 + 切全部，在线防抖服务端搜）
+        Row() {
+          Search({
+            value: this.searchText,
+            placeholder: this.sourceTab === SourceTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
+          })
+            .layoutWeight(1)
+            .constraintSize({ minHeight: 40 })
+            .fontColor($r('app.color.ink'))
+            .placeholderColor($r('app.color.ink_faint'))
+            .onChange((value: string) => {
+              const prev = this.searchText;
+              this.searchText = value;
+              if (this.sourceTab === SourceTab.ONLINE) {
+                // 在线搜索由服务端完成（含网络源聚合），输入停顿后触发；
+                // 框内清除键清空即回到服务器曲库全量
+                if (value === '' && prev !== '') {
+                  this.enterOnline('');
+                } else {
                   this.scheduleOnlineSearch();
-                  return;
                 }
-                if (value.trim() !== '' && this.tab !== LibraryTab.ALL) {
-                  // 搜索时自动切回全部，避免「喜欢」子集里搜不到造成困惑
-                  this.tab = LibraryTab.ALL;
-                }
-              })
-            if (this.sourceTab === SourceTab.ONLINE && this.onlineLoading) {
-              // 搜索发起处的即时加载指示（HarmonyOS 规范：异步操作在触发点反馈）
-              LoadingProgress()
-                .width(14)
-                .height(14)
-                .color($r('app.color.ink_faint'))
-            }
-            if (this.searchText !== '') {
-              SymbolGlyph($r('sys.symbol.xmark_circle_fill'))
-                .fontSize(15)
-                .fontColor([$r('app.color.ink_faint')])
-                // padding 补足 40vp 热区（15 + 12×2 ≈ 39，视觉平衡取整）
-                .padding(12)
-                .accessibilityText('清空搜索')
-                .onClick(() => {
-                  this.searchText = '';
-                  if (this.sourceTab === SourceTab.ONLINE) {
-                    // 清空即回到服务器曲库全量
-                    this.enterOnline('');
-                  }
-                })
-            }
-          }
-          .layoutWeight(1)
-          // minHeight 替代固定高度：系统大字体时搜索框随内容撑高不截断
-          .constraintSize({ minHeight: 38 })
-          .borderRadius(19)
-          .backgroundColor($r('app.color.surface_alt'))
-          .padding({ left: 12, right: 12 })
-
-          // 排序入口在下方过滤器行（本地源语义），搜索行只放搜索
+                return;
+              }
+              if (value.trim() !== '' && this.tab !== LibraryTab.ALL) {
+                // 搜索时自动切回全部，避免「喜欢」子集里搜不到造成困惑
+                this.tab = LibraryTab.ALL;
+              }
+            })
+            .onSubmit((value: string) => {
+              // 键盘搜索键：在线立即触发一次（不等防抖），本地已是即时过滤
+              if (this.sourceTab === SourceTab.ONLINE) {
+                this.cancelPendingSearch();
+                this.enterOnline(value.trim());
+              }
+            })
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
         // 列表过滤器（本地源语义，在线隐藏）：分类 + 排序是列表的就近过滤器，
-        // 用轻量文本风放搜索下方；主模式切换（本地/在线）在标题下方紧凑分段
+        // 用轻量文本风放搜索下方
         if (this.sourceTab === SourceTab.LOCAL) {
           Row({ space: 4 }) {
             this.TabChip(LibraryTab.ALL, '全部')
@@ -314,34 +269,57 @@ struct Index {
           .padding({ left: 20, right: 20, top: 8, bottom: 4 })
         }
 
-        // 歌曲列表 / 空态
-        if (this.filteredSongs.length === 0) {
-          if (this.sourceTab === SourceTab.ONLINE) {
-            this.OnlineStatusView()
-          } else if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
-            this.LibraryEmptyView()
-          } else if (this.searchText.trim() !== '') {
-            this.NoResultView()
-          } else if (this.tab === LibraryTab.FAVORITES) {
-            this.EmptyHintView($r('sys.symbol.heart'), '还没有喜欢的歌曲',
-              '长按歌曲或点击播放页 ♥，把喜欢的歌收进来')
-          } else {
-            this.EmptyHintView($r('sys.symbol.clock'), '还没有播放记录', '点一首歌开始听吧')
+        // 源切换 Tabs（系统滑动手势 + 切换动画）：TabContent 不带 tabBar
+        // （系统栏定高 91vp 且两项左右散开，不符合分段控件观感），切换条用
+        // 自绘胶囊行（点选经 switchSource 改受控 index；滑动经 onChange 回写）
+        Tabs({ barPosition: BarPosition.Start, index: this.sourceTab }) {
+          TabContent() {
+            if (this.filteredSongs.length === 0) {
+              if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
+                this.LibraryEmptyView()
+              } else if (this.searchText.trim() !== '') {
+                this.NoResultView()
+              } else if (this.tab === LibraryTab.FAVORITES) {
+                this.EmptyHintView($r('sys.symbol.heart'), '还没有喜欢的歌曲',
+                  '长按歌曲或点击播放页 ♥，把喜欢的歌收进来')
+              } else {
+                this.EmptyHintView($r('sys.symbol.clock'), '还没有播放记录', '点一首歌开始听吧')
+              }
+            } else {
+              this.SongList(this.localScroller)
+            }
           }
-        } else if (this.sourceTab === SourceTab.ONLINE) {
-          // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
-          Refresh({ refreshing: $$this.isRefreshing }) {
-            this.SongList(this.onlineScroller)
+
+          TabContent() {
+            if (this.filteredSongs.length === 0) {
+              this.OnlineStatusView()
+            } else {
+              // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
+              Refresh({ refreshing: $$this.isRefreshing }) {
+                this.SongList(this.onlineScroller)
+              }
+              .onRefreshing(() => {
+                this.enterOnline(this.searchText.trim()).finally(() => {
+                  this.isRefreshing = false;
+                });
+              })
+              // TabContent 非线性布局：layoutWeight 失效致内容居中留白，
+              // 用足高替代（空态 Column 居中即所求，保留 layoutWeight 无碍）
+              .height('100%')
+            }
           }
-          .onRefreshing(() => {
-            this.enterOnline(this.searchText.trim()).finally(() => {
-              this.isRefreshing = false;
-            });
-          })
-          .layoutWeight(1)
-        } else {
-          this.SongList(this.localScroller)
         }
+        // TabContent 不挂 tabBar 时系统仍保留 91vp 空栏（实测截图布局树
+        // TabBar bounds 182px），barHeight(0)+barOverlap 压掉，页面零空隙
+        .barHeight(0)
+        .barOverlap(true)
+        .layoutWeight(1)
+        .width('100%')
+        .onChange((index: number) => {
+          if (index !== this.sourceTab) {
+            this.switchSource(index);
+          }
+        })
 
         // 底部回顶：远离顶部时才在拇指区占位，回到顶部自动收起不留白
         if (this.showBackTop) {
@@ -362,9 +340,9 @@ struct Index {
         }
         .width('100%')
         .height('100%')
-        // 全局恒定全屏布局：背景层已延伸进系统栏，前景内容按预读避让高度留白；
+        // 系统标题栏已占顶部避让，内容只留底部避让（背景层仍延伸进系统栏）；
         // 下拉悬停时整体下沉（translate 由 reachY 驱动，动画在 setReach 内指定）
-        .padding({ top: appStore.safeTopVp, bottom: appStore.safeBottomVp })
+        .padding({ bottom: appStore.safeBottomVp })
         .translate({ y: this.reachY })
         .onAreaChange((_old: Area, area: Area) => {
           const h = area.height as number;
@@ -382,8 +360,41 @@ struct Index {
       .height('100%')
     }
     .mode(NavigationMode.Stack)
-    .hideTitleBar(true)
+    // 系统大标题（Free 模式随列表滚动折叠为迷你栏，仅 ResourceStr/CommonTitle
+    // 形态生效；副标题为曲目数；导入/设置挂 menus，本地源才显导入入口）
+    .hideTitleBar(false)
+    .title({
+      main: '音乐',
+      sub: this.sourceTab === SourceTab.ONLINE
+        ? (this.onlineSongs.length > 0 ? `在线 · ${this.onlineSongs.length} 首歌曲` : '在线音乐')
+        : (appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐')
+    })
+    .titleMode(NavigationTitleMode.Free)
+    .menus(this.NavMenus())
     .navDestination(this.pageMap)
+  }
+
+  /** 导航栏菜单：设置常驻；本地曲库常驻导入入口（平台已移除静默扫描
+   * 公共媒体库的权限与 API，AudioViewPicker 用户选择是唯一导入途径，
+   * 不能只藏在空态） */
+  @Builder
+  NavMenus() {
+    Row({ space: 4 }) {
+      if (this.sourceTab === SourceTab.LOCAL) {
+        SymbolGlyph($r('sys.symbol.folder_badge_plus'))
+          .fontSize(20)
+          .fontColor([$r('app.color.ink')])
+          .padding(10)
+          .accessibilityText('导入音乐')
+          .onClick(() => this.importFromPicker())
+      }
+      SymbolGlyph($r('sys.symbol.gearshape'))
+        .fontSize(20)
+        .fontColor([$r('app.color.ink')])
+        .padding(10)
+        .accessibilityText('设置')
+        .onClick(() => this.pathStack.pushPathByName('settings', null))
+    }
   }
 
   /** 歌曲列表。加载反馈不插顶部状态行：无旧列表时列表区域由
@@ -391,7 +402,7 @@ struct Index {
    * 小 loading 与下拉刷新指示反馈进行中），避免列表内容跳动 */
   @Builder
   SongList(scroller: Scroller) {
-    List({ space: 2, scroller: scroller }) {
+    List({ space: 8, scroller: scroller }) {
       LazyForEach(this.songSource, (song: SongRecord) => {
         ListItem() {
           SongItem({
@@ -414,8 +425,10 @@ struct Index {
     }
     .cachedCount(6)
     .width('100%')
-    .layoutWeight(1)
-    .padding({ left: 12, right: 12, bottom: 8 })
+    // TabContent 非线性布局：layoutWeight 失效致列表按内容高居中、
+    // 上方留白，必须足高
+    .height('100%')
+    .padding({ left: 16, right: 16, bottom: 12 })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
       // 远离顶部才在拇指区露出回顶按钮，回到顶部自动收起
@@ -446,7 +459,8 @@ struct Index {
       })
   }
 
-  /** 源切换 chip */
+  /** 源切换胶囊（Tabs 系统栏不用后，由该行点选驱动受控 index；
+   * 选中态读 sourceTab，滑动切页经 onChange 回写后同样刷新） */
   @Builder
   SourceChip(tab: SourceTab, label: string, icon: Resource) {
     Row({ space: 5 }) {
@@ -460,7 +474,7 @@ struct Index {
     }
     // 上下 padding 补足 40vp 触控热区
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-    .borderRadius(15)
+    .borderRadius(16)
     .backgroundColor(this.sourceTab === tab ? $r('app.color.accent') : $r('app.color.surface'))
     .accessibilityText(`切换到${label}`)
     .onClick(() => this.switchSource(tab))

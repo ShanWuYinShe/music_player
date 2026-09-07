@@ -3,7 +3,7 @@ import { formatTime } from '../common/TimeUtils';
 import { TextSegment, splitHighlight } from '../common/LibraryFilter';
 import { EqIndicator } from './EqIndicator';
 
-const COVER_SIZE = 48;
+const COVER_SIZE = 52;
 const CURRENT_COLOR = $r('app.color.accent');
 
 /**
@@ -55,7 +55,7 @@ export struct SongItem {
           Image(this.song.coverPath)
             .width(COVER_SIZE)
             .height(COVER_SIZE)
-            .borderRadius(10)
+            .borderRadius(14)
             .autoResize(true)
         } else {
           Column() {
@@ -65,7 +65,7 @@ export struct SongItem {
           }
           .width(COVER_SIZE)
           .height(COVER_SIZE)
-          .borderRadius(10)
+          .borderRadius(14)
           .backgroundColor($r('app.color.surface_alt'))
           .justifyContent(FlexAlign.Center)
         }
@@ -103,9 +103,18 @@ export struct SongItem {
         .fontColor($r('app.color.ink_faint'))
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-    .borderRadius(12)
-    .backgroundColor(this.isCurrent ? $r('app.color.surface') : $r('app.color.page_bg'))
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .borderRadius(18)
+    // 卡片化：常态 surface 浮起（柔光阴影），当前行 accent 浅 tint + 描边；
+    // 按压缩放给触感反馈（stateStyles 不占布局，大字体不断裂）
+    .backgroundColor(this.isCurrent ? $r('app.color.accent_soft') : $r('app.color.surface'))
+    .border(this.isCurrent
+      ? { width: 1, color: $r('app.color.accent') }
+      : { width: 1, color: $r('app.color.line') })
+    .shadow(this.isCurrent
+      ? { radius: 12, color: $r('app.color.accent_shadow'), offsetY: 3 }
+      : { radius: 8, color: $r('app.color.card_shadow'), offsetY: 2 })
+    .stateStyles({ pressed: { scale: { x: 0.98, y: 0.98 } } })
     .onClick(() => this.onItemClick(this.song.id))
   }
 }

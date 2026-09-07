@@ -41,6 +41,18 @@
       "value": "#201807"
     },
     {
+      "name": "accent_soft",
+      "value": "#3A2E18"
+    },
+    {
+      "name": "card_shadow",
+      "value": "#66000000"
+    },
+    {
+      "name": "accent_shadow",
+      "value": "#59DBA84E"
+    },
+    {
       "name": "danger",
       "value": "#E08260"
     },
