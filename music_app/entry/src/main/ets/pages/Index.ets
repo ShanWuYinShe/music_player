@@ -203,17 +203,33 @@ struct Index {
         .clip(true)
 
         Column() {
-        // 标题由 Navigation 系统大标题承载（Free 模式随滚动折叠），
-        // 操作入口（导入/设置）挂 Navigation menus
-
-        // 源切换（主模式）：标题下方紧凑分段；点选走 switchSource 改受控
-        // index，列表区滑动由 Tabs onChange 回写同一入口
+        // 源切换（主模式）+ 页面级操作：点选走 switchSource 改受控 index，
+        // 列表区滑动由 Tabs onChange 回写同一入口；导入/设置居右（原
+        // Navigation menus 迁入——标题栏已整条去除）
         Row({ space: 8 }) {
           this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
           this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+          Blank()
+          if (this.sourceTab === SourceTab.LOCAL) {
+            // 本地曲库常驻导入入口：平台(API 24)已移除静默扫描公共媒体库的
+            // 权限与 API，AudioViewPicker 用户选择是唯一导入途径
+            SymbolGlyph($r('sys.symbol.folder_badge_plus'))
+              .fontSize(20)
+              .fontColor([$r('app.color.ink')])
+              .padding(10)
+              .accessibilityText('导入音乐')
+              .onClick(() => this.importFromPicker())
+          }
+          SymbolGlyph($r('sys.symbol.gearshape'))
+            .fontSize(20)
+            .fontColor([$r('app.color.ink')])
+            .padding(10)
+            .accessibilityText('设置')
+            .onClick(() => this.pathStack.pushPathByName('settings', null))
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 8, bottom: 2 })
+        // 顶部留白含状态栏避让（标题栏去除后内容顶到系统栏下）
+        .padding({ left: 20, right: 16, top: appStore.safeTopVp + 8, bottom: 2 })
 
         // 系统搜索框（样式/清除键/键盘搜索键由系统托管，深浅自动适配）：
         // 输入语义与旧自绘框一致（本地即时过滤 + 切全部，在线防抖服务端搜）
@@ -340,8 +356,9 @@ struct Index {
         }
         .width('100%')
         .height('100%')
-        // 系统标题栏已占顶部避让，内容只留底部避让（背景层仍延伸进系统栏）；
-        // 下拉悬停时整体下沉（translate 由 reachY 驱动，动画在 setReach 内指定）
+        // 顶部避让已并入源切换行 padding（safeTopVp+8），此处只留底部避让
+        // （背景层仍延伸进系统栏）；下拉悬停时整体下沉（translate 由
+        // reachY 驱动，动画在 setReach 内指定）
         .padding({ bottom: appStore.safeBottomVp })
         .translate({ y: this.reachY })
         .onAreaChange((_old: Area, area: Area) => {
@@ -360,41 +377,10 @@ struct Index {
       .height('100%')
     }
     .mode(NavigationMode.Stack)
-    // 系统大标题（Free 模式随列表滚动折叠为迷你栏，仅 ResourceStr/CommonTitle
-    // 形态生效；副标题为曲目数；导入/设置挂 menus，本地源才显导入入口）
-    .hideTitleBar(false)
-    .title({
-      main: '音乐',
-      sub: this.sourceTab === SourceTab.ONLINE
-        ? (this.onlineSongs.length > 0 ? `在线 · ${this.onlineSongs.length} 首歌曲` : '在线音乐')
-        : (appStore.player.songs.length > 0 ? `${appStore.player.songs.length} 首歌曲` : '本地音乐')
-    })
-    .titleMode(NavigationTitleMode.Free)
-    .menus(this.NavMenus())
+    // 标题栏整条去除（「音乐/N 首歌曲」与「全部 N」chip 冗余）：内容顶到
+    // 状态栏下，导入/设置并入源切换行右端（TopToolbar）
+    .hideTitleBar(true)
     .navDestination(this.pageMap)
-  }
-
-  /** 导航栏菜单：设置常驻；本地曲库常驻导入入口（平台已移除静默扫描
-   * 公共媒体库的权限与 API，AudioViewPicker 用户选择是唯一导入途径，
-   * 不能只藏在空态） */
-  @Builder
-  NavMenus() {
-    Row({ space: 4 }) {
-      if (this.sourceTab === SourceTab.LOCAL) {
-        SymbolGlyph($r('sys.symbol.folder_badge_plus'))
-          .fontSize(20)
-          .fontColor([$r('app.color.ink')])
-          .padding(10)
-          .accessibilityText('导入音乐')
-          .onClick(() => this.importFromPicker())
-      }
-      SymbolGlyph($r('sys.symbol.gearshape'))
-        .fontSize(20)
-        .fontColor([$r('app.color.ink')])
-        .padding(10)
-        .accessibilityText('设置')
-        .onClick(() => this.pathStack.pushPathByName('settings', null))
-    }
   }
 
   /** 歌曲列表。加载反馈不插顶部状态行：无旧列表时列表区域由
