@@ -506,14 +506,16 @@ void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
     // uTilt 视差（设备倾斜）：整场（天幕/雪原/倒影）反向轻移 = 相机视差；
+    // uSpin 滚转 + uKick 缩放脉冲经公共 motionSpinKick（含背景整场转）；
     // 只进几何不进色相（防闪烁纪律）
     vec2 q = sceneUV(vec2(0.5, 0.42) - uTilt * 0.05);
+    q = motionSpinKick(q, vec2(0.0));
     float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 
     // 活跃度（substorm 慢相位）：平静帘 ↔ 爆发
     float act = smoothstep(0.40, 0.78, wander2(ts, ACT_SCALE, sd + 7.0));
-    // 节拍只进亮度（局部元素增益）
-    float beatG = 1.0 + 0.32 * uBeat;
+    // 节拍/kick 只进亮度（局部元素增益）：kick 是抛甩激励包络
+    float beatG = 1.0 + 0.32 * uBeat + 0.30 * uKick;
 
     // ---- v10 方向随机化：电子入射方向不固定 → 极光带出现的位置/方向都
     // 不确定（用户反馈"极光不应固定竖直"）。整场方向角 dirAngle（wander

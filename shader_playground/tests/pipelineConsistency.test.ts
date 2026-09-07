@@ -110,6 +110,30 @@ describe('shader 管线跨端配置一致性', () => {
 		expect(stateRows).toBe(cppH);
 		expect(cppH).toBe(tsH);
 	});
+
+	test('体感 uniform（uTilt/uSpin/uKick）两端注入头一致', () => {
+		const generator = readRepoFile('music_app/entry/src/main/cpp/tools/gen_shader_header.py');
+		const patch = readRepoFile('shader_playground/src/glslPatch.ts');
+		const genUniforms = quotedStrings(
+			capture(generator, /FRAG_UNIFORMS\s*=\s*\[([^\]]+)\]/, 'gen_shader_header.py'),
+		);
+		const tsUniforms = quotedStrings(
+			capture(patch, /FRAG_UNIFORM_NAMES\s*=\s*\[([^\]]+)\]/, 'glslPatch.ts'),
+		);
+		expect(tsUniforms).toEqual(genUniforms);
+		expect(genUniforms).toContain('uTilt');
+		expect(genUniforms).toContain('uSpin');
+		expect(genUniforms).toContain('uKick');
+		// 注入头行数两端一致（编译报错行号换算依赖它：头 15 + common 行数）
+		const tsHeaderLines = Number((patch.match(/FRAG_HEADER_LINES\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
+		expect(tsHeaderLines).toBe(15);
+		expect(generator).toContain('frag_injected = 15 +');
+		// NAPI 与 ArkTS 传参对齐（renderFrame 12 参：…tiltX, tiltY, spin, kick）
+		const view = readRepoFile('music_app/entry/src/main/ets/components/VisualizerView.ets');
+		expect(view).toContain('this.tiltX, this.tiltY, this.spin, this.kick');
+		const napi = readRepoFile('music_app/entry/src/main/cpp/napi_init.cpp');
+		expect(napi).toContain('size_t argc = 12;');
+	});
 });
 
 /** 读 shaders/ 目录下的场景源（与 regression.test.ts 同约定） */

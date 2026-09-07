@@ -20,6 +20,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PlayerController } from '../player/PlayerController';
 import {
   seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, normalizeTilt,
+  normalizeSpin, wrapAngleDelta, accelKickLevel,
   PRESET_COUNT, VIZ_FRAME_INTERVAL_MS
 } from '../common/VisualizerCore';
 import entry from 'libentry.so';
@@ -83,8 +84,20 @@ export struct VisualizerView {
    * 0，效果退化为现状 */
   private tiltX = 0;
   private tiltY = 0;
-  private sensorOn = false;
+  /** 面内旋转（ORIENTATION alpha 相对舞台进入时基准的差分，经
+   * normalizeSpin+低通，[-1,1]）：每帧作 shader uSpin——全场景滚转，
+   * 只进几何。磁力计漂移时靠死区抑制，无传感器时保持 0 */
+  private spin = 0;
+  private spinBase: number | null = null;
+  /** 抛甩激励包络（LINEAR_ACCELEROMETER 瞬时量 attack、逐帧指数 decay，
+   * 0..1）：每帧作 shader uKick——只进已有音频量的亮度/尺寸通道。
+   * 权限被拒/无传感器时保持 0，倾斜旋转照常 */
+  private kick = 0;
+  private orientationOn = false;
+  private accelOn = false;
   private tiltLogged = false;
+  /** 抛甩包络衰减时间常数（ms）：挥动后约 0.6s 回落，甩动有"余震" */
+  private static readonly KICK_DECAY_MS = 600;
   /** 当前风格号（仅点击可视化区域切换，无自动轮换） */
   private presetLock: number = 0;
   private beatPhase = 0;
@@ -126,37 +139,76 @@ export struct VisualizerView {
     this.syncState();
   }
 
-  /** ORIENTATION 订阅启停：免权限姿态角（beta/gamma 欧拉角）→ 归一化
-   * 倾斜 → 低通去抖；'ui' 档 60ms 上报对慢速视差足够。失败仅记日志 */
+  /** 传感器订阅启停（仅 full 变体激活时持有，省电）：
+   * ORIENTATION（免权限）：beta/gamma→uTilt 视差，alpha 差分→uSpin 滚转，
+   *   'ui' 档 60ms 上报对慢速视差足够；
+   * LINEAR_ACCELEROMETER（需 ohos.permission.ACCELEROMETER）：去重力线加速度
+   *   → uKick 抛甩脉冲，'game' 档更快捕捉挥动。任一失败仅记日志降级，
+   *   不影响另一路与画面本身 */
   private syncSensor(): void {
     const want = this.variant !== 'mini' && this.active && !this.disposed && this.ready;
-    if (want && !this.sensorOn) {
+    if (want && !this.orientationOn) {
       try {
+        // 每次进入舞台重取 alpha 基准：滚转是相对量，避免跨次残留跳变
+        this.spinBase = null;
         const cb = (data: sensor.OrientationResponse): void => {
           const norm = normalizeTilt(data.beta, data.gamma);
           // 低通：事件率 16Hz 下 ~0.2s 收敛，滤手抖
           this.tiltX += (norm[0] - this.tiltX) * 0.12;
           this.tiltY += (norm[1] - this.tiltY) * 0.12;
+          if (this.spinBase === null && Number.isFinite(data.alpha)) {
+            this.spinBase = data.alpha;
+          }
+          if (this.spinBase !== null) {
+            const target = normalizeSpin(wrapAngleDelta(data.alpha, this.spinBase));
+            this.spin += (target - this.spin) * 0.15;
+          }
           if (!this.tiltLogged) {
             this.tiltLogged = true;
-            hilog.info(0x0004, 'VizView', 'orientation live, tilt=%{public}s',
-              `${norm[0].toFixed(2)},${norm[1].toFixed(2)}`);
+            hilog.info(0x0004, 'VizView', 'orientation live, tilt=%{public}s spinBase=%{public}s',
+              `${norm[0].toFixed(2)},${norm[1].toFixed(2)}`, `${this.spinBase}`);
           }
         };
         sensor.on(sensor.SensorId.ORIENTATION, cb, { interval: 'ui' });
-        this.sensorOn = true;
+        this.orientationOn = true;
       } catch (err) {
         hilog.warn(0x0004, 'VizView', 'orientation subscribe failed: %{public}s',
           JSON.stringify(err));
       }
-    } else if (!want && this.sensorOn) {
+    } else if (!want && this.orientationOn) {
       try {
         // 不带 callback 注销本类型全部订阅（本组件只注册一份）
         sensor.off(sensor.SensorId.ORIENTATION);
       } catch (err) {
         // 反订阅失败无需处理（组件销毁后系统自行回收）
       }
-      this.sensorOn = false;
+      this.orientationOn = false;
+      this.spinBase = null;
+    }
+    if (want && !this.accelOn) {
+      try {
+        const cb = (data: sensor.LinearAccelerometerResponse): void => {
+          const level = accelKickLevel(data.x, data.y, data.z);
+          // attack：瞬时抬升只上不下，decay 在 frame() 里按时钟做
+          if (level > this.kick) {
+            this.kick = level;
+          }
+        };
+        sensor.on(sensor.SensorId.LINEAR_ACCELEROMETER, cb, { interval: 'game' });
+        this.accelOn = true;
+      } catch (err) {
+        // 权限被拒/无传感器：降级为纯姿态响应，画面不受影响
+        hilog.warn(0x0004, 'VizView', 'linear-accel subscribe failed, kick disabled: %{public}s',
+          JSON.stringify(err));
+      }
+    } else if (!want && this.accelOn) {
+      try {
+        sensor.off(sensor.SensorId.LINEAR_ACCELEROMETER);
+      } catch (err) {
+        // 反订阅失败无需处理（组件销毁后系统自行回收）
+      }
+      this.accelOn = false;
+      this.kick = 0;
     }
   }
 
@@ -262,8 +314,16 @@ export struct VisualizerView {
       if (this.presetTrans < 1) {
         this.presetTrans = Math.min(1, this.presetTrans + dt / 1500);
       }
+      // 抛甩包络 decay：attack 由传感器回调抬升，这里按有效播放时钟外的时间
+      // 常数指数回落（暂停时 kick 冻结，随画面一起定格）
+      if (this.kick > 0) {
+        this.kick *= Math.exp(-dt / VisualizerView.KICK_DECAY_MS);
+        if (this.kick < 0.01) {
+          this.kick = 0;
+        }
+      }
       entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock, this.presetTrans,
-        this.tiltX, this.tiltY);
+        this.tiltX, this.tiltY, this.spin, this.kick);
       if (!playing && now > this.fadeDeadline) {
         this.stopLoop();
       }

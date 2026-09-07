@@ -10,7 +10,8 @@ import {
 } from '../main/ets/source/OnlineApi';
 import {
   PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
-  beatEnvelope, bpmFromSeed, hslToRgb, normalizeTilt
+  beatEnvelope, bpmFromSeed, hslToRgb, normalizeTilt,
+  normalizeSpin, wrapAngleDelta, accelKickLevel
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 
@@ -299,24 +300,80 @@ export default function LocalUnitSuite() {
 
   describe('VisualizerCoreTest', () => {
     it('normalizeTiltDeadzoneAndSaturation', 0, () => {
+      // 轴语义：x=gamma（左右横滚→水平），y=beta（前后俯仰→垂直）
+      expect(normalizeTilt(40, 0)[0]).assertEqual(0);
+      expect(normalizeTilt(40, 0)[1]).assertEqual(1);
+      expect(normalizeTilt(0, 40)[0]).assertEqual(1);
+      expect(normalizeTilt(0, 40)[1]).assertEqual(0);
       // 死区内（|deg| <= 4）恒 0
       expect(normalizeTilt(0, 0)[0]).assertEqual(0);
       expect(normalizeTilt(3.9, -2)[0]).assertEqual(0);
       expect(normalizeTilt(0, 4.0)[1]).assertEqual(0);
       // 过死区连续：4.1 度只留极小残量
-      const just = normalizeTilt(0, 4.1)[1];
+      const just = normalizeTilt(4.1, 0)[1];
       expect(just > 0).assertTrue();
       expect(just < 0.01).assertTrue();
       // 满量程 ±40 度 = ±1，超过饱和
-      expect(normalizeTilt(40, -40)[0]).assertEqual(1);
-      expect(normalizeTilt(40, -40)[1]).assertEqual(-1);
-      expect(normalizeTilt(120, -900)[0]).assertEqual(1);
-      expect(normalizeTilt(120, -900)[1]).assertEqual(-1);
-      // 中段线性：22 度 = (22-4)/36 ≈ 0.5
-      const mid = normalizeTilt(22, 0)[0];
+      expect(normalizeTilt(40, -40)[0]).assertEqual(-1);
+      expect(normalizeTilt(40, -40)[1]).assertEqual(1);
+      expect(normalizeTilt(120, -900)[0]).assertEqual(-1);
+      expect(normalizeTilt(120, -900)[1]).assertEqual(1);
+      // 中段线性：gamma 22 度 = (22-4)/36 ≈ 0.5
+      const mid = normalizeTilt(0, 22)[0];
+      expect(mid > 0.49 && mid < 0.51).assertTrue();
+      // 非法输入归零（且 beta 通道不 leaking 到 x）
+      expect(normalizeTilt(10, NaN)[0]).assertEqual(0);
+      expect(normalizeTilt(NaN, NaN)[1]).assertEqual(0);
+    });
+
+    it('wrapAngleDeltaHandlesCompassWrap', 0, () => {
+      // 0/360 回绕：359→1 只差 +2 度，不是 -358
+      expect(wrapAngleDelta(1, 359)).assertEqual(2);
+      expect(wrapAngleDelta(359, 1)).assertEqual(-2);
+      expect(wrapAngleDelta(180, 0)).assertEqual(180);
+      expect(wrapAngleDelta(0, 180)).assertEqual(180);
+      expect(wrapAngleDelta(45, 30)).assertEqual(15);
+      // 非法输入归零
+      expect(wrapAngleDelta(NaN, 30)).assertEqual(0);
+    });
+
+    it('normalizeSpinDeadzoneAndSaturation', 0, () => {
+      // 死区 ±5° 内恒 0
+      expect(normalizeSpin(0)).assertEqual(0);
+      expect(normalizeSpin(-5)).assertEqual(0);
+      expect(normalizeSpin(5)).assertEqual(0);
+      // 过死区连续
+      const just = normalizeSpin(5.6);
+      expect(just > 0).assertTrue();
+      expect(just < 0.05).assertTrue();
+      // 满量程 ±60° = ±1，超过饱和
+      expect(normalizeSpin(60)).assertEqual(1);
+      expect(normalizeSpin(-60)).assertEqual(-1);
+      expect(normalizeSpin(200)).assertEqual(1);
+      expect(normalizeSpin(-200)).assertEqual(-1);
+      // 中段线性：32.5° = (32.5-5)/55 = 0.5
+      const mid = normalizeSpin(32.5);
+      expect(mid > 0.49 && mid < 0.51).assertTrue();
+      expect(normalizeSpin(NaN)).assertEqual(0);
+    });
+
+    it('accelKickLevelThresholdAndSaturation', 0, () => {
+      // 阈值 1.5 以下恒 0（日常手持抖动不起脉冲）
+      expect(accelKickLevel(0, 0, 0)).assertEqual(0);
+      expect(accelKickLevel(1.5, 0, 0)).assertEqual(0);
+      expect(accelKickLevel(0.8, 0.8, 0.8)).assertEqual(0);
+      // 过阈值连续：1.6 起微量
+      const just = accelKickLevel(1.6, 0, 0);
+      expect(just > 0).assertTrue();
+      expect(just < 0.05).assertTrue();
+      // 阈值 + 满量程（1.5+8=9.5）达 1，超过饱和
+      expect(accelKickLevel(9.5, 0, 0)).assertEqual(1);
+      expect(accelKickLevel(0, 20, 0)).assertEqual(1);
+      // 中段线性：(5.5-1.5)/8 = 0.5
+      const mid = accelKickLevel(0, 0, 5.5);
       expect(mid > 0.49 && mid < 0.51).assertTrue();
       // 非法输入归零
-      expect(normalizeTilt(NaN, 10)[0]).assertEqual(0);
+      expect(accelKickLevel(NaN, 0, 0)).assertEqual(0);
     });
 
     it('seedIsDeterministicAndDistinct', 0, () => {

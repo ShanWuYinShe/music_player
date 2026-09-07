@@ -4,11 +4,11 @@
 // gen_shader_header.py）把它原样注入到每个场景"注入头之后、场景源之前"。
 // 场景文件直接使用这里的函数，**不要重复定义**（重复定义会编译报错）。
 //
-// uniform（uT/uSeed/uRes/uBeat/uBass/uTreble/uTilt/uTransition/uPrev）与 vUV 由
+// uniform（uT/uSeed/uRes/uBeat/uBass/uTreble/uTilt/uSpin/uKick/uTransition/uPrev）与 vUV 由
 // 注入头声明，本文件的函数直接读取。书写风格与场景源一致：GLSL ES 1.00
 // （texture2D / 无 #version），词汇替换由工具链统一完成。
 //
-// 行号换算：编译器报错行号 − 注入头行数(13) − 本文件行数 = 场景源文件行号。
+// 行号换算：编译器报错行号 − 注入头行数(15) − 本文件行数 = 场景源文件行号。
 // 报错行号落在本文件区间内时，工具会标注为 common.glsl 的行号。
 
 #define TAU 6.2831853
@@ -94,6 +94,17 @@ float wanderBi(float t, float scale, float seed) {
 mat2 rot(float a) {
     float c = cos(a), s = sin(a);
     return mat2(c, -s, s, c);
+}
+
+// ---- 体感运动（uTilt/uSpin/uKick，只进几何/亮度，不进色相/速度）-----------
+// 最大滚转 ±0.35rad（≈±20°，手机转 60° 饱和）；抛甩缩放脉冲最大收缩 6%。
+// pivot 是旋转/缩放中心：sceneUV 系场景传原点，vUV 系场景传屏中。
+#define SPIN_MAX_RAD 0.35
+#define KICK_ZOOM 0.06
+vec2 motionSpinKick(vec2 q, vec2 pivot) {
+    q = pivot + rot(uSpin * SPIN_MAX_RAD) * (q - pivot);
+    q = pivot + (q - pivot) * (1.0 - uKick * KICK_ZOOM);
+    return q;
 }
 
 // uT 单位是毫秒，场景里一律用秒

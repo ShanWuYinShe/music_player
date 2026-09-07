@@ -3,7 +3,7 @@
 // 结构：48 条圆头竖柱构成底部主频谱阵（capsule 距离场，mini.frag 画法的
 // 全屏化），能量 = shader 内确定性频谱合成（复刻 VisualizerCore.
 // synthSpectrum"低频柱高缓变、高频柱矮快闪、seed 扰动"的结构）；uBass/
-// uTreble 分别抬升低/高频段增益，uBeat 只进亮度与柱高——防闪烁铁律：
+// uTreble 分别抬升低/高频段增益，uBeat/uKick 只进亮度与柱高——防闪烁铁律：
 // 音频量绝不进色相/速度。中轴上方是镜像倒影（波纹扰动 + exp 衰减，
 // aurora 水面倒影同思路），柱顶有随能量呼吸的余晖，背景是暖黑舞台 +
 // 被总能量微光照亮的底部辉光 + 十余颗慢漂光尘。
@@ -72,7 +72,8 @@ float barShape(vec2 q, float cx, float h, float halfW) {
 float barHeight(float i, float count, float seed, float tMs, float beat) {
     float band = i / max(count - 1.0, 1.0);
     float energy = spectrumEnergy(i, count, seed, tMs);
-    float gain = 1.0 + 0.34 * uBass * (1.0 - band) + 0.34 * uTreble * band - 0.18;
+    float gain = 1.0 + 0.34 * uBass * (1.0 - band) + 0.34 * uTreble * band - 0.18
+        + 0.45 * uKick;
     float sway = 0.82 + SWAY_K * sin(tMs * SWAY_W + i * 0.9);
     return clamp(energy * gain * sway * (0.84 + 0.22 * beat) * BAR_H_MAX, 0.02, 0.5);
 }
@@ -95,8 +96,10 @@ void main() {
     float ts = nowSec();
     float seed = fract(uSeed * 1.0e-7);            // 缩到 [0,1] 安全小 seed
     // uTilt 视差（设备倾斜）：柱阵/倒影/背景整体轻移，反馈与抖动仍用 vUV；
+    // uSpin 滚转 + uKick 缩放脉冲经公共 motionSpinKick（vUV 系以屏中为心）；
     // 只进几何不进色相（防闪烁纪律）
     vec2 q = vUV - uTilt * 0.03;
+    q = motionSpinKick(q, vec2(0.5, 0.5));
     float beat = beatEnv(tMs, seed);
     float transA = smoothstep(0.0, 1.0, clamp(uTransition, 0.0, 1.0));
 

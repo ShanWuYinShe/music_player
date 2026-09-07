@@ -45,6 +45,10 @@ const state = {
 	 * 的偏移模拟，全部效果由此获得与手机一致的相机视差 */
 	tiltX: 0,
 	tiltY: 0,
+	/** 面内旋转（真机来自 alpha 差分）：预览用滚轮模拟（±60° 满量程同端侧） */
+	spin: 0,
+	/** 抛甩激励（真机来自线加速度包络）：预览按 K 键触发一次脉冲 */
+	kick: 0,
 	paused: false,
 
 	lastWall: 0,
@@ -286,6 +290,8 @@ function renderFrame(): void {
 		transition: state.transition,
 		tiltX: state.tiltX,
 		tiltY: state.tiltY,
+		spin: state.spin,
+		kick: state.kick,
 		renderScale: preset?.renderScale ?? RENDER_SCALE,
 	});
 }
@@ -297,6 +303,11 @@ function tick(): void {
 		audio.advance(dt);
 		if (state.transition < 1) {
 			state.transition = Math.min(1, state.transition + dt / TRANSITION_MS);
+		}
+		// kick 脉冲 decay（复刻端侧 VisualizerView.KICK_DECAY_MS=600）
+		if (state.kick > 0) {
+			state.kick *= Math.exp(-dt / 600);
+			if (state.kick < 0.01) state.kick = 0;
 		}
 	}
 	state.lastWall = now;
@@ -397,6 +408,10 @@ canvas.addEventListener('click', () => {
 	selectPreset((state.presetIndex + 1) % PRESETS.length, { restartTransition: true });
 });
 
+// 滚轮模拟面内旋转（端侧 ±60° 满量程）：约 500px 滚量转满
+canvas.addEventListener('wheel', (e) => {
+	state.spin = Math.max(-1, Math.min(1, state.spin + e.deltaY * 0.002));
+});
 // 指针相对画布中心的偏移模拟真机倾斜（[-1,1]）：四个场景的 uTilt 相机视差
 // 在预览端即可感受（真机来源是 ORIENTATION 姿态角，归一化同量级）
 canvas.addEventListener('pointermove', (e) => {
@@ -412,6 +427,9 @@ window.addEventListener('keydown', (e) => {
 		setPaused(!state.paused);
 	} else if (e.key === 's' || e.key === 'S') {
 		screenshot();
+	} else if (e.key === 'k' || e.key === 'K') {
+		// K 触发一次抛甩脉冲（真机来自线加速度包络，decay 走 tick）
+		state.kick = 1;
 	} else if (e.key === 'Escape') {
 		hideDiagnostic();
 	} else if (/^[1-9]$/.test(e.key)) {

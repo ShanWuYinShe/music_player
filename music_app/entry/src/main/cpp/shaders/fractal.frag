@@ -194,8 +194,10 @@ void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
     // uTilt 视差（设备倾斜）：场景整体反向轻移 = 相机随手机转动；
+    // uSpin 滚转（面内旋转）+ uKick 缩放脉冲（抛甩）经公共 motionSpinKick；
     // 只进几何不进色相（防闪烁纪律），幅度 ≤5% 屏高
     vec2 q = sceneUV(vec2(0.5) - uTilt * 0.05);
+    q = motionSpinKick(q, vec2(0.0));
 
     // ---- 主体（永远在场）----
     vec3 bcol;
@@ -219,8 +221,8 @@ void main() {
         * exp(-rr * 2.4) * RIPPLE_GAIN;
     col += bcol * ripple;
 
-    // beat 只进亮度（速度恒定铁律）
-    col *= 0.94 + 0.18 * uBeat;
+    // beat/kick 只进亮度（速度恒定铁律）：kick 是抛甩激励包络
+    col *= 0.94 + 0.18 * uBeat + 0.22 * uKick;
     col *= 1.0 - VIGNETTE * dot(q, q);
 
     // ---- 反馈循环：每帧用上一帧 fragment 数据生成新帧（残影流动）----

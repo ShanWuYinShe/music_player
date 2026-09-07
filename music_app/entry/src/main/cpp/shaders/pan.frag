@@ -895,8 +895,10 @@ void main() {
     float ts = nowSec();
     float sd = seedHash() * SEED_SPREAD;
     // uTilt 视差（设备倾斜）：锅/珠/壁整体轻移——状态预通道按格子索引
-    // 写状态（不依赖 q），主 pass 整体平移不破坏锅珠相对位置；只进几何
+    // 写状态（不依赖 q），主 pass 整体平移不破坏锅珠相对位置；
+    // uSpin 滚转 + uKick 缩放脉冲经公共 motionSpinKick；只进几何
     vec2 q = sceneUV(vec2(0.5, 0.47) - uTilt * 0.04);
+    q = motionSpinKick(q, vec2(0.0));
     float aspect = aspectRatio();
 
 #ifndef PAN_NO_STATE_TEX
@@ -1132,6 +1134,8 @@ void main() {
     }
 
     // ---- 照片后期链 ----
+    // kick 是抛甩激励包络：HDR 线性区整体提亮（只进亮度，不进色相/速度）
+    col *= 1.0 + 0.25 * uKick;
     col = filmic(col);
     col *= 1.0 - 0.22 * dot(q * 1.1, q * 1.1);
     float L = dot(col, vec3(0.299, 0.587, 0.114));

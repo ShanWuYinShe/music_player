@@ -128,11 +128,14 @@ const TILT_DEADZONE_DEG = 4.0;
 
 /**
  * 设备姿态 → 归一化倾斜 [-1,1]×[-1,1]（ORIENTATION 传感器的 beta/gamma
- * 欧拉角，绕 X/绕 Y）。死区内线性归零（过死区边沿连续），超出满量程饱和；
+ * 欧拉角）。轴语义（设备坐标系：X 右、Y 上、Z 朝外）：
+ * gamma 是绕 Y 轴横滚（左右倾斜）→ 驱动水平视差 x；
+ * beta 是绕 X 轴俯仰（前后倾斜）→ 驱动垂直视差 y。
+ * 死区内线性归零（过死区边沿连续），超出满量程饱和；
  * 输出直接作 shader uTilt——相机视差只进几何（uv 偏移），不进色相/速度。
  */
 export function normalizeTilt(beta: number, gamma: number): number[] {
-  return [tiltAxis(beta), tiltAxis(gamma)];
+  return [tiltAxis(gamma), tiltAxis(beta)];
 }
 
 function tiltAxis(deg: number): number {
@@ -146,4 +149,63 @@ function tiltAxis(deg: number): number {
   const span = TILT_RANGE_DEG - TILT_DEADZONE_DEG;
   const k = Math.min((a - TILT_DEADZONE_DEG) / span, 1.0);
   return deg < 0 ? -k : k;
+}
+
+/** 面内旋转归一化死区（度）：相对基准的偏航抖动不触发旋转 */
+const SPIN_DEADZONE_DEG = 5.0;
+/** 面内旋转归一化满量程（度）：相对基准 ±60° 达 ±1，超过饱和 */
+const SPIN_RANGE_DEG = 60.0;
+/** 抛甩激励阈值（m/s²）：线加速度模超过它才起脉冲（滤日常手持抖动） */
+const KICK_THRESHOLD = 1.5;
+/** 抛甩激励满量程（m/s²）：阈值 + 该值达 1（用力挥/抛起可达 10+） */
+const KICK_SPAN = 8.0;
+
+/**
+ * 有符号最小角差 (-180,180]（度）：处理 alpha 在 0/360 处回绕，
+ * 面内旋转取相对基准的差分用（绝对偏航角本身无意义，随朝向漂移）。
+ */
+export function wrapAngleDelta(deg: number, base: number): number {
+  if (!Number.isFinite(deg) || !Number.isFinite(base)) {
+    return 0;
+  }
+  let d = (deg - base) % 360;
+  if (d > 180) {
+    d -= 360;
+  } else if (d <= -180) {
+    d += 360;
+  }
+  return d;
+}
+
+/**
+ * 面内旋转差分 → 归一化旋转 [-1,1]（相对进入可视化舞台时的 alpha 基准）。
+ * 死区 ±5°、±60° 饱和；输出直接作 shader uSpin——场景内滚转只进几何
+ * （uv 旋转），不进色相/速度。传感器不可用时调用方保持 0。
+ */
+export function normalizeSpin(deltaDeg: number): number {
+  if (!Number.isFinite(deltaDeg)) {
+    return 0;
+  }
+  const a = Math.abs(deltaDeg);
+  if (a <= SPIN_DEADZONE_DEG) {
+    return 0;
+  }
+  const k = Math.min((a - SPIN_DEADZONE_DEG) / (SPIN_RANGE_DEG - SPIN_DEADZONE_DEG), 1.0);
+  return deltaDeg < 0 ? -k : k;
+}
+
+/**
+ * 线加速度（去重力，LINEAR_ACCELEROMETER x/y/z，m/s²）→ 抛甩激励 0..1
+ * 瞬时量。调用方做 attack 快、decay 慢的包络（uKick），shader 里只驱动
+ * 已有音频量的同类通道（亮度/尺寸增益），不进色相/速度。
+ */
+export function accelKickLevel(x: number, y: number, z: number): number {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return 0;
+  }
+  const mag = Math.sqrt(x * x + y * y + z * z);
+  if (mag <= KICK_THRESHOLD) {
+    return 0;
+  }
+  return Math.min((mag - KICK_THRESHOLD) / KICK_SPAN, 1.0);
 }

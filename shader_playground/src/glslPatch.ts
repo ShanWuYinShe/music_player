@@ -32,6 +32,8 @@ const FRAG_HEADER =
 	'uniform float uBass;\n' +
 	'uniform float uTreble;\n' +
 	'uniform vec2 uTilt;\n' +
+	'uniform float uSpin;\n' +
+	'uniform float uKick;\n' +
 	'uniform float uTransition;\n' +
 	'uniform sampler2D uPrev;\n' +
 	'in vec2 vUV;\n' +
@@ -48,7 +50,7 @@ const BLIT_HEADER =
 	'out vec4 fragColor;\n';
 
 /** 注入头的行数；编译器行号 − 该值（frag 还要 − common 行数）= 源文件行号 */
-export const FRAG_HEADER_LINES = 13;
+export const FRAG_HEADER_LINES = 15;
 export const VERT_HEADER_LINES = 4;
 export const BLIT_HEADER_LINES = 5;
 
@@ -60,6 +62,8 @@ const FRAG_UNIFORM_NAMES = [
 	'uBass',
 	'uTreble',
 	'uTilt',
+	'uSpin',
+	'uKick',
 	'uTransition',
 	'uPrev',
 ];

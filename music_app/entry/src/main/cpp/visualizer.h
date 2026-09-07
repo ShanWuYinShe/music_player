@@ -14,6 +14,7 @@ void VizOnSurfaceDestroyed(OH_NativeXComponent* component, void* window);
 /** surface show 兜底:未就绪时等价 created(幂等初始化),已就绪仅刷新尺寸 */
 void VizOnSurfaceShow(OH_NativeXComponent* component, void* window);
 void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
-                     double presetLock, double transition, double tiltX, double tiltY);
+                     double presetLock, double transition, double tiltX, double tiltY,
+                     double spin, double kick);
 
 #endif  // MUSICPLAYER_VISUALIZER_H

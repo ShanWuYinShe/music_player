@@ -24,7 +24,9 @@
  * 不进源码树）。每个场景一个 program，按 presetLock 切换。
  *
  * 参数：t(有效播放时钟 ms)、seed(曲目 id 派生)、playing(暂停分支)、
- *       tiltX/tiltY(设备姿态归一化倾斜，uniform uTilt——全场景相机视差)。
+ *       tiltX/tiltY(设备姿态归一化倾斜，uniform uTilt——全场景相机视差)、
+ *       spin(面内旋转归一化，uniform uSpin——全场景滚转，只进几何)、
+ *       kick(抛甩激励包络，uniform uKick——只进亮度/尺寸，不进色相)。
  */
 
 #include "visualizer.h"
@@ -78,6 +80,8 @@ struct SceneLocs {
     GLint treble = -1;
     GLint transition = -1;
     GLint tilt = -1;        // 设备倾斜视差 uTilt（vec2，全场景共用）
+    GLint spin = -1;        // 面内旋转 uSpin（float，全场景共用）
+    GLint kick = -1;        // 抛甩激励 uKick（float，全场景共用）
     GLint prev = -1;
     GLint stateMode = -1;   // pan 专用：uStateMode（其他场景无此 uniform，恒 -1）
     GLint state = -1;       // pan 专用：uState 采样器
@@ -150,6 +154,8 @@ GLuint LinkProgram(GLuint vs, GLuint fs, SceneLocs* locs) {
         locs->treble = glGetUniformLocation(prog, "uTreble");
         locs->transition = glGetUniformLocation(prog, "uTransition");
         locs->tilt = glGetUniformLocation(prog, "uTilt");
+        locs->spin = glGetUniformLocation(prog, "uSpin");
+        locs->kick = glGetUniformLocation(prog, "uKick");
         locs->prev = glGetUniformLocation(prog, "uPrev");
         locs->stateMode = glGetUniformLocation(prog, "uStateMode");
         locs->state = glGetUniformLocation(prog, "uState");
@@ -431,7 +437,8 @@ void ResizeFeedbackTextures(int newW, int newH) {
 }
 
 void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
-                     double presetLock, double transition, double tiltX, double tiltY) {
+                     double presetLock, double transition, double tiltX, double tiltY,
+                     double spin, double kick) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
         return;
     }
@@ -467,6 +474,8 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
         glUniform1f(loc.treble, static_cast<float>(treble));
         glUniform1f(loc.transition, static_cast<float>(transition));
         glUniform2f(loc.tilt, static_cast<float>(tiltX), static_cast<float>(tiltY));
+        glUniform1f(loc.spin, static_cast<float>(spin));
+        glUniform1f(loc.kick, static_cast<float>(kick));
         glUniform1f(loc.stateMode, 1.0f);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
@@ -486,6 +495,8 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     glUniform1f(loc.treble, static_cast<float>(treble));
     glUniform1f(loc.transition, static_cast<float>(transition));
     glUniform2f(loc.tilt, static_cast<float>(tiltX), static_cast<float>(tiltY));
+    glUniform1f(loc.spin, static_cast<float>(spin));
+    glUniform1f(loc.kick, static_cast<float>(kick));
     if (idx == kVizPresetPan) {
         // 2=读状态纹理（常规）；0=回退逐像素（无浮点 FBO 的设备）
         glUniform1f(loc.stateMode, gStateMode == 2 ? 2.0f : 0.0f);
