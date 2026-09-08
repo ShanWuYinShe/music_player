@@ -347,13 +347,15 @@ struct Index {
         }
 
         // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）：
-        // 其上的下滑手势是下拉悬停的触发器（手在下半屏，映射操作顶部）
+        // 其上的手势 = 半屏拇指遥控：下滑拉悬停 / 横滑切分类 / 画 <> 切源
         if (this.mini !== null) {
           MiniPlayerBar({
             player: appStore.player,
             info: this.mini,
             onTapOpen: () => this.pathStack.pushPathByName('player', null),
-            onPullDown: () => this.setReach(true)
+            onPullDown: () => this.setReach(true),
+            onSwipeTab: (direction: number) => this.cycleTab(direction),
+            onSwipeSource: (direction: number) => this.cycleSource(direction)
           })
         }
         }
@@ -411,13 +413,6 @@ struct Index {
               .margin({ left: 71 })
           }
         }
-        .swipeAction({
-          end: {
-            builder: (): void => {
-              this.SwipeActions(song.id)
-            }
-          }
-        })
       }, (song: SongRecord) => song.id)
     }
     .cachedCount(6)
@@ -627,7 +622,8 @@ struct Index {
     }
   }
 
-  /** 长按歌曲菜单：原生 Menu/MenuItem，磨砂底/圆角/行高/按压态由系统托管 */
+  /** 长按歌曲菜单（歌曲操作的唯一入口，左滑已移除——每操作一条路径）：
+   * 原生 Menu/MenuItem，磨砂底/圆角/行高/按压态由系统托管 */
   @Builder
   SongMenu(song: SongRecord) {
     Menu() {
@@ -638,15 +634,6 @@ struct Index {
         .onClick(() => {
           const count = appStore.player.queueNext(song.id);
           promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
-        })
-      MenuItem({
-        symbolStartIcon: new SymbolGlyphModifier(
-          appStore.userData.isFavorite(song.id) ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart')),
-        content: appStore.userData.isFavorite(song.id) ? '取消喜欢' : '喜欢'
-      })
-        .onClick(() => {
-          const fav = appStore.userData.toggleFavorite(song.id);
-          promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
         })
       if (this.sourceTab === SourceTab.LOCAL) {
         MenuItem({
@@ -727,52 +714,6 @@ struct Index {
         action: () => appStore.player.removeSong(song.id)
       }
     });
-  }
-
-  /** 左滑操作：下一首播放 + 删除 */
-  @Builder
-  SwipeActions(id: string) {
-    Row() {
-      Column() {
-        SymbolGlyph($r('sys.symbol.forward_end_fill'))
-          .fontSize(20)
-          .fontColor([$r('app.color.on_accent')])
-      }
-      .width(52)
-      .height('100%')
-      .borderRadius(12)
-      .backgroundColor($r('app.color.accent'))
-      .justifyContent(FlexAlign.Center)
-      .margin({ left: 6 })
-      .accessibilityText('下一首播放')
-      .onClick(() => {
-        const count = appStore.player.queueNext(id);
-        promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
-      })
-
-      if (this.sourceTab === SourceTab.LOCAL) {
-        Column() {
-          SymbolGlyph($r('sys.symbol.trash'))
-            .fontSize(20)
-            .fontColor([$r('app.color.on_accent')])
-        }
-        .width(52)
-        .height('100%')
-        .borderRadius(12)
-        .backgroundColor($r('app.color.danger'))
-        .justifyContent(FlexAlign.Center)
-        .margin({ left: 6 })
-        .accessibilityText('从曲库删除')
-        // 破坏性操作与长按菜单统一走二次确认，不得直删
-        .onClick(() => {
-          const song = appStore.player.getSong(id);
-          if (song) {
-            this.confirmRemoveSong(song);
-          }
-        })
-      }
-    }
-    .height('100%')
   }
 
   /** 曲库空态：导入 / 演示曲目 */
@@ -902,6 +843,36 @@ struct Index {
       appStore.player.refreshSongs();
     }
     this.activeScroller().scrollToIndex(0);
+  }
+
+  /** 迷你条弧线手势：顶层源循环切换（> 下一个 / < 上一个，两源即往返） */
+  private cycleSource(direction: number): void {
+    const next = direction > 0 ? SourceTab.ONLINE : SourceTab.LOCAL;
+    if (next !== this.sourceTab) {
+      this.switchSource(next);
+      promptAction.showToast({
+        message: next === SourceTab.ONLINE ? '已切换到在线' : '已切换到本地',
+        duration: 1200
+      });
+    }
+  }
+
+  /** 迷你条横滑手势：本地分类标签循环（> 下一个 / < 上一个，越界回绕）。
+   * 仅本地源响应——在线页无分类标签行；目标为当前分类时不动作 */
+  private cycleTab(direction: number): void {
+    if (this.sourceTab !== SourceTab.LOCAL) {
+      return;
+    }
+    const order: LibraryTab[] = [LibraryTab.ALL, LibraryTab.FAVORITES, LibraryTab.RECENT];
+    const idx = order.indexOf(this.tab);
+    const next = order[(idx + direction + order.length) % order.length];
+    if (next !== this.tab) {
+      this.tab = next;
+      this.showBackTop = false;
+      this.localScroller.scrollToIndex(0);
+      const label = next === LibraryTab.ALL ? '全部' : (next === LibraryTab.FAVORITES ? '喜欢' : '最近');
+      promptAction.showToast({ message: label, duration: 1000 });
+    }
   }
 
   /** 在线搜索防抖：输入停顿后触发服务端搜索 */
