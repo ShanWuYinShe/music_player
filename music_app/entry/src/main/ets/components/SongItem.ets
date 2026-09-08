@@ -2,13 +2,16 @@ import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
 import { TextSegment, splitHighlight } from '../common/LibraryFilter';
 import { EqIndicator } from './EqIndicator';
+import { CoverArt } from './CoverArt';
 
-const COVER_SIZE = 52;
+const COVER_SIZE = 44;
 const CURRENT_COLOR = $r('app.color.accent');
 
 /**
- * 歌曲列表项：封面 / 歌名 / 歌手（搜索关键词高亮）+ 当前播放高亮
- * （EQ 跳动指示）+ VIP 徽标
+ * 歌曲列表项（杂志目录行）：无盒子大字排版——歌名是主角（17vp 粗字直接
+ * 排在页面上），歌手小字随行，时长右对齐如目录页码；行间发丝线分隔。
+ * 当前行 = 行首金色竖线 + 歌名变金 + EQ 跳动，无底色无描边无阴影。
+ * 搜索关键词高亮保留；VIP 徽标轻量化为字距拉开的小字。
  */
 @ComponentV2
 export struct SongItem {
@@ -39,7 +42,7 @@ export struct SongItem {
       ForEach(segments, (seg: TextSegment, idx: number) => {
         Span(seg.text)
           .fontColor(seg.hit ? CURRENT_COLOR : baseColor)
-          .fontWeight(seg.hit ? FontWeight.Medium : fontWeight)
+          .fontWeight(seg.hit ? FontWeight.Bold : fontWeight)
           .fontSize(fontSize)
       }, (seg: TextSegment, idx: number) => `${idx}_${seg.text}`)
     }
@@ -49,46 +52,34 @@ export struct SongItem {
 
   build() {
     Row({ space: 12 }) {
-      // 封面
-      Stack() {
-        if (this.song.coverPath !== '') {
-          Image(this.song.coverPath)
-            .width(COVER_SIZE)
-            .height(COVER_SIZE)
-            .borderRadius(14)
-            .autoResize(true)
-        } else {
-          Column() {
-            SymbolGlyph($r('sys.symbol.music_note_list'))
-              .fontSize(22)
-              .fontColor([$r('app.color.ink_soft')])
-          }
-          .width(COVER_SIZE)
-          .height(COVER_SIZE)
-          .borderRadius(14)
-          .backgroundColor($r('app.color.surface_alt'))
-          .justifyContent(FlexAlign.Center)
-        }
-      }
+      // 当前行标记：金色竖线（杂志引言线的用法，替代描边盒子）
+      Column()
+        .width(3)
+        .height(36)
+        .borderRadius(1.5)
+        .backgroundColor(this.isCurrent ? CURRENT_COLOR : Color.Transparent)
 
-      // 歌名 / 歌手
-      Column({ space: 4 }) {
+      // 封面缩为行首小方片：排版行的节奏点，不再喧宾夺主
+      CoverArt({ coverPath: this.song.coverPath, seedId: this.song.id, radius: 8, glyphSize: 18 })
+        .width(COVER_SIZE)
+        .height(COVER_SIZE)
+
+      // 歌名（主角）/ 歌手（随行）
+      Column({ space: 3 }) {
         Row({ space: 6 }) {
           this.HighlightText(this.titleSegments,
-            this.isCurrent ? CURRENT_COLOR : $r('app.color.ink'), 16, FontWeight.Medium)
-          // 网易云付费曲目徽标（未登录时播放页会追加「VIP 试听」标注）
+            this.isCurrent ? CURRENT_COLOR : $r('app.color.editorial_title'), 17, FontWeight.Bold)
+          // 网易云付费曲目徽标：轻量小字（未登录时播放页追加「VIP 试听」标注）
           if (this.song.vip === true) {
             Text('VIP')
-              .fontSize(10)
+              .fontSize(9)
               .fontWeight(FontWeight.Medium)
               .fontColor(CURRENT_COLOR)
-              .padding({ left: 4, right: 4, top: 1, bottom: 1 })
-              .borderRadius(4)
-              .border({ width: 0.5, color: CURRENT_COLOR })
+              .letterSpacing(1)
           }
         }
         .alignItems(VerticalAlign.Center)
-        this.HighlightText(this.artistSegments, $r('app.color.ink_soft'), 13, FontWeight.Normal)
+        this.HighlightText(this.artistSegments, $r('app.color.editorial_meta'), 12, FontWeight.Normal)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -96,25 +87,18 @@ export struct SongItem {
       // 当前播放：EQ 跳动指示（Poweramp 式，暂停时静止）。isCurrent 由
       // Index 在 onStateChanged 回调中 reload 列表驱动重建求值
       if (this.isCurrent) {
-        EqIndicator({ active: this.isPlaying, color: CURRENT_COLOR })
+        EqIndicator({ active: this.isPlaying, color: CURRENT_COLOR, songId: this.song.id })
       }
+
+      // 时长：目录页码的用法——等宽感小字右对齐
       Text(this.song.duration > 0 ? formatTime(this.song.duration) : '--:--')
         .fontSize(12)
-        .fontColor($r('app.color.ink_faint'))
+        .fontColor($r('app.color.editorial_meta'))
     }
     .width('100%')
-    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-    .borderRadius(18)
-    // 卡片化：常态 surface 浮起（柔光阴影），当前行 accent 浅 tint + 描边；
-    // 按压缩放给触感反馈（stateStyles 不占布局，大字体不断裂）
-    .backgroundColor(this.isCurrent ? $r('app.color.accent_soft') : $r('app.color.surface'))
-    .border(this.isCurrent
-      ? { width: 1, color: $r('app.color.accent') }
-      : { width: 1, color: $r('app.color.line') })
-    .shadow(this.isCurrent
-      ? { radius: 12, color: $r('app.color.accent_shadow'), offsetY: 3 }
-      : { radius: 8, color: $r('app.color.card_shadow'), offsetY: 2 })
-    .stateStyles({ pressed: { scale: { x: 0.98, y: 0.98 } } })
+    .alignItems(VerticalAlign.Center)
+    // 行高：大字排版需要呼吸感；无底色无阴影，触感反馈交给系统默认按压
+    .padding({ left: 12, right: 16, top: 14, bottom: 14 })
     .onClick(() => this.onItemClick(this.song.id))
   }
 }

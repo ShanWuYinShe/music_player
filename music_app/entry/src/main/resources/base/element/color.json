@@ -61,6 +61,22 @@
       "value": "#E2DCCE"
     },
     {
+      "name": "editorial_title",
+      "value": "#141008"
+    },
+    {
+      "name": "editorial_body",
+      "value": "#3A3226"
+    },
+    {
+      "name": "editorial_meta",
+      "value": "#8D8574"
+    },
+    {
+      "name": "editorial_rule",
+      "value": "#D8D0BE"
+    },
+    {
       "name": "viz_fg",
       "value": "#F3EFE4"
     },

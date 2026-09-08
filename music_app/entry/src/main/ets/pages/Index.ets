@@ -8,6 +8,9 @@ import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
 
+/** 金色 accent 文件级常量：@Builder 内引用组件字段需 this 前缀，常量直引更净 */
+const CURRENT_TINT: Resource = $r('app.color.accent');
+
 /** 曲目来源：本地曲库 / 在线服务 */
 enum SourceTab {
   LOCAL = 0,
@@ -111,6 +114,7 @@ struct Index {
       const song = appStore.player.currentSong;
       const hadMini = this.mini !== null;
       this.mini = song === null ? null : {
+        seedId: song.id,
         title: song.title,
         artist: song.artist,
         coverPath: song.coverPath,
@@ -272,9 +276,9 @@ struct Index {
         .padding({ left: 20, right: 20, top: 6, bottom: 2 })
 
         // 列表过滤器（本地源语义，在线隐藏）：分类 + 排序是列表的就近过滤器，
-        // 用轻量文本风放搜索下方
+        // 章节索引文字风放搜索下方
         if (this.sourceTab === SourceTab.LOCAL) {
-          Row({ space: 4 }) {
+          Row({ space: 0 }) {
             this.TabChip(LibraryTab.ALL, '全部')
             this.TabChip(LibraryTab.FAVORITES, '喜欢')
             this.TabChip(LibraryTab.RECENT, '最近')
@@ -282,7 +286,7 @@ struct Index {
             this.SortButton()
           }
           .width('100%')
-          .padding({ left: 20, right: 20, top: 8, bottom: 4 })
+          .padding({ left: 12, right: 12, top: 8, bottom: 4 })
         }
 
         // 源切换 Tabs（系统滑动手势 + 切换动画）：TabContent 不带 tabBar
@@ -351,7 +355,6 @@ struct Index {
             onTapOpen: () => this.pathStack.pushPathByName('player', null),
             onPullDown: () => this.setReach(true)
           })
-            .margin({ left: 12, right: 12, bottom: 12 })
         }
         }
         .width('100%')
@@ -383,22 +386,30 @@ struct Index {
     .navDestination(this.pageMap)
   }
 
-  /** 歌曲列表。加载反馈不插顶部状态行：无旧列表时列表区域由
-   * OnlineStatusView 居中呈现加载态，有旧列表时保留展示（搜索框内
-   * 小 loading 与下拉刷新指示反馈进行中），避免列表内容跳动 */
+  /** 歌曲列表（杂志目录）：行间零间距 + 发丝线分隔（分隔由ListItem边界线
+   * 承担），排版行的密度优势靠这个兑现。加载反馈不插顶部状态行：无旧列表
+   * 时列表区域由 OnlineStatusView 居中呈现加载态，有旧列表时保留展示
+   * （搜索框内小 loading 与下拉刷新指示反馈进行中），避免列表内容跳动 */
   @Builder
   SongList(scroller: Scroller) {
-    List({ space: 8, scroller: scroller }) {
+    List({ space: 0, scroller: scroller }) {
       LazyForEach(this.songSource, (song: SongRecord) => {
         ListItem() {
-          SongItem({
-            song: song,
-            isCurrent: song.id === appStore.player.currentSongId,
-            isPlaying: appStore.player.isPlaying,
-            keyword: this.searchText,
-            onItemClick: (id: string) => appStore.player.playSong(id)
-          })
-            .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
+          Column() {
+            SongItem({
+              song: song,
+              isCurrent: song.id === appStore.player.currentSongId,
+              isPlaying: appStore.player.isPlaying,
+              keyword: this.searchText,
+              onItemClick: (id: string) => appStore.player.playSong(id)
+            })
+              .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
+            // 发丝线：目录行的分隔语言（最后一行由列表底部自然收尾，不画）
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('app.color.editorial_rule'))
+              .margin({ left: 71 })
+          }
         }
         .swipeAction({
           end: {
@@ -430,13 +441,12 @@ struct Index {
   @Builder
   TabChip(tab: LibraryTab, label: string) {
     Text(this.chipCount(tab) > 0 ? `${label} ${this.chipCount(tab)}` : label)
-      .fontSize(13)
-      .fontColor(this.tab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
-      .fontWeight(this.tab === tab ? FontWeight.Medium : FontWeight.Normal)
-      // 轻量文本风：未选中透明底（选中才实心 accent），热区仍由 padding 保 40vp
+      .fontSize(14)
+      .fontColor(this.tab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
+      .fontWeight(this.tab === tab ? FontWeight.Bold : FontWeight.Normal)
+      .letterSpacing(this.tab === tab ? 0.5 : 0)
+      // 文字标签风（章节索引）：无底无框，热区由 padding 保 40vp
       .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-      .borderRadius(15)
-      .backgroundColor(this.tab === tab ? $r('app.color.accent') : Color.Transparent)
       .accessibilityText(`分类${label}`)
       .onClick(() => {
         this.tab = tab;
@@ -445,23 +455,30 @@ struct Index {
       })
   }
 
-  /** 源切换胶囊（Tabs 系统栏不用后，由该行点选驱动受控 index；
-   * 选中态读 sourceTab，滑动切页经 onChange 回写后同样刷新） */
+  /** 源切换（Tabs 系统栏不用后，由该行点选驱动受控 index；
+   * 选中态读 sourceTab，滑动切页经 onChange 回写后同样刷新）。
+   * 排印风：选中项金色加粗 + 下方短金线（书脊标记），无底色 */
   @Builder
   SourceChip(tab: SourceTab, label: string, icon: Resource) {
-    Row({ space: 5 }) {
-      SymbolGlyph(icon)
-        .fontSize(14)
-        .fontColor([this.sourceTab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft')])
-      Text(label)
-        .fontSize(13)
-        .fontColor(this.sourceTab === tab ? $r('app.color.on_accent') : $r('app.color.ink_soft'))
-        .fontWeight(this.sourceTab === tab ? FontWeight.Medium : FontWeight.Normal)
+    Column({ space: 4 }) {
+      Row({ space: 5 }) {
+        SymbolGlyph(icon)
+          .fontSize(14)
+          .fontColor([this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta')])
+        Text(label)
+          .fontSize(15)
+          .fontColor(this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
+          .fontWeight(this.sourceTab === tab ? FontWeight.Bold : FontWeight.Normal)
+      }
+      // 选中项下方短金线（书脊标记）
+      Row()
+        .width(20)
+        .height(2)
+        .borderRadius(1)
+        .backgroundColor(this.sourceTab === tab ? CURRENT_TINT : Color.Transparent)
     }
     // 上下 padding 补足 40vp 触控热区
-    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-    .borderRadius(16)
-    .backgroundColor(this.sourceTab === tab ? $r('app.color.accent') : $r('app.color.surface'))
+    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .accessibilityText(`切换到${label}`)
     .onClick(() => this.switchSource(tab))
   }
@@ -517,16 +534,16 @@ struct Index {
   }
 
   /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口）。
-   * 轻量文本风（透明底），与分类同行右对齐 */
+   * 排印风：meta 色文字，与分类同行右对齐 */
   @Builder
   SortButton() {
     Row({ space: 3 }) {
       Text(sortLabel(this.sortMode))
         .fontSize(13)
-        .fontColor($r('app.color.ink_soft'))
+        .fontColor($r('app.color.editorial_meta'))
       SymbolGlyph($r('sys.symbol.chevron_down'))
         .fontSize(12)
-        .fontColor([$r('app.color.ink_faint')])
+        .fontColor([$r('app.color.editorial_meta')])
     }
     // constraintSize 替代固定高度：热区达标（≥40vp），大字体时随内容撑高
     .constraintSize({ minHeight: 40 })

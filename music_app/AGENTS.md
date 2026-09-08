@@ -31,9 +31,12 @@
   无需手动转 PixelMap）；⑧迷你条频谱经 `onVisibleAreaChange` 随可见性启停；
   ⑨避让区高度入口是 `AppStore.readSafeArea()`，配置变更（旋转/折叠展开，
   `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点；
-  ⑪首页用 Navigation 系统大标题（`NavigationCommonTitle{main,sub}` +
-  `titleMode(Free)`，随列表滚动折叠；大标题缩放只在 ResourceStr/CommonTitle
-  形态生效）+ `menus(CustomBuilder)` 挂导入/设置，内容区不再自绘标题；
+  ⑪首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」与「全部 N」
+  chip 冗余已裁撤，2026-09 用户决策）：首屏直接是源切换胶囊行（导入/设置
+  图标居行尾，顶部避让并入该行 padding `safeTopVp+8`）→ 系统 Search →
+  筛选行 → 列表；封面占位统一走 `components/CoverArt.ets`（无内嵌封面时
+  按曲目 id 哈希派生渐变 + 音符字形：列表/迷你条用浅色 token 板，播放页
+  大封面 `onStage` 变体恒暗 viz token 板——勿再手写「灰块+音符」占位）；
   ⑫本地/在线切换走 `Tabs`（`index` 单向受控 + `onChange` 进 `switchSource`，
   点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证，
   tabBar 用自绘胶囊）；⑬搜索框用系统 `Search`（受控 `value` + `onChange`/

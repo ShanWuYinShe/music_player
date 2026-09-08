@@ -6,6 +6,7 @@ import { playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { VisualizerView } from '../components/VisualizerView';
 import { WaveformSeekbar } from '../components/WaveformSeekbar';
+import { CoverArt } from '../components/CoverArt';
 import { EqIndicator } from '../components/EqIndicator';
 import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
@@ -116,7 +117,6 @@ export struct PlayerPage {
       // 前景层的舞台占位 Blank 承担（见下方 else 分支）
       VisualizerView({
         player: this.player,
-        variant: 'full',
         presetIndex: this.vizPreset,
         active: !this.coverMode
       })
@@ -233,30 +233,15 @@ export struct PlayerPage {
         // 可视化模式点击画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
           Column() {
-            Stack() {
-              if (this.song !== null && this.song.coverPath !== '') {
-                Image(this.song.coverPath)
-                  .width('100%')
-                  .height('100%')
-                  .borderRadius(16)
-                  .objectFit(ImageFit.Cover)
-                  .interpolation(ImageInterpolation.Medium)
-              } else {
-                Column({ space: 14 }) {
-                  SymbolGlyph($r('sys.symbol.music_note_list'))
-                    .fontSize(56)
-                    .fontColor([$r('app.color.viz_fg_soft')])
-                  Text('暂无封面')
-                    .fontSize(12)
-                    .fontColor($r('app.color.viz_fg_faint'))
-                }
-                .width('100%')
-                .height('100%')
-                .borderRadius(16)
-                .backgroundColor('rgba(255,255,255,0.06)')
-                .justifyContent(FlexAlign.Center)
-              }
-            }
+            // 大封面（三处共用 CoverArt）：无封面按曲目 id 派生深色渐变占位
+            // （onStage 变体走恒暗 viz token 族，浅色模式不与深舞台冲突）
+            CoverArt({
+              coverPath: this.song?.coverPath ?? '',
+              seedId: this.song?.id ?? '',
+              radius: 16,
+              glyphSize: 56,
+              onStage: true
+            })
             .aspectRatio(1)
             .width('84%')
             .clip(true)
@@ -569,7 +554,8 @@ export struct PlayerPage {
             Row({ space: 12 }) {
               if (entry.song.id === (this.song?.id ?? '')) {
                 Row() {
-                  EqIndicator({ active: this.isPlaying, color: $r('app.color.accent') })
+                  EqIndicator({ active: this.isPlaying, color: $r('app.color.accent'),
+                    songId: entry.song.id })
                 }
                 .width(22)
                 .justifyContent(FlexAlign.Center)
