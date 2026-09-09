@@ -272,6 +272,7 @@ export struct PlayerPage {
               isPlaying: this.isPlaying,
               coverPath: this.song?.coverPath ?? '',
               seedId: this.song?.id ?? '',
+              fallbackCurrent: this.song?.title ?? '',
               prevCover: this.prevCover,
               nextCover: this.nextCover,
               onSwipeEnd: (offsetX: number): string => this.swipeOutcome(offsetX),

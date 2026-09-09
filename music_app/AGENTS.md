@@ -35,8 +35,10 @@
   chip 冗余已裁撤，2026-09 用户决策）：首屏直接是源切换胶囊行（导入/设置
   图标居行尾，顶部避让并入该行 padding `safeTopVp+8`）→ 系统 Search →
   筛选行 → 列表；封面占位统一走 `components/CoverArt.ets`（无内嵌封面时
-  按曲目 id 哈希派生渐变 + 音符字形：列表/迷你条用浅色 token 板，播放页
-  大封面 `onStage` 变体恒暗 viz token 板——勿再手写「灰块+音符」占位）；
+  以**歌名首字**做大字排版占位：列表/迷你条浅色 token 板 `surface_alt`，
+  播放页纸带 `onStage` 变体恒暗 viz token 板；不做哈希派生渐变——
+  2026-09 用户决策「默认封面放歌名，不要哈希当颜色」——勿再手写
+  「灰块+音符」占位）；
   ⑫本地/在线切换走 `Tabs`（`index` 单向受控 + `onChange` 进 `switchSource`，
   点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证；
   切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色；

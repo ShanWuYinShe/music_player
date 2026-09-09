@@ -25,11 +25,14 @@ function isNetworkUrl(fileName: string): boolean {
   return fileName.startsWith('http://') || fileName.startsWith('https://');
 }
 
-/** 封面预览（路径+种子）：播放页纸带拖动时展示隔壁封面用。
- * 注意 V2 规则——对象字面量必须对应 interface，构造一律走 coverRefOf */
+/** 封面预览（路径+种子+歌名）：播放页纸带拖动时展示隔壁封面用，
+ * 无封面时占位显示歌名首字。注意 V2 规则——对象字面量必须对应
+ * interface，构造一律走 coverRefOf */
 export interface CoverRef {
   path: string;
   seed: string;
+  /** 歌名（占位首字来源） */
+  title: string;
 }
 
 /** 构造 CoverRef（song 为 null 即无预览） */
@@ -37,7 +40,7 @@ function coverRefOf(song: SongRecord | null): CoverRef | null {
   if (song === null) {
     return null;
   }
-  return { path: song.coverPath, seed: song.id };
+  return { path: song.coverPath, seed: song.id, title: song.title };
 }
 
 /**

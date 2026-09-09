@@ -1,40 +1,35 @@
-import { seedFromId, hash01 } from '../common/VisualizerCore';
-
-/** 渐变角度档：曲目 id 哈希散列，避免无封面占位长一个样 */
-const COVER_ANGLES: number[] = [135, 45, 90, 160];
-
 /**
- * 封面统一渲染：有内嵌封面走 Image，无封面按曲目 id 派生渐变占位+
- * 音符字形（首页卡片 / 迷你条 / 播放页大封面三处共用；只用现有 token
- * 色，深浅自动适配）。尺寸由父级定（width/height），内部 100% 填充；
- * 圆角与字形大小按场景传入。
+ * 封面统一渲染：有内嵌封面走 Image，无封面以歌名首字做大字排版占位
+ * （首页列表/迷你条/播放页纸带三处共用）。尺寸由父级定（width/height），
+ * 内部 100% 填充；圆角与字号按场景传入。
+ * 占位底色恒定（浅色 surface_alt / 深舞台恒暗 viz token），不做哈希渐变——
+ * 用户决策 2026-09：默认封面放歌名，不要哈希派生颜色。
  */
 @ComponentV2
 export struct CoverArt {
   @Param @Require coverPath: string;
+  /** 占位首字来源（歌名首字符）：空串时不渲染占位字 */
   @Param @Require seedId: string;
+  /** 占位大字（歌名首字）：列表/迷你条短、播放页大 */
+  @Param fallbackText: string = '';
   @Param radius: number = 14;
   @Param glyphSize: number = 22;
   /** 播放页舞台变体：舞台恒定深底（媒体页惯例），占位走恒暗 viz token 族，
    * 浅色系统模式下不与深舞台冲突 */
   @Param onStage: boolean = false;
 
-  /** 渐变种子（一次哈希，多处复用：角度档 + 方向反转） */
+  /** 歌名首字：取第一个字符（含代理对保护——emoji 等增补平面字符按
+   * code point 取，避免劈成乱码）；无字时不显示 */
   @Computed
-  get gradSeed(): number {
-    return seedFromId(this.seedId);
-  }
-
-  /** 渐变角度档（哈希取模循环） */
-  @Computed
-  get angleSlot(): number {
-    return this.gradSeed % COVER_ANGLES.length;
-  }
-
-  /** 渐变方向是否反转（散列高位 bit，保证相邻曲目不撞脸） */
-  @Computed
-  get reversed(): boolean {
-    return hash01(this.gradSeed) > 0.5;
+  get initialChar(): string {
+    if (this.fallbackText === '') {
+      return '';
+    }
+    const code = this.fallbackText.codePointAt(0);
+    if (code === undefined) {
+      return '';
+    }
+    return String.fromCodePoint(code);
   }
 
   build() {
@@ -48,35 +43,29 @@ export struct CoverArt {
         .interpolation(ImageInterpolation.Medium)
     } else if (this.onStage) {
       Column() {
-        SymbolGlyph($r('sys.symbol.music_note_list'))
+        Text(this.initialChar)
           .fontSize(this.glyphSize)
-          .fontColor([$r('app.color.viz_fg_soft')])
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.viz_fg_soft'))
+          .maxLines(1)
       }
       .width('100%')
       .height('100%')
       .borderRadius(this.radius)
-      .linearGradient({
-        angle: COVER_ANGLES[this.angleSlot],
-        colors: this.reversed ?
-          [[$r('app.color.viz_line'), 0], [$r('app.color.viz_fg_faint'), 1]] :
-          [[$r('app.color.viz_fg_faint'), 0], [$r('app.color.viz_line'), 1]]
-      })
+      .backgroundColor($r('app.color.viz_fg_faint'))
       .justifyContent(FlexAlign.Center)
     } else {
       Column() {
-        SymbolGlyph($r('sys.symbol.music_note_list'))
+        Text(this.initialChar)
           .fontSize(this.glyphSize)
-          .fontColor([$r('app.color.ink_soft')])
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.ink_soft'))
+          .maxLines(1)
       }
       .width('100%')
       .height('100%')
       .borderRadius(this.radius)
-      .linearGradient({
-        angle: COVER_ANGLES[this.angleSlot],
-        colors: this.reversed ?
-          [[$r('app.color.surface_alt'), 0], [$r('app.color.accent_soft'), 1]] :
-          [[$r('app.color.accent_soft'), 0], [$r('app.color.surface_alt'), 1]]
-      })
+      .backgroundColor($r('app.color.surface_alt'))
       .justifyContent(FlexAlign.Center)
     }
   }

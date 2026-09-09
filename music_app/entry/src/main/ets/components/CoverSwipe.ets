@@ -50,6 +50,8 @@ export struct CoverSwipe {
   @Param coverPath: string = '';
   /** 当前曲 id（封面种子 + 切歌检测） */
   @Param seedId: string = '';
+  /** 当前曲歌名（占位首字来源；相邻格经 CoverRef.title 传入） */
+  @Param fallbackCurrent: string = '';
   /** 相邻封面预览（父组件状态订阅经 peek 下发；随机/空队列/5 秒规则为 null） */
   @Param nextCover: CoverRef | null = null;
   @Param prevCover: CoverRef | null = null;
@@ -218,12 +220,12 @@ export struct CoverSwipe {
     return this.prevCover;
   }
 
-  /** 中格内容：吸附中 = 旧当前曲；否则 = 当前曲 */
+  /** 中格内容：吸附中 = 旧当前曲；否则 = 当前曲（含标题兜底字） */
   private midCell(): CoverRef | null {
     if (this.rotated) {
       return this.prevCover;
     }
-    return { path: this.coverPath, seed: this.seedId };
+    return { path: this.coverPath, seed: this.seedId, title: this.fallbackCurrent };
   }
 
   /** 中格透明度：正常随 swapFade/播放态；吸附中滑出者恒 1（暗态由
@@ -239,7 +241,7 @@ export struct CoverSwipe {
    * 否则 = 下一首 */
   private rightCell(): CoverRef | null {
     if (this.rotated) {
-      return { path: this.coverPath, seed: this.seedId };
+      return { path: this.coverPath, seed: this.seedId, title: this.fallbackCurrent };
     }
     return this.nextCover;
   }
@@ -257,7 +259,8 @@ export struct CoverSwipe {
             CoverArt({
               coverPath: (this.leftCell() as CoverRef).path,
               seedId: (this.leftCell() as CoverRef).seed,
-              radius: 16, glyphSize: 56, onStage: true
+              fallbackText: (this.leftCell() as CoverRef).title,
+              radius: 16, glyphSize: 88, onStage: true
             })
               .width(this.widthVp)
               .height(this.widthVp)
@@ -273,7 +276,8 @@ export struct CoverSwipe {
             CoverArt({
               coverPath: (this.midCell() as CoverRef).path,
               seedId: (this.midCell() as CoverRef).seed,
-              radius: 16, glyphSize: 56, onStage: true
+              fallbackText: (this.midCell() as CoverRef).title,
+              radius: 16, glyphSize: 88, onStage: true
             })
               .width(this.widthVp)
               .height(this.widthVp)
@@ -290,7 +294,8 @@ export struct CoverSwipe {
             CoverArt({
               coverPath: (this.rightCell() as CoverRef).path,
               seedId: (this.rightCell() as CoverRef).seed,
-              radius: 16, glyphSize: 56, onStage: true
+              fallbackText: (this.rightCell() as CoverRef).title,
+              radius: 16, glyphSize: 88, onStage: true
             })
               .width(this.widthVp)
               .height(this.widthVp)

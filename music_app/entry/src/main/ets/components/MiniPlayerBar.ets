@@ -6,7 +6,7 @@ const BAR_HEIGHT = 62;
 /** 迷你条展示镜像：由 Index 经 onStateChanged 回调维护的 @Local 整体替换
  * 传入（@Local→@Param 链路可靠）；进度/时长仍直读 player 的 @Trace */
 export interface MiniInfo {
-  /** 渐变占位种子：曲目 id（无封面时 CoverArt 按此派生渐变） */
+  /** 占位首字来源曲目 id（组件 key/语义标识；占位字用 title） */
   seedId: string;
   title: string;
   artist: string;
@@ -101,8 +101,8 @@ export struct MiniPlayerBar {
         Stack({ alignContent: Alignment.TopStart }) {
           Row({ space: 12 }) {
             // 封面也承担打开播放页（行点击已下沉到文本区，按钮不再被冒泡误带跳页：
-            // ClickEvent 无 stopPropagation，只能结构规避）
-            CoverArt({ coverPath: this.info.coverPath, seedId: this.info.seedId, radius: 8, glyphSize: 20 })
+            // ClickEvent 无 stopPropagation，只能结构规避）；无封面占位放歌名首字
+            CoverArt({ coverPath: this.info.coverPath, seedId: this.info.seedId, fallbackText: this.info.title, radius: 8, glyphSize: 17 })
               .width(40)
               .height(40)
               .onClick(() => this.onTapOpen())

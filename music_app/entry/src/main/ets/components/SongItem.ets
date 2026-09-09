@@ -61,8 +61,9 @@ export struct SongItem {
         .borderRadius(1.5)
         .backgroundColor(this.isCurrent ? CURRENT_COLOR : Color.Transparent)
 
-      // 封面缩为行首小方片：排版行的节奏点，不再喧宾夺主
-      CoverArt({ coverPath: this.song.coverPath, seedId: this.song.id, radius: 8, glyphSize: 18 })
+      // 封面缩为行首小方片：排版行的节奏点，不再喧宾夺主；
+      // 无封面占位放歌名首字（大字排版，不搞哈希渐变）
+      CoverArt({ coverPath: this.song.coverPath, seedId: this.song.id, fallbackText: this.song.title, radius: 8, glyphSize: 15 })
         .width(COVER_SIZE)
         .height(COVER_SIZE)
 
