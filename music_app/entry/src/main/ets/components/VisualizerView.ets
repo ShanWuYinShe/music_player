@@ -16,7 +16,6 @@
 import displaySync from '@ohos.graphics.displaySync';
 import sensor from '@ohos.sensor';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { PlayerController } from '../player/PlayerController';
 import {
   seedFromId, synthSpectrum, beatEnvelope, bpmFromSeed, hash01, hslToRgb, normalizeTilt,
   normalizeSpin, wrapAngleDelta, accelKickLevel,
@@ -45,7 +44,11 @@ const FRAME_MIN_INTERVAL = 25;
 
 @ComponentV2
 export struct VisualizerView {
-  @Param @Require player: PlayerController;
+  /** 播放态 @Param 镜像（父页面经状态订阅维护后下发；跨单例直读
+   * player @Trace 在真机上不可靠，启停/切歌漏触发即后台空烧 GPU） */
+  @Param isPlaying: boolean = false;
+  /** 当前曲 id @Param 镜像（种子/时钟重置依据，同上） */
+  @Param songId: string = '';
   /** 当前风格号（父页面持有，经顶栏魔法棒菜单切换；@Param 回流驱动渐变） */
   @Param presetIndex: number = 0;
   /** 舞台是否激活：false 时停帧不渲染（播放页封面模式——封面与可视化互斥，
@@ -55,6 +58,8 @@ export struct VisualizerView {
   private presetTrans: number = 1;
 
   private ds: displaySync.DisplaySync | null = null;
+  /** frame 具名回调：匿名闭包无法 off('frame') 注销，重进会堆积回调 */
+  private frameCb: () => void = () => this.frame();
 
   private running = false;
   private disposed = false;
@@ -94,16 +99,20 @@ export struct VisualizerView {
     this.ds = displaySync.create();
     const range: ExpectedFrameRateRange = { min: 0, max: 30, expected: 30 };
     this.ds.setExpectedFrameRateRange(range);
-    this.ds.on('frame', () => this.frame());
+    this.ds.on('frame', this.frameCb);
   }
 
   aboutToDisappear(): void {
     this.disposed = true;
     this.stopLoop();
+    if (this.ds !== null) {
+      this.ds.off('frame', this.frameCb);
+      this.ds = null;
+    }
     this.syncSensor();
   }
 
-  @Monitor('player.isPlaying', 'player.currentSongId')
+  @Monitor('isPlaying', 'songId')
   onPlayerStateChange(): void {
     this.syncState();
   }
@@ -197,7 +206,7 @@ export struct VisualizerView {
       this.stopLoop();
       return;
     }
-    const id = this.player.currentSongId;
+    const id = this.songId;
     if (id !== this.lastSongId) {
       this.lastSongId = id;
       this.seed = seedFromId(id);
@@ -209,7 +218,7 @@ export struct VisualizerView {
       this.stopLoop();
       return;
     }
-    if (this.player.isPlaying) {
+    if (this.isPlaying) {
       this.startLoop();
     } else {
       this.fadeDeadline = Date.now() + FADE_MS;
@@ -258,7 +267,7 @@ export struct VisualizerView {
     }
     const dt = Math.min(now - this.lastNow, 66);
     this.lastNow = now;
-    const playing = this.player.isPlaying;
+    const playing = this.isPlaying;
     if (playing) {
       this.playClock += dt;
     }

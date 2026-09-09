@@ -1,12 +1,12 @@
-import { promptAction, SymbolGlyphModifier, curves } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
-import { playModeLabel, playModeSymbol } from '../model/PlayMode';
+import { PlayMode, playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
 import { VisualizerView } from '../components/VisualizerView';
 import { WaveformSeekbar } from '../components/WaveformSeekbar';
-import { CoverArt } from '../components/CoverArt';
+import { CoverSwipe, COVER_SWIPE_THRESHOLD } from '../components/CoverSwipe';
 import { EqIndicator } from '../components/EqIndicator';
 import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
@@ -49,20 +49,26 @@ export struct PlayerPage {
   /** 舞台双态（互斥）：true 封面舞台（默认，Poweramp 习惯，可视化停渲染）；
    * false 纯可视化全屏 */
   @Local coverMode: boolean = true;
-  /** 封面跟手位移（Poweramp swipe 切歌）：拖动中绑定 translate，松手判定 */
-  @Local coverDragX: number = 0;
+  /** 播放模式 @Local 镜像：经状态订阅维护（player 的 @Trace 在真机上不驱动
+   * glyph/文案插值，已踩坑； cyclePlayMode/setVolume/启停定时器末尾会调
+   * notifyState，见 PlayerController 前提契约） */
+  @Local playMode: PlayMode = PlayMode.SEQUENCE;
+  /** 音量 @Local 镜像（0~1）：Slider 渲染读它，不直读 player */
+  @Local volume: number = 1;
+  /** 定时剩余秒数 @Local 镜像（-1 无定时；每秒 tick 不通知，倒计时只在启停时刷新） */
+  @Local sleepRemainSec: number = -1;
+  /** 音量拖动预览（-1 无拖动）：Moving 只写它不调 setVolume，End 才真正生效 */
+  @Local volumePreview: number = -1;
   private volumeBeforeMute: number = 1;
 
-  /** swipe 判定阈值（vp）：位移超过才切歌——与点击/轻扫误触区分 */
-  private static readonly SWIPE_THRESHOLD: number = 60;
+  /** swipe 判定阈值（vp）由 CoverSwipe 导出：封面路径在子组件内判定，
+   * 可视化舞台手势（无封面场景）在此判定，二者同值 */
+  private static readonly SWIPE_THRESHOLD: number = COVER_SWIPE_THRESHOLD;
 
-  /** Poweramp 手势：横向滑动结束的切歌判定（左滑下一首 / 右滑上一首）。
-   * 封面位移以弹簧曲线回弹归零（HarmonyOS 手势动效规范：跟手场景以
-   * 物理模型收尾），避免瞬间消失的生硬感 */
+  /** 横向滑动结束的切歌判定（左滑下一首 / 右滑上一首）。
+   * 封面路径：CoverSwipe 已做阈值判定与滑出/滑入过渡，这里只做实际切歌；
+   * 可视化路径：无封面过渡，在此做阈值判定 */
   private onSwipeEnd(offsetX: number): void {
-    this.getUIContext().animateTo({ curve: curves.springMotion(0.4, 0.8) }, () => {
-      this.coverDragX = 0;
-    });
     if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
       this.player.next();
     } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
@@ -77,6 +83,9 @@ export struct PlayerPage {
       this.song = id === '' ? null : this.player.getSong(id);
       this.isPlaying = this.player.isPlaying;
       this.isFavoriteNow = id !== '' && appStore.userData.isFavorite(id);
+      this.playMode = this.player.playMode;
+      this.volume = this.player.volume;
+      this.sleepRemainSec = this.player.sleepRemainSec;
     };
     this.stateListener(); // 进入即同步一次当前状态
     this.player.addStateListener(this.stateListener);
@@ -116,7 +125,8 @@ export struct PlayerPage {
       // 注意其原生表面区域不接收点击——可视化舞台"点画面回封面"由
       // 前景层的舞台占位 Blank 承担（见下方 else 分支）
       VisualizerView({
-        player: this.player,
+        isPlaying: this.isPlaying,
+        songId: this.song?.id ?? '',
         presetIndex: this.vizPreset,
         active: !this.coverMode
       })
@@ -233,40 +243,23 @@ export struct PlayerPage {
         // 可视化模式点击画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
           Column() {
-            // 大封面（三处共用 CoverArt）：无封面按曲目 id 派生深色渐变占位
-            // （onStage 变体走恒暗 viz token 族，浅色模式不与深舞台冲突）
-            CoverArt({
+            // 大封面滑动容器（跟手位移下沉子组件 @Local，拖动不重建页面；
+            // 链上无隐式 animation，跟手即时；滑动成功旧滑出新滑入，
+            // 未达阈值弹簧回弹；点按切入可视化舞台）
+            CoverSwipe({
+              isPlaying: this.isPlaying,
               coverPath: this.song?.coverPath ?? '',
               seedId: this.song?.id ?? '',
-              radius: 16,
-              glyphSize: 56,
-              onStage: true
+              onSwipeEnd: (offsetX: number): void => this.onSwipeEnd(offsetX),
+              onTap: (): void => {
+                // 点按大封面切入可视化舞台（可视化里点画面回封面）；返回曲库
+                // 只走左上箭头/系统侧滑，内容区点击不做导航，避免轻扫切歌
+                // 未达阈值被判成点击而误退回首页
+                this.coverMode = false;
+              }
             })
             .aspectRatio(1)
             .width('84%')
-            .clip(true)
-            .scale(this.isPlaying ? { x: 1, y: 1 } : { x: 0.94, y: 0.94 })
-            .opacity(this.isPlaying ? 1.0 : 0.7)
-            .animation({ duration: 360, curve: Curve.EaseOut })
-            // Poweramp 招牌手势：封面左右滑动切歌（跟手位移，松手判定±阈值）
-            .translate({ x: this.coverDragX })
-            .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
-            .gesture(
-              PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
-                .onActionUpdate((e: GestureEvent): void => {
-                  this.coverDragX = e.offsetX;
-                })
-                .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
-                .onActionCancel((): void => {
-                  this.coverDragX = 0;
-                })
-            )
-            .onClick(() => {
-              // 点按大封面切入可视化舞台（可视化里点画面切风格，回封面走
-              // 顶栏按钮）；返回曲库只走左上箭头/系统侧滑，内容区点击不做
-              // 导航，避免轻扫切歌未达阈值被判成点击而误退回首页
-              this.coverMode = false;
-            })
           }
           .layoutWeight(1)
           .width('100%')
@@ -363,15 +356,15 @@ export struct PlayerPage {
           // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
           // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
           Row({ space: 30 }) {
-          SymbolGlyph(playModeSymbol(this.player.playMode))
+          SymbolGlyph(playModeSymbol(this.playMode))
             .fontSize(24)
             .fontColor([$r('app.color.viz_fg')])
             .padding(8)
-            .accessibilityText(`播放模式，当前${playModeLabel(this.player.playMode)}`)
+            .accessibilityText(`播放模式，当前${playModeLabel(this.playMode)}`)
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
             .onClick(() => {
               this.player.cyclePlayMode();
-              promptAction.showToast({ message: playModeLabel(this.player.playMode) });
+              promptAction.showToast({ message: playModeLabel(this.playMode) });
             })
 
           SymbolGlyph($r('sys.symbol.backward_end_fill'))
@@ -423,12 +416,13 @@ export struct PlayerPage {
             .fontSize(20)
             .fontColor([$r('app.color.viz_fg')])
             .padding(10)
-            .accessibilityText(this.player.volume > 0 ? '静音' : '恢复音量')
+            .accessibilityText(this.volume > 0 ? '静音' : '恢复音量')
             .margin({ left: -10 })
             .onClick(() => this.toggleMute())
 
           Slider({
-            value: Math.round(this.player.volume * 100),
+            value: this.volumePreview >= 0 ?
+              Math.round(this.volumePreview * 100) : Math.round(this.volume * 100),
             min: 0,
             max: 100,
             style: SliderStyle.OutSet
@@ -439,7 +433,11 @@ export struct PlayerPage {
             .trackColor($r('app.color.viz_line'))
             .blockColor($r('app.color.accent'))
             .onChange((value: number, mode: SliderChangeMode) => {
-              if (mode === SliderChangeMode.Moving || mode === SliderChangeMode.End) {
+              if (mode === SliderChangeMode.Moving) {
+                // 拖动中只写本地预览，不调 setVolume（避免每帧跨单例写 @Trace）
+                this.volumePreview = value / 100;
+              } else if (mode === SliderChangeMode.End) {
+                this.volumePreview = -1;
                 this.player.setVolume(value / 100);
               }
             })
@@ -447,10 +445,10 @@ export struct PlayerPage {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.timer'))
               .fontSize(16)
-              .fontColor([this.player.sleepRemainSec >= 0 ?
+              .fontColor([this.sleepRemainSec >= 0 ?
                 $r('app.color.accent') : $r('app.color.viz_fg_faint')])
-            if (this.player.sleepRemainSec >= 0) {
-              Text(formatTime(this.player.sleepRemainSec * 1000))
+            if (this.sleepRemainSec >= 0) {
+              Text(formatTime(this.sleepRemainSec * 1000))
                 .fontSize(11)
                 .fontColor($r('app.color.accent'))
             }
@@ -522,13 +520,14 @@ export struct PlayerPage {
     return 0;
   }
 
-  /** 半模态播放队列 */
+  /** 半模态播放队列（queueEntries 为 @Computed：同次 build 多次读取共享
+   * 同一份缓存快照，无重复计算；真 LazyForEach 重构待真机验证后再定） */
   @Builder
   QueueSheet() {
     Column() {
       // 汇总行
       Row({ space: 8 }) {
-        Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.player.playMode)}`)
+        Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.playMode)}`)
           .fontSize(12)
           .fontColor($r('app.color.ink_faint'))
         if (this.player.playNextCount > 0) {
@@ -631,9 +630,9 @@ export struct PlayerPage {
         MenuItem({ content: '60 分钟后停止' })
           .onClick((): void => this.applySleepTimer(60))
       }
-      if (this.player.sleepRemainSec >= 0) {
+      if (this.sleepRemainSec >= 0) {
         MenuItemGroup() {
-          MenuItem({ content: `取消定时（剩 ${formatTime(this.player.sleepRemainSec * 1000)}）` })
+          MenuItem({ content: `取消定时（剩 ${formatTime(this.sleepRemainSec * 1000)}）` })
             .onClick(() => {
               this.player.cancelSleepTimer();
               promptAction.showToast({ message: '已取消定时关闭' });
@@ -678,11 +677,12 @@ export struct PlayerPage {
     promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
   }
 
+  /** 音量图标：渲染读 @Local 镜像（真机上 player @Trace 不驱动属性插值） */
   private volumeIcon(): Resource {
-    if (this.player.volume <= 0) {
+    if (this.volume <= 0) {
       return $r('sys.symbol.speaker_slash');
     }
-    if (this.player.volume < 0.5) {
+    if (this.volume < 0.5) {
       return $r('sys.symbol.speaker_wave_1_fill');
     }
     return $r('sys.symbol.speaker_wave_2_fill');

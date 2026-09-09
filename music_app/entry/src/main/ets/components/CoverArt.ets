@@ -19,16 +19,22 @@ export struct CoverArt {
    * 浅色系统模式下不与深舞台冲突 */
   @Param onStage: boolean = false;
 
+  /** 渐变种子（一次哈希，多处复用：角度档 + 方向反转） */
+  @Computed
+  get gradSeed(): number {
+    return seedFromId(this.seedId);
+  }
+
   /** 渐变角度档（哈希取模循环） */
   @Computed
   get angleSlot(): number {
-    return seedFromId(this.seedId) % COVER_ANGLES.length;
+    return this.gradSeed % COVER_ANGLES.length;
   }
 
   /** 渐变方向是否反转（散列高位 bit，保证相邻曲目不撞脸） */
   @Computed
   get reversed(): boolean {
-    return hash01(seedFromId(this.seedId)) > 0.5;
+    return hash01(this.gradSeed) > 0.5;
   }
 
   build() {

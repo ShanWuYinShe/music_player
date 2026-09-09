@@ -6,6 +6,9 @@ const BAR_COUNT = 52;
 /** 波形高度区间（vp）：min 保证可见，max 在 32 以内与控制区间协调 */
 const BAR_MIN_VP = 5;
 const BAR_MAX_VP = 30;
+/** 进度自驱节流（毫秒）：timeUpdate 高频写 @Trace，真机上属性插值不跟随，
+ * 且 52 柱逐 tick diff 太贵；4Hz 自驱，已点亮柱数变化时才刷新 */
+const PROGRESS_TICK_MS = 250;
 
 /**
  * 波形进度条（Poweramp 招牌交互）：以曲目 id 为种子的确定性伪波形，
@@ -23,6 +26,11 @@ export struct WaveformSeekbar {
   @Param trackColor: Resource = $r('app.color.viz_line');
   /** 拖动中的局部预览比例（-1 无拖动），避免与 timeUpdate 抖动 */
   @Local dragFraction: number = -1;
+  /** 已点亮柱数：250ms 自驱/拖动中更新，变化才赋值触发刷新（渲染读它，
+   * 不直读高频 currentTime——真机属性插值不跟随，且省 52 柱逐 tick diff） */
+  @Local litBars: number = 0;
+  /** 进度自驱定时器 id（-1 未启动） */
+  private progressTimer: number = -1;
   /** 组件宽度（vp），手势换算比例用 */
   @Local widthVp: number = 1;
   /** 拖动起始时的进度比例（offsetX 为累计偏移，须从起点换算） */
@@ -52,6 +60,32 @@ export struct WaveformSeekbar {
     this.player.seek(Math.floor(fraction * this.player.duration));
   }
 
+  aboutToAppear(): void {
+    this.refreshLit(this.fraction());
+    this.progressTimer = setInterval(() => {
+      // 定时器回调内读 @Trace 安全（非渲染上下文）；拖动预览期间跳过，
+      // 预览由手势回调直接驱动 litBars
+      if (this.dragFraction < 0) {
+        this.refreshLit(this.fraction());
+      }
+    }, PROGRESS_TICK_MS);
+  }
+
+  aboutToDisappear(): void {
+    if (this.progressTimer >= 0) {
+      clearInterval(this.progressTimer);
+      this.progressTimer = -1;
+    }
+  }
+
+  /** 按比例折算已点亮柱数，变化才赋值（一次 @Local 写只刷边界柱） */
+  private refreshLit(f: number): void {
+    const lit = Math.floor(Math.min(1, Math.max(0, f)) * BAR_COUNT);
+    if (lit !== this.litBars) {
+      this.litBars = lit;
+    }
+  }
+
   build() {
     Row({ space: 1.5 }) {
       ForEach(this.bars, (h: number, index: number) => {
@@ -60,9 +94,8 @@ export struct WaveformSeekbar {
           .layoutWeight(1)
           .height(BAR_MIN_VP + h * (BAR_MAX_VP - BAR_MIN_VP))
           .borderRadius(1)
-          .backgroundColor(index < this.fraction() * BAR_COUNT ? this.playedColor : this.trackColor)
-          .animation({ duration: 120 })
-      }, (h: number, index: number) => `${index}_${h.toFixed(3)}`)
+          .backgroundColor(index < this.litBars ? this.playedColor : this.trackColor)
+      }, (_h: number, index: number) => index.toString())
     }
     .width('100%')
     // 触控热区加高到 48vp：柱体仍 ≤30vp 视觉高度，容器上下留白居中，
@@ -87,6 +120,8 @@ export struct WaveformSeekbar {
         .onActionUpdate((event: GestureEvent) => {
           if (this.widthVp > 0) {
             this.dragFraction = Math.min(1, Math.max(0, this.startFraction + event.offsetX / this.widthVp));
+            // 拖动预览即时驱动点亮柱（不等 250ms tick，拇指跟手）
+            this.refreshLit(this.dragFraction);
           }
         })
         .onActionEnd(() => {
@@ -94,6 +129,7 @@ export struct WaveformSeekbar {
             this.seekTo(this.dragFraction);
           }
           this.dragFraction = -1;
+          this.refreshLit(this.fraction());
         })
     )
   }
