@@ -32,6 +32,13 @@ export interface CoverRef {
   seed: string;
 }
 
+/** 相邻预览对（按下瞬间父组件同步快照返回，拖动全程冻结用它——@Param
+ * 下发是异步的，按下时读必是旧值） */
+export interface CoverPair {
+  prev: CoverRef | null;
+  next: CoverRef | null;
+}
+
 /** 构造 CoverRef（song 为 null 即无预览） */
 function coverRefOf(song: SongRecord | null): CoverRef | null {
   if (song === null) {
@@ -307,7 +314,9 @@ export class PlayerController {
     return coverRefOf(this.songs[(index + 1) % this.songs.length]);
   }
 
-  /** 上一首预览（previous 不消费插播队列，纯按索引；随机给 null） */
+  /** 上一首预览（previous 不消费插播队列，纯按索引；随机给 null）。
+   * 含 5 秒回曲首规则：播放超 5 秒右滑只回曲首不换轨，此时无预览
+   * （与 previous() 语义对齐，释放后 'same' 回弹才不显得 preview 在骗人） */
   peekPrevCover(): CoverRef | null {
     if (this.songs.length === 0) {
       return null;
@@ -317,6 +326,9 @@ export class PlayerController {
       return coverRefOf(this.songs[0]);
     }
     if (this.playMode === PlayMode.SHUFFLE) {
+      return null;
+    }
+    if (this.currentTime > 5000) {
       return null;
     }
     return coverRefOf(this.songs[(index - 1 + this.songs.length) % this.songs.length]);

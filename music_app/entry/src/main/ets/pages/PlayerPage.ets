@@ -1,6 +1,6 @@
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
-import { PlayerController, CoverRef } from '../player/PlayerController';
+import { PlayerController, CoverPair, CoverRef } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
 import { PlayMode, playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
@@ -94,6 +94,15 @@ export struct PlayerPage {
     }
     const after = this.player.currentSongId;
     return after === '' || after === before ? 'same' : after;
+  }
+
+  /** 封面按下快照（CoverSwipe 事件，返回值同步给子组件冻结）：事件回调内
+   * 直接读 player 是新鲜值（含 5 秒回曲首规则），不依赖 @Param 异步下发；
+   * 顺手刷新镜像，参数通道也保持新鲜 */
+  private refreshCovers(): CoverPair {
+    this.prevCover = this.player.peekPrevCover();
+    this.nextCover = this.player.peekNextCover();
+    return { prev: this.prevCover, next: this.nextCover };
   }
 
   aboutToAppear(): void {
@@ -265,15 +274,17 @@ export struct PlayerPage {
         // 可视化模式点击画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
           Column() {
-            // 大封面滑动 pager（三层：live 跟手 + 快照滑出 + 隔壁预览跟进；
+            // 大封面滑动 pager（live 跟手 + 按下冻结快照 + 双侧预览跟进；
             // 链上无隐式 animation，跟手即时；预判命中滑出/归位，曲目未变
-            // 回弹，无预览/预判落空淡入；点按切入可视化舞台）
+            // 回弹，无预览/预判落空淡入；轻快 flick 低位移也成歌；
+            // 点按切入可视化舞台）
             CoverSwipe({
               isPlaying: this.isPlaying,
               coverPath: this.song?.coverPath ?? '',
               seedId: this.song?.id ?? '',
               prevCover: this.prevCover,
               nextCover: this.nextCover,
+              onPressCovers: (): CoverPair => this.refreshCovers(),
               onSwipeEnd: (offsetX: number): string => this.swipeOutcome(offsetX),
               onTap: (): void => {
                 // 点按大封面切入可视化舞台（可视化里点画面回封面）；返回曲库
