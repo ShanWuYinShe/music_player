@@ -4,7 +4,7 @@ import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
 import { SongItem } from '../components/SongItem';
-import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
+import { MiniPlayerBar, MiniInfo, MINI_BAR_HEIGHT } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
 
@@ -374,22 +374,21 @@ struct Index {
           this.BottomToolbar()
         }
 
-        // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）：
+        // 底部迷你播放条（常驻：无播放曲目时显示占位态，不再随曲目显隐
+        // 造成 UI 跳动——用户决策）。其内容经 @Local 镜像（见 mini 字段注释）；
         // 其上的手势 = 半屏拇指遥控：横滑切分类 / 画 <> 切源
-        if (this.mini !== null) {
-          MiniPlayerBar({
-            player: appStore.player,
-            info: this.mini,
-            onTapOpen: () => this.pathStack.pushPathByName('player', null),
-            onSwipeTab: (direction: number) => this.cycleTab(direction),
-            onSwipeSource: (direction: number) => this.cycleSource(direction)
-          })
-        }
+        MiniPlayerBar({
+          player: appStore.player,
+          info: this.mini,
+          onTapOpen: () => this.pathStack.pushPathByName('player', null),
+          onSwipeTab: (direction: number) => this.cycleTab(direction),
+          onSwipeSource: (direction: number) => this.cycleSource(direction)
+        })
         }
         .width('100%')
         .height('100%')
-        // 顶部避让已并入源切换行 padding（safeTopVp+8），此处只留底部避让
-        // （背景层仍延伸进系统栏）
+        // 顶部避让已并入源切换行 padding（safeTopVp+8）；底部除系统栏避让
+        // 外再留出迷你条高度（常驻），避免列表最后一行被压住
         .padding({ bottom: appStore.safeBottomVp })
       }
       .width('100%')
@@ -435,7 +434,9 @@ struct Index {
     // TabContent 非线性布局：layoutWeight 失效致列表按内容高居中、
     // 上方留白，必须足高
     .height('100%')
-    .padding({ left: 16, right: 16, bottom: 12 })
+    // 底部留白含常驻迷你条高度：列表最后一行不被压住（迷你条不再随曲目
+    // 显隐，留白也要常驻）
+    .padding({ left: 16, right: 16, bottom: 12 + MINI_BAR_HEIGHT })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
       // 滚过约一屏半才在拇指区露出回顶按钮（阈值太小稍滚即出，抢底部拇指区），

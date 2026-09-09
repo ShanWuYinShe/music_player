@@ -3,6 +3,10 @@ import { CoverArt } from './CoverArt';
 
 const BAR_HEIGHT = 62;
 
+/** 条高（vp）：导出供首页给列表留底部空间——迷你条常驻，不再随有无播放
+ * 曲目显隐（用户决策），列表须常留这段高度避免最后一行被压住 */
+export const MINI_BAR_HEIGHT: number = BAR_HEIGHT;
+
 /** 迷你条展示镜像：由 Index 经 onStateChanged 回调维护的 @Local 整体替换
  * 传入（@Local→@Param 链路可靠）；进度/时长仍直读 player 的 @Trace */
 export interface MiniInfo {
@@ -15,13 +19,16 @@ export interface MiniInfo {
 }
 
 /**
- * 底部迷你播放条：封面 + 歌名 + 播放/暂停 + 下一首，顶部细线为实时播放进度，
- * 悬浮磨砂胶囊，点击整条进入播放页。
+ * 底部迷你播放条（常驻）：封面 + 歌名 + 播放/暂停 + 下一首，顶部细线为实时
+ * 播放进度，磨砂通栏，点击整条进入播放页。
+ * 无播放曲目时（info = null）显示占位态：保留封面位与条高，标题为「未在
+ * 播放」，播放/下一首禁用——常驻不消失，UI 不跳动。
  */
 @ComponentV2
 export struct MiniPlayerBar {
   @Param @Require player: PlayerController;
-  @Param @Require info: MiniInfo;
+  /** 当前曲镜像；null = 无播放曲目（占位态） */
+  @Param info: MiniInfo | null = null;
   @Event onTapOpen: () => void = () => {
   };
   /** 水平滑 = 分类标签切换（全部→喜欢→最近循环，方向即顺序），仅本地源 */
@@ -32,10 +39,15 @@ export struct MiniPlayerBar {
   };
 
   private progressPercent(): number {
-    if (this.player.duration <= 0) {
+    if (this.info === null || this.player.duration <= 0) {
       return 0;
     }
     return Math.min(100, this.player.currentTime / this.player.duration * 100);
+  }
+
+  /** 是否有可操作的曲目（占位态下禁用播放/下一首） */
+  private hasTrack(): boolean {
+    return this.info !== null;
   }
 
   /** 手势轨迹采样点（[相对起点的 dx, dy]，间隔 >6vp 记一条，上限 32 点）：
@@ -91,19 +103,24 @@ export struct MiniPlayerBar {
           Row({ space: 12 }) {
             // 封面也承担打开播放页（行点击已下沉到文本区，按钮不再被冒泡误带跳页：
             // ClickEvent 无 stopPropagation，只能结构规避）；无封面占位放歌名首字
-            CoverArt({ coverPath: this.info.coverPath, seedId: this.info.seedId, fallbackText: this.info.title, radius: 8, glyphSize: 17 })
+            CoverArt({
+              coverPath: this.info?.coverPath ?? '',
+              seedId: this.info?.seedId ?? '',
+              fallbackText: this.info?.title ?? '',
+              radius: 8, glyphSize: 17
+            })
               .width(40)
               .height(40)
               .onClick(() => this.onTapOpen())
 
             Column() {
-              Text(this.info.title)
+              Text(this.info !== null ? this.info.title : '未在播放')
                 .fontSize(15)
                 .fontWeight(FontWeight.Bold)
-                .fontColor($r('app.color.editorial_title'))
+                .fontColor(this.info !== null ? $r('app.color.editorial_title') : $r('app.color.editorial_meta'))
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(this.info.artist)
+              Text(this.info !== null ? this.info.artist : '选一首歌开始')
                 .fontSize(12)
                 .fontColor($r('app.color.editorial_meta'))
                 .maxLines(1)
@@ -111,22 +128,34 @@ export struct MiniPlayerBar {
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
-            .accessibilityText(`正在播放：${this.info.title}，${this.info.artist}，点按打开播放页`)
+            .accessibilityText(this.info !== null
+              ? `正在播放：${this.info.title}，${this.info.artist}，点按打开播放页`
+              : '未在播放，点按打开播放页')
             .onClick(() => this.onTapOpen())
 
-            SymbolGlyph(this.info.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+            SymbolGlyph(this.info?.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(26)
-              .fontColor([$r('app.color.ink')])
+              .fontColor([this.hasTrack() ? $r('app.color.ink') : $r('app.color.ink_faint')])
+              .opacity(this.hasTrack() ? 1 : 0.4)
               .padding(7)
-              .accessibilityText(this.info.isPlaying ? '暂停' : '播放')
-              .onClick(() => this.player.togglePlay())
+              .accessibilityText(this.info?.isPlaying ? '暂停' : '播放')
+              .onClick(() => {
+                if (this.hasTrack()) {
+                  this.player.togglePlay();
+                }
+              })
 
             SymbolGlyph($r('sys.symbol.forward_end_fill'))
               .fontSize(26)
-              .fontColor([$r('app.color.ink')])
+              .fontColor([this.hasTrack() ? $r('app.color.ink') : $r('app.color.ink_faint')])
+              .opacity(this.hasTrack() ? 1 : 0.4)
               .padding(7)
               .accessibilityText('下一首')
-              .onClick(() => this.player.next())
+              .onClick(() => {
+                if (this.hasTrack()) {
+                  this.player.next();
+                }
+              })
           }
           .width('100%')
           .height(BAR_HEIGHT)
@@ -138,7 +167,7 @@ export struct MiniPlayerBar {
             .height(2.5)
             .borderRadius({ bottomRight: 2 })
             .backgroundColor($r('app.color.accent'))
-            .opacity(this.info.isPlaying ? 0.5 : 0.3)
+            .opacity(this.info?.isPlaying ? 0.5 : 0.3)
         }
         .width('100%')
       }
