@@ -34,12 +34,13 @@ const RUBBER_MAX_VP: number = 24;
  * 三格纸带 [上一首 | 当前 | 下一首] 常驻挂载（邻居图进场前已解码，拖动
  * 零首帧卡顿），格间留 CELL_GAP_VP 空隙，窗口 .clip 裁剪——整条纸带只有
  * stripX 一次平移，跟手即时（链上无隐式动画）。松手：
- *   成歌（超阈值/甩动 + 目标侧有封面）→ 纸带弹簧滑向相邻格位，落定后
- *   无动画瞬时回中（当前格内容已是新曲，视觉无缝）；
+ *   成歌（超阈值/甩动 + 目标侧有封面 + 换轨确认）→ 纸带沿手指方向弹簧
+ *   滑向相邻格位（露出目标格），落定同帧把内容序旋转一格 + 纸带瞬时
+ *   复位（两步互抵画面零变化，视觉无缝）；
  *   未达阈值/曲目未变 → 弹簧回中；
  *   目标侧无封面（随机/空队列/5 秒回曲首）→ 该侧 rubber-band 阻尼 +
  *   回中（拖不出去是明确的"这边没有了"）；
- *   预览落空（罕见竞态）→ 回中后交叉淡化遮交接。
+ *   落定时曲目与预期不符（罕见竞态）→ 交叉淡化遮交接。
  */
 @ComponentV2
 export struct CoverSwipe {
@@ -61,6 +62,10 @@ export struct CoverSwipe {
   /** 纸带平移：静止 = -(格宽+间距)（当前格居中），拖动叠加跟手位移，
    * 收尾动画滑向相邻格位或回中（逐 tick 唯一的 @Local 写） */
   @Local stripX: number = 0;
+  /** 落定内容旋转标记：成歌吸附途中保持旧序（中格=旧曲，纸带滑出新曲
+   * 格位），落定同帧旋转一格 + 纸带复位，画面零变化（普通切歌时 @Param
+   * 更新照常驱动；此标记只为取格内容时的顺序判断） */
+  @Local rotated: boolean = false;
   /** 是否已测量（widthVp>0 后纸带才有意义，未测量只画当前格） */
   @Local measured: boolean = false;
   /** 暂停态缩放（显式动画驱动，无隐式 animation） */
@@ -75,8 +80,6 @@ export struct CoverSwipe {
   private settleTimer: number = -1;
   /** 期望的新曲 id（落定核对：落定时实际曲目不符则交叉淡化遮交接） */
   private expectedSeed: string = '';
-  /** 吸附方向（±1）：落定回中前用于核对目标格 */
-  private settleDir: number = 0;
   /** 甩速采样（[位移, 时间戳]，松手前 120ms 窗口算平均速度；private 不触发重建） */
   private velPts: number[][] = [];
 
@@ -159,33 +162,36 @@ export struct CoverSwipe {
     return Math.abs(v) >= FLING_VP_PER_MS && (v < 0) === (offsetX < 0);
   }
 
-  /** 松手成功：切歌 + 纸带滑向相邻格位；目标侧无封面或曲目未变则回中。
-   * 落定后无动画瞬时回中（当前格内容此时已是新曲，画面无缝） */
+  /** 松手成功：切歌 + 纸带滑向相邻格位。成歌条件（子组件已判：超阈值或
+   * 甩动）+ 目标侧有封面 + 返回值确认换轨。落定后无动画瞬时回中（当前格
+   * 内容已是新曲，画面无缝） */
   private commitSwipe(offsetX: number): void {
     const dir = offsetX < 0 ? -1 : 1;
-    const before = this.seedId;
     const result = this.onSwipeEnd(offsetX);
     if (result === 'same' || !this.sideHasCover(dir)) {
       this.springBack();
       return;
     }
     this.dragging = false;
-    this.settleDir = dir;
     this.expectedSeed = result;
+    // 纸带朝手指方向滑：左滑(dir=-1)纸带左移露出右格(下一首)——
+    // 与手指推动方向一致，落到相邻格位（旧版符号反了，反向滑+回中
+    // 被看成"滑一下弹回来"）
     this.getUIContext().animateTo({ duration: SETTLE_MS, curve: curves.springMotion(0.75, 0.9) }, () => {
-      this.stripX = this.restX() - dir * (this.cellW() + CELL_GAP_VP);
+      this.stripX = this.restX() + dir * (this.cellW() + CELL_GAP_VP);
     });
     this.settleTimer = setTimeout(() => {
       this.settleTimer = -1;
-      this.finishSettle(before);
+      this.finishSettle();
     }, SETTLE_MS + 60);
   }
 
-  /** 吸附落定：无动画瞬时回中（新当前格已在中央，回中是纯状态复位）；
-   * 实际曲目与预期不符（罕见竞态）再交叉淡化遮一下 */
-  private finishSettle(before: string): void {
+  /** 吸附落定：先无动画瞬时换带再回中——纸带此刻停在新格位（露出目标
+   * 格内容），同帧把内容序旋转一格（当前格=目标曲）并复位纸带，两件事
+   * 同一帧生效，画面零变化；竞态（曲目与预期不符）才交叉淡化遮交接 */
+  private finishSettle(): void {
+    this.rotated = true;
     this.stripX = this.restX();
-    this.settleDir = 0;
     if (this.seedId !== this.expectedSeed) {
       this.swapFade = 0;
       this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
@@ -198,20 +204,61 @@ export struct CoverSwipe {
   /** 未达阈值（且非甩动）/ 曲目未变：弹簧回中（取消语义；音频动作如回曲首已生效） */
   private springBack(): void {
     this.dragging = false;
+    this.rotated = false;
     this.getUIContext().animateTo({ curve: curves.springMotion(0.4, 0.8) }, () => {
       this.stripX = this.restX();
     });
+  }
+
+  /** 左格内容：吸附中 = 旧当前曲（被滑出的，冻结快照）；否则 = 上一首 */
+  private leftCell(): CoverRef | null {
+    if (this.rotated) {
+      return null;
+    }
+    return this.prevCover;
+  }
+
+  /** 中格内容：吸附中 = 旧当前曲；否则 = 当前曲 */
+  private midCell(): CoverRef | null {
+    if (this.rotated) {
+      return this.prevCover;
+    }
+    return { path: this.coverPath, seed: this.seedId };
+  }
+
+  /** 中格透明度：正常随 swapFade/播放态；吸附中滑出者恒 1（暗态由
+   * playScale 缩放层表达，不重复叠加） */
+  private midCellOpacity(): number {
+    if (this.rotated) {
+      return 1;
+    }
+    return this.swapFade * (this.isPlaying ? 1.0 : 0.7);
+  }
+
+  /** 右格内容：吸附中 = 目标新曲（返回的新曲 id + 当前参数已是它的封面）；
+   * 否则 = 下一首 */
+  private rightCell(): CoverRef | null {
+    if (this.rotated) {
+      return { path: this.coverPath, seed: this.seedId };
+    }
+    return this.nextCover;
   }
 
   build() {
     Stack() {
       if (this.measured) {
         // 三格纸带：整条只有 stripX 一次平移；邻居常驻挂载（解码预热），
-        // 拖动零首帧卡顿；格间 CELL_GAP_VP 空隙，窗口裁剪
+        // 拖动零首帧卡顿；格间 CELL_GAP_VP 空隙，窗口裁剪。
+        // 吸附途中(rotated=false)保持旧序[旧上|旧曲|目标]，落定帧旋转
+        // 成[目标|新曲|新下一]并复位纸带，同一帧内两步互抵画面零变化
         Row({ space: CELL_GAP_VP }) {
-          // 左格：上一首（无则空格，配合 rubber-band 表达"这边没有了"）
-          if (this.prevCover !== null) {
-            CoverArt({ coverPath: this.prevCover.path, seedId: this.prevCover.seed, radius: 16, glyphSize: 56, onStage: true })
+          // 左格：吸附中 = 旧当前曲（滑出者）或无；正常 = 上一首或无
+          if (this.leftCell() !== null) {
+            CoverArt({
+              coverPath: (this.leftCell() as CoverRef).path,
+              seedId: (this.leftCell() as CoverRef).seed,
+              radius: 16, glyphSize: 56, onStage: true
+            })
               .width(this.widthVp)
               .height(this.widthVp)
               .scale({ x: this.playScale, y: this.playScale })
@@ -221,16 +268,30 @@ export struct CoverSwipe {
               .width(this.widthVp)
               .height(this.widthVp)
           }
-          // 中格：当前曲
-          CoverArt({ coverPath: this.coverPath, seedId: this.seedId, radius: 16, glyphSize: 56, onStage: true })
-            .width(this.widthVp)
-            .height(this.widthVp)
-            .scale({ x: this.playScale, y: this.playScale })
-            .opacity(this.swapFade * (this.isPlaying ? 1.0 : 0.7))
-            .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
-          // 右格：下一首
-          if (this.nextCover !== null) {
-            CoverArt({ coverPath: this.nextCover.path, seedId: this.nextCover.seed, radius: 16, glyphSize: 56, onStage: true })
+          // 中格：吸附中 = 旧当前曲（被滑出的）；正常 = 当前曲
+          if (this.midCell() !== null) {
+            CoverArt({
+              coverPath: (this.midCell() as CoverRef).path,
+              seedId: (this.midCell() as CoverRef).seed,
+              radius: 16, glyphSize: 56, onStage: true
+            })
+              .width(this.widthVp)
+              .height(this.widthVp)
+              .scale({ x: this.playScale, y: this.playScale })
+              .opacity(this.midCellOpacity())
+              .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+          } else {
+            Column()
+              .width(this.widthVp)
+              .height(this.widthVp)
+          }
+          // 右格：吸附中 = 目标新曲（滑入者）；正常 = 下一首或无
+          if (this.rightCell() !== null) {
+            CoverArt({
+              coverPath: (this.rightCell() as CoverRef).path,
+              seedId: (this.rightCell() as CoverRef).seed,
+              radius: 16, glyphSize: 56, onStage: true
+            })
               .width(this.widthVp)
               .height(this.widthVp)
               .scale({ x: this.playScale, y: this.playScale })
@@ -263,6 +324,7 @@ export struct CoverSwipe {
             return;
           }
           this.dragging = true;
+          this.rotated = false;
           this.velPts = [];
         })
         .onActionUpdate((e: GestureEvent): void => {

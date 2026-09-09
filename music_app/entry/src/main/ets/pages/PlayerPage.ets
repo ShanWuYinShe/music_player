@@ -81,16 +81,15 @@ export struct PlayerPage {
     }
   }
 
-  /** 封面滑动对账入口（CoverSwipe 事件）：阈值由子组件判定，这里切歌并
-   * 返回结果供子组件选视觉路径 */
+  /** 封面滑动对账入口（CoverSwipe 事件）：子组件已判成歌（含甩动），方向
+   * 以释放点/甩速方向为准，这里只按方向切歌并返回结果供子组件选视觉路径。
+   * 甩动位移可能不足 SWIPE_THRESHOLD（子组件按速度放行），不得再按阈值拦 */
   private swipeOutcome(offsetX: number): string {
     const before = this.player.currentSongId;
-    if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
+    if (offsetX < 0) {
       this.player.next();
-    } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
-      this.player.previous();
     } else {
-      return 'same';
+      this.player.previous();
     }
     const after = this.player.currentSongId;
     return after === '' || after === before ? 'same' : after;
