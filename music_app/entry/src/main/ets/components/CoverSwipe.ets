@@ -1,18 +1,20 @@
 import { curves } from '@kit.ArkUI';
 import { CoverArt } from './CoverArt';
-import { CoverPair, CoverRef } from '../player/PlayerController';
+import { CoverRef } from '../player/PlayerController';
 
 /** 滑动切歌成功阈值（vp）：与 PlayerPage 可视化舞台手势共用同一判定 */
 export const COVER_SWIPE_THRESHOLD: number = 60;
-/** 滑出时长（ms）：快照层沿手势方向滑出、预览层同步归位 */
-const SWIPE_EXIT_MS: number = 260;
+/** 相邻封面间距（vp）：成熟播放器（Poweramp/Apple Music）的页间留白 */
+const CELL_GAP_VP: number = 24;
 /** 按钮/队列切歌的交叉淡化时长（ms）：旧 crossfade 效果不退化 */
 const SWAP_FADE_MS: number = 260;
 /** 暂停态缩放过渡时长（ms）：沿用旧隐式动画的 360ms 手感 */
 const PLAYSCALE_MS: number = 360;
 /** 暂停态缩放比例 */
 const PAUSED_SCALE: number = 0.94;
-/** 滑出/归位距离量不到时的兜底宽度（vp） */
+/** 纸带吸附时长（ms）：松手后滑向相邻格位 */
+const SETTLE_MS: number = 300;
+/** 宽度量不到时的兜底（vp） */
 const FALLBACK_WIDTH_VP: number = 320;
 /** 甩动成歌最小位移（vp）：低于此值只认阈值，防抖动误甩 */
 const FLING_MIN_OFFSET: number = 20;
@@ -22,16 +24,22 @@ const FLING_WINDOW_MS: number = 120;
 const FLING_VP_PER_MS: number = 1.0;
 /** 速度采样上限（点）：120ms 窗口足够覆盖，旧点移出 */
 const VEL_PTS_CAP: number = 10;
+/** 空侧阻尼系数：没有相邻封面的一侧拖动按此比例 rubber-band（封顶见下） */
+const RUBBER_FACTOR: number = 0.2;
+/** 空侧阻尼最大位移（vp） */
+const RUBBER_MAX_VP: number = 24;
 
 /**
- * 封面滑动 pager：live 层（当前参数）+ 按下冻结的快照（退出层 + 双侧预览）。
- * 拖动中 live 层跟手、双侧预览（上一首在左/下一首在右）同步跟进——真 pager
- * 纸带，过零换向无挂载抖动（双侧常驻，只随位移平移）；松手成功且预判命中
- * 时快照层滑出、对应侧预览归位，全程无黑层。链上无任何隐式 .animation——
- * 跟手 translate 必须即时（隐式动画会让位移被 360ms 缓追，旧 bug 根因），
- * 暂停态缩放/过渡一律显式 animateTo。未达阈值（且非甩动）、曲目未变（右滑
- * 回曲首/单曲重播/空队列）弹簧回弹；无预览（随机模式）或预判落空时直接切
- * live 淡入，不硬滑一张错封面。快甩（低位移高速度）同样成歌。
+ * 封面滑动纸带（成熟播放器的 pager 模型）：
+ * 三格纸带 [上一首 | 当前 | 下一首] 常驻挂载（邻居图进场前已解码，拖动
+ * 零首帧卡顿），格间留 CELL_GAP_VP 空隙，窗口 .clip 裁剪——整条纸带只有
+ * stripX 一次平移，跟手即时（链上无隐式动画）。松手：
+ *   成歌（超阈值/甩动 + 目标侧有封面）→ 纸带弹簧滑向相邻格位，落定后
+ *   无动画瞬时回中（当前格内容已是新曲，视觉无缝）；
+ *   未达阈值/曲目未变 → 弹簧回中；
+ *   目标侧无封面（随机/空队列/5 秒回曲首）→ 该侧 rubber-band 阻尼 +
+ *   回中（拖不出去是明确的"这边没有了"）；
+ *   预览落空（罕见竞态）→ 回中后交叉淡化遮交接。
  */
 @ComponentV2
 export struct CoverSwipe {
@@ -41,48 +49,34 @@ export struct CoverSwipe {
   @Param coverPath: string = '';
   /** 当前曲 id（封面种子 + 切歌检测） */
   @Param seedId: string = '';
-  /** 相邻封面预览（父组件经 peek 下发；随机模式/空队列为 null） */
+  /** 相邻封面预览（父组件状态订阅经 peek 下发；随机/空队列/5 秒规则为 null） */
   @Param nextCover: CoverRef | null = null;
   @Param prevCover: CoverRef | null = null;
-  /** 按下回调：父组件同步快照预览对并返回（@Param 下发异步，按下时读必旧，
-   * 返回值才是新鲜快照；含 5 秒回曲首规则，拖动全程冻结用它） */
-  @Event onPressCovers: () => CoverPair = () => ({ prev: null, next: null });
-  /** 滑动切歌回调（超阈值/甩动才调）：返回 'same'（曲目未变→回弹）或新曲 id
-   * （真换轨→滑出/归位）；父组件内同步完成切歌 */
+  /** 滑动切歌回调（超阈值/甩动才调）：返回 'same'（曲目未变→回中）或新曲 id
+   * （真换轨→滑向相邻格位）；父组件内同步完成切歌 */
   @Event onSwipeEnd: (offsetX: number) => string = () => '';
   /** 点按封面回调（父组件切入可视化舞台） */
   @Event onTap: () => void = () => {
   };
-  /** 手势进行中（按下→收尾）：图层走快照，live 参数更新不干扰拖动 */
-  @Local swiping: boolean = false;
-  /** 退出中（预判命中的成功滑动）：快照层滑出、预览层归位，live 隐藏 */
-  @Local exiting: boolean = false;
-  /** 退出方向（±1，仅 exiting 有效）：预览层归位公式用 */
-  @Local exitDir: number = 0;
-  /** 当前/快照层位移：拖动跟手 / 退出滑出（逐 tick 唯一的 @Local 写） */
-  @Local dragX: number = 0;
+  /** 纸带平移：静止 = -(格宽+间距)（当前格居中），拖动叠加跟手位移，
+   * 收尾动画滑向相邻格位或回中（逐 tick 唯一的 @Local 写） */
+  @Local stripX: number = 0;
+  /** 是否已测量（widthVp>0 后纸带才有意义，未测量只画当前格） */
+  @Local measured: boolean = false;
   /** 暂停态缩放（显式动画驱动，无隐式 animation） */
   @Local playScale: number = 1;
-  /** 按钮切歌交叉淡化（1 常态，0 瞬隐后显式淡入） */
+  /** 按钮切歌交叉淡化（1 常态，0 瞬隐后显式淡入；纸带路径不用它） */
   @Local swapFade: number = 1;
-  /** 按下瞬间的冻结快照（退出动画全程用它，不受切歌参数更新影响） */
-  @Local snapPath: string = '';
-  @Local snapSeed: string = '';
-  /** 双侧预览快照（打平为 string + bool，build 内无类型窄化风险） */
-  @Local hasPrev: boolean = false;
-  @Local prevPath: string = '';
-  @Local prevSeed: string = '';
-  @Local hasNext: boolean = false;
-  @Local nextPath: string = '';
-  @Local nextSeed: string = '';
-  /** 退出时展示匹配预览（预判命中才置位；落空不硬滑错封面） */
-  @Local showExitPreview: boolean = false;
-  /** 组件实宽（vp）：滑出/归位距离 */
+  /** 组件实宽（vp）＝格宽 */
   @Local widthVp: number = 0;
-  /** 退出收尾定时器 */
-  private finishTimer: number = -1;
-  /** 期望的新曲 id（收尾核对：退出期间又有外部切歌则淡入遮一下交接） */
+  /** 手势进行中（拖动跟手，纸带内容此时冻结不换） */
+  private dragging: boolean = false;
+  /** 吸附落定定时器（滑向相邻格位后回中） */
+  private settleTimer: number = -1;
+  /** 期望的新曲 id（落定核对：落定时实际曲目不符则交叉淡化遮交接） */
   private expectedSeed: string = '';
+  /** 吸附方向（±1）：落定回中前用于核对目标格 */
+  private settleDir: number = 0;
   /** 甩速采样（[位移, 时间戳]，松手前 120ms 窗口算平均速度；private 不触发重建） */
   private velPts: number[][] = [];
 
@@ -91,9 +85,9 @@ export struct CoverSwipe {
   }
 
   aboutToDisappear(): void {
-    if (this.finishTimer >= 0) {
-      clearTimeout(this.finishTimer);
-      this.finishTimer = -1;
+    if (this.settleTimer >= 0) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = -1;
     }
   }
 
@@ -108,17 +102,11 @@ export struct CoverSwipe {
     }
   }
 
-  /** 曲目变化：退出中由收尾定时器接应（不与滑出动画打架）；拖动中把快照
-   * 换新（播完连播等外部切歌，拖动在新封面上继续）；静止态走交叉淡化 */
+  /** 曲目变化：拖动/吸附中不动纸带（落定回中会带上新内容）；静止且非本次
+   * 手势结果（按钮/队列/外部切歌）走交叉淡化 */
   @Monitor('seedId')
   onSeedChange(): void {
-    if (this.exiting) {
-      return;
-    }
-    if (this.swiping) {
-      this.snapPath = this.coverPath;
-      this.snapSeed = this.seedId;
-      this.snapCovers(this.prevCover, this.nextCover);
+    if (this.dragging || this.settleTimer >= 0) {
       return;
     }
     this.swapFade = 0;
@@ -127,24 +115,18 @@ export struct CoverSwipe {
     });
   }
 
-  private slideDist(): number {
+  private cellW(): number {
     return this.widthVp > 0 ? this.widthVp : FALLBACK_WIDTH_VP;
   }
 
-  /** 预览层位移（dir=-1 左侧上一首，1 右侧下一首）：dragX + dir*dist——
-   * 拖动跟手、退出归位同一公式（退出把 dragX 推向 -dir*dist 时自然收敛 0） */
-  private previewX(dir: number): number {
-    return this.dragX + dir * this.slideDist();
+  /** 静止纸带位移：当前格居中（左格完全在窗外） */
+  private restX(): number {
+    return -(this.cellW() + CELL_GAP_VP);
   }
 
-  /** 冻结双侧预览快照（按下返回值 / 参数更新两种来源，打平存 string） */
-  private snapCovers(prev: CoverRef | null, next: CoverRef | null): void {
-    this.hasPrev = prev !== null;
-    this.prevPath = prev !== null ? prev.path : '';
-    this.prevSeed = prev !== null ? prev.seed : '';
-    this.hasNext = next !== null;
-    this.nextPath = next !== null ? next.path : '';
-    this.nextSeed = next !== null ? next.seed : '';
+  /** 目标侧是否有封面（决定成歌后能否滑过去） */
+  private sideHasCover(dir: number): boolean {
+    return dir < 0 ? this.nextCover !== null : this.prevCover !== null;
   }
 
   /** 甩动判定：位移未达阈值但松手前 120ms 平均速度达标、且方向一致——
@@ -177,31 +159,33 @@ export struct CoverSwipe {
     return Math.abs(v) >= FLING_VP_PER_MS && (v < 0) === (offsetX < 0);
   }
 
-  /** 滑动成功收尾：快照层滑出、匹配侧预览归位（预判命中才进此路径） */
-  private beginExit(dir: number, newId: string): void {
-    this.expectedSeed = newId;
-    this.exitDir = dir;
-    this.showExitPreview = true;
-    this.exiting = true;
-    this.getUIContext().animateTo({ duration: SWIPE_EXIT_MS, curve: Curve.EaseOut }, () => {
-      this.dragX = -dir * this.slideDist();
-    });
-    this.finishTimer = setTimeout(() => {
-      this.finishTimer = -1;
-      this.finishExit();
-    }, SWIPE_EXIT_MS + 80);
-  }
-
-  private finishExit(): void {
-    if (!this.exiting) {
+  /** 松手成功：切歌 + 纸带滑向相邻格位；目标侧无封面或曲目未变则回中。
+   * 落定后无动画瞬时回中（当前格内容此时已是新曲，画面无缝） */
+  private commitSwipe(offsetX: number): void {
+    const dir = offsetX < 0 ? -1 : 1;
+    const before = this.seedId;
+    const result = this.onSwipeEnd(offsetX);
+    if (result === 'same' || !this.sideHasCover(dir)) {
+      this.springBack();
       return;
     }
-    this.exiting = false;
-    this.swiping = false;
-    this.exitDir = 0;
-    this.dragX = 0;
-    this.showExitPreview = false;
-    // 退出期间又有外部切歌（实际与期望不一致）：live 淡入遮一下交接
+    this.dragging = false;
+    this.settleDir = dir;
+    this.expectedSeed = result;
+    this.getUIContext().animateTo({ duration: SETTLE_MS, curve: curves.springMotion(0.75, 0.9) }, () => {
+      this.stripX = this.restX() - dir * (this.cellW() + CELL_GAP_VP);
+    });
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = -1;
+      this.finishSettle(before);
+    }, SETTLE_MS + 60);
+  }
+
+  /** 吸附落定：无动画瞬时回中（新当前格已在中央，回中是纯状态复位）；
+   * 实际曲目与预期不符（罕见竞态）再交叉淡化遮一下 */
+  private finishSettle(before: string): void {
+    this.stripX = this.restX();
+    this.settleDir = 0;
     if (this.seedId !== this.expectedSeed) {
       this.swapFade = 0;
       this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
@@ -211,123 +195,95 @@ export struct CoverSwipe {
     this.expectedSeed = '';
   }
 
-  /** 未达阈值（且非甩动）/ 曲目未变：弹簧回弹（取消语义；音频动作如回曲首已生效） */
+  /** 未达阈值（且非甩动）/ 曲目未变：弹簧回中（取消语义；音频动作如回曲首已生效） */
   private springBack(): void {
-    this.swiping = false;
-    this.showExitPreview = false;
+    this.dragging = false;
     this.getUIContext().animateTo({ curve: curves.springMotion(0.4, 0.8) }, () => {
-      this.dragX = 0;
+      this.stripX = this.restX();
     });
-  }
-
-  /** 松手成功：先让父组件同步切歌，拿返回值决定视觉路径——'same' 回弹；
-   * 预判命中（快照预览种子 == 新曲）滑出/归位；否则（无预览/预判落空）
-   * 直接回到 live（参数已是新封面）淡入，不硬滑一张错封面 */
-  private commitSwipe(offsetX: number): void {
-    const dir = offsetX < 0 ? -1 : 1;
-    const previewSeed = dir < 0 ? (this.hasNext ? this.nextSeed : '') : (this.hasPrev ? this.prevSeed : '');
-    const result = this.onSwipeEnd(offsetX);
-    if (result === 'same') {
-      this.springBack();
-      return;
-    }
-    if (previewSeed === '' || previewSeed !== result) {
-      this.swiping = false;
-      this.showExitPreview = false;
-      this.dragX = 0;
-      this.swapFade = 0;
-      this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
-        this.swapFade = 1;
-      });
-      return;
-    }
-    this.beginExit(dir, result);
   }
 
   build() {
     Stack() {
-      if (this.exiting) {
-        // 快照层：沿手势方向滑出
-        CoverArt({ coverPath: this.snapPath, seedId: this.snapSeed, radius: 16, glyphSize: 56, onStage: true })
-          .width('100%')
-          .height('100%')
-          .translate({ x: this.dragX })
-        // 匹配侧预览：同步归位到中央
-        if (this.showExitPreview) {
-          CoverArt({
-            coverPath: this.exitDir < 0 ? this.nextPath : this.prevPath,
-            seedId: this.exitDir < 0 ? this.nextSeed : this.prevSeed,
-            radius: 16, glyphSize: 56, onStage: true
-          })
-            .width('100%')
-            .height('100%')
+      if (this.measured) {
+        // 三格纸带：整条只有 stripX 一次平移；邻居常驻挂载（解码预热），
+        // 拖动零首帧卡顿；格间 CELL_GAP_VP 空隙，窗口裁剪
+        Row({ space: CELL_GAP_VP }) {
+          // 左格：上一首（无则空格，配合 rubber-band 表达"这边没有了"）
+          if (this.prevCover !== null) {
+            CoverArt({ coverPath: this.prevCover.path, seedId: this.prevCover.seed, radius: 16, glyphSize: 56, onStage: true })
+              .width(this.widthVp)
+              .height(this.widthVp)
+              .scale({ x: this.playScale, y: this.playScale })
+              .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+          } else {
+            Column()
+              .width(this.widthVp)
+              .height(this.widthVp)
+          }
+          // 中格：当前曲
+          CoverArt({ coverPath: this.coverPath, seedId: this.seedId, radius: 16, glyphSize: 56, onStage: true })
+            .width(this.widthVp)
+            .height(this.widthVp)
             .scale({ x: this.playScale, y: this.playScale })
-            .translate({ x: this.previewX(this.exitDir) })
-            .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
+            .opacity(this.swapFade * (this.isPlaying ? 1.0 : 0.7))
+            .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+          // 右格：下一首
+          if (this.nextCover !== null) {
+            CoverArt({ coverPath: this.nextCover.path, seedId: this.nextCover.seed, radius: 16, glyphSize: 56, onStage: true })
+              .width(this.widthVp)
+              .height(this.widthVp)
+              .scale({ x: this.playScale, y: this.playScale })
+              .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+          } else {
+            Column()
+              .width(this.widthVp)
+              .height(this.widthVp)
+          }
         }
-      } else {
-        // 左侧预览（上一首）：拖动中常驻跟进，无挂载抖动
-        if (this.swiping && this.hasPrev) {
-          CoverArt({ coverPath: this.prevPath, seedId: this.prevSeed, radius: 16, glyphSize: 56, onStage: true })
-            .width('100%')
-            .height('100%')
-            .scale({ x: this.playScale, y: this.playScale })
-            .translate({ x: this.previewX(-1) })
-            .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
-        }
-        // live 层：静止展示 / 拖动跟手
-        CoverArt({ coverPath: this.coverPath, seedId: this.seedId, radius: 16, glyphSize: 56, onStage: true })
-          .width('100%')
-          .height('100%')
-          .scale({ x: this.playScale, y: this.playScale })
-          .opacity(this.swapFade * (this.isPlaying ? 1.0 : 0.7))
-          .translate({ x: this.dragX })
-          .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
-        // 右侧预览（下一首）：拖动中常驻跟进
-        if (this.swiping && this.hasNext) {
-          CoverArt({ coverPath: this.nextPath, seedId: this.nextSeed, radius: 16, glyphSize: 56, onStage: true })
-            .width('100%')
-            .height('100%')
-            .scale({ x: this.playScale, y: this.playScale })
-            .translate({ x: this.previewX(1) })
-            .shadow({ radius: 48, color: 'rgba(0,0,0,0.6)', offsetY: 16 })
-        }
+        .translate({ x: this.stripX })
       }
     }
     .width('100%')
     .height('100%')
+    .clip(true)
     .onAreaChange((_old: Area, area: Area) => {
-      this.widthVp = area.width as number;
+      const w = area.width as number;
+      if (w > 0 && !this.measured) {
+        // 首次测量：初始化纸带居中位移（无动画，避免从 0 飞入）
+        this.widthVp = w;
+        this.stripX = this.restX();
+        this.measured = true;
+      }
     })
     .gesture(
       PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
         .onActionStart((): void => {
-          if (this.exiting) {
+          if (this.settleTimer >= 0) {
             return;
           }
-          // 按下冻结快照：返回值是父组件同步现算的（含 5 秒规则），必新鲜；
-          // 后续参数更新不干扰本次手势
-          const pair = this.onPressCovers();
-          this.snapPath = this.coverPath;
-          this.snapSeed = this.seedId;
-          this.snapCovers(pair.prev, pair.next);
-          this.showExitPreview = false;
+          this.dragging = true;
           this.velPts = [];
-          this.swiping = true;
         })
         .onActionUpdate((e: GestureEvent): void => {
-          if (this.exiting) {
+          if (this.settleTimer >= 0 || !this.dragging) {
             return;
           }
+          const raw = e.offsetX;
+          // 空侧 rubber-band：没有相邻封面的一侧拖不动（阻尼 + 封顶），
+          // 拖出去多少弹回多少，"这边没有了"的手感
+          const dir = raw < 0 ? -1 : 1;
+          const eff = this.sideHasCover(dir) ? raw
+            : Math.sign(raw) * Math.min(Math.abs(raw) * RUBBER_FACTOR, RUBBER_MAX_VP);
           // 逐 tick 唯一的 @Local 写（速度采样走 private，不触发重建）
-          this.dragX = e.offsetX;
+          this.stripX = this.restX() + eff;
           if (this.velPts.length >= VEL_PTS_CAP) {
             this.velPts.shift();
           }
-          this.velPts.push([e.offsetX, Date.now()]);
+          this.velPts.push([raw, Date.now()]);
         })
         .onActionEnd((e: GestureEvent): void => {
-          if (this.exiting) {
+          if (this.settleTimer >= 0 || !this.dragging) {
             return;
           }
           const offsetX = e.offsetX;
@@ -338,7 +294,7 @@ export struct CoverSwipe {
           this.springBack();
         })
         .onActionCancel((): void => {
-          if (this.exiting) {
+          if (this.settleTimer >= 0) {
             return;
           }
           this.springBack();

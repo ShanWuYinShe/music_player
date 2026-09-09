@@ -25,18 +25,11 @@ function isNetworkUrl(fileName: string): boolean {
   return fileName.startsWith('http://') || fileName.startsWith('https://');
 }
 
-/** 封面预览（路径+种子）：播放页 pager 拖动时展示隔壁封面用。
+/** 封面预览（路径+种子）：播放页纸带拖动时展示隔壁封面用。
  * 注意 V2 规则——对象字面量必须对应 interface，构造一律走 coverRefOf */
 export interface CoverRef {
   path: string;
   seed: string;
-}
-
-/** 相邻预览对（按下瞬间父组件同步快照返回，拖动全程冻结用它——@Param
- * 下发是异步的，按下时读必是旧值） */
-export interface CoverPair {
-  prev: CoverRef | null;
-  next: CoverRef | null;
 }
 
 /** 构造 CoverRef（song 为 null 即无预览） */
