@@ -319,7 +319,11 @@ export struct PlayerPage {
             })
         }
 
-        // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体
+        // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体。
+        // 三行信息各行 **constraintSize 锁最小高度**：面板高度与具体曲目无关
+        // （空串/长短歌名/有无试听提示均同高）——舞台区是 layoutWeight(1)
+        // 吸收剩余高度，面板高度一旦波动，aspectRatio(1) 的封面就会被等比
+        // 缩放（封面大小随曲目变化的根因）
         Column() {
           Column({ space: 6 }) {
             Text(this.song ? this.song.title : '未在播放')
@@ -328,14 +332,14 @@ export struct PlayerPage {
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ minHeight: 30 })
             Text(this.song ? this.song.artist : '')
               .fontSize(14)
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示。
-            // **常驻占位**（无曲目时空串保留行高）：该行出现/消失会顶推上方
-            // 封面区域，正是"封面位置随歌名区域变化"的根因
+              .constraintSize({ minHeight: 20 })
+            // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示。常驻占位
             Text() {
               Span(this.song !== null ? this.songMetaText(this.song) : ' ')
                 .fontColor($r('app.color.viz_fg_faint'))
@@ -348,6 +352,7 @@ export struct PlayerPage {
             .letterSpacing(0.8)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ minHeight: 16 })
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
