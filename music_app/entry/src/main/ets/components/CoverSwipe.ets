@@ -288,6 +288,20 @@ export struct CoverSwipe {
     }
   }
 
+  /** 接管进行中的吸附（快速连滑）：吸附动画的收尾只是"同步实况邻居"，
+   * 内容旋转早已在松手那一步完成（中格恒为目标曲），所以可以安全地立刻
+   * 收敛——清兜底、复位标志、同步三格（补齐左/右邻居供下一次滑），
+   * 画面上中格内容不变，只是纸带位移改为跟手 */
+  private takeOverSettle(): void {
+    if (!this.settling) {
+      return;
+    }
+    this.clearSafety();
+    this.settling = false;
+    this.expectedSeed = '';
+    this.syncTrio();
+  }
+
   build() {
     Stack() {
       if (this.measured) {
@@ -356,14 +370,18 @@ export struct CoverSwipe {
     .gesture(
       PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
         .onActionStart((): void => {
-          if (this.settling) {
+          // 吸附途中允许立即接管（快速连滑）：从当前位置续拖。只锁"同一
+          // 笔画重复触发"——旧版锁住整段吸附，滑完必须等弹簧收敛才能再滑
+          if (this.dragging) {
             return;
           }
+          // 接管旧吸附：内容旋转早已生效（中格已是目标曲），即刻收敛
+          this.takeOverSettle();
           this.dragging = true;
           this.velPts = [];
         })
         .onActionUpdate((e: GestureEvent): void => {
-          if (this.settling || !this.dragging) {
+          if (!this.dragging) {
             return;
           }
           const raw = e.offsetX;
@@ -380,7 +398,7 @@ export struct CoverSwipe {
           this.velPts.push([raw, Date.now()]);
         })
         .onActionEnd((e: GestureEvent): void => {
-          if (this.settling || !this.dragging) {
+          if (!this.dragging) {
             return;
           }
           const offsetX = e.offsetX;
@@ -391,7 +409,7 @@ export struct CoverSwipe {
           this.springBack();
         })
         .onActionCancel((): void => {
-          if (this.settling) {
+          if (!this.dragging) {
             return;
           }
           this.springBack();

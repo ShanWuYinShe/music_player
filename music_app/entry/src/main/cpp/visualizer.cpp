@@ -41,6 +41,8 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <atomic>
+#include <thread>
 
 
 #undef LOG_TAG
@@ -114,6 +116,16 @@ GLuint gFboState = 0;
 GLuint gTexState = 0;
 int gStateMode = 0;
 
+/** pan 回退变体源码：#version 必须保持首行，把编译期开关插到它之后 */
+std::string WithPanStateDisabled(const char* src) {
+    std::string s(src);
+    size_t nl = s.find('\n');
+    if (nl == std::string::npos) {
+        return s;
+    }
+    return s.substr(0, nl + 1) + "#define PAN_NO_STATE_TEX 1\n" + s.substr(nl + 1);
+}
+
 GLuint CompileShader(GLenum type, const char* src) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, nullptr);
@@ -163,14 +175,125 @@ GLuint LinkProgram(GLuint vs, GLuint fs, SceneLocs* locs) {
     return prog;
 }
 
-/** pan 回退变体源码：#version 必须保持首行，把编译期开关插到它之后 */
-std::string WithPanStateDisabled(const char* src) {
-    std::string s(src);
-    size_t nl = s.find('\n');
-    if (nl == std::string::npos) {
-        return s;
+/** 场景 program 构建结果（后台线程产出，主线程取用） */
+struct ScenePrograms {
+    GLuint scene[kVizPresetCount] = {0};
+    SceneLocs locs[kVizPresetCount];
+    GLuint blit = 0;
+    GLint blitTex = -1;
+    bool ok = false;
+};
+
+/** 后台编译状态：
+ *  shader 编译+链接在真机上可达数百毫秒，同步做在 UI 线程会卡住进页。
+ *  这里在子线程用**共享 context**（eglCreateContext 的 share_context 参数，
+ *  EGL 核心能力非扩展）+ pbuffer surface 编译链接——GL 对象（program）在
+ *  共享同一 share group 的 context 间可见，主线程拿到后直接 glUseProgram。
+ *  未就绪前渲染直接跳过（画面随后自然出现），绝不阻塞 UI 线程。 */
+std::atomic<bool> gProgramsBuilding{false};
+std::atomic<bool> gProgramsReady{false};
+ScenePrograms gPrograms;
+std::thread gBuildThread;
+
+/** 构建全部场景 program（在具备当前 GL context 的线程上执行） */
+ScenePrograms BuildScenePrograms(int stateMode) {
+    ScenePrograms out;
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
+    if (!vs) {
+        OH_LOG_ERROR(LOG_APP, "[%s] vertex shader compile failed", LOG_TAG);
+        return out;
     }
-    return s.substr(0, nl + 1) + "#define PAN_NO_STATE_TEX 1\n" + s.substr(nl + 1);
+    for (int i = 0; i < kVizPresetCount; i++) {
+        const char* sceneSrc = kFragScene[i];
+        std::string fallbackSrc;
+        if (i == kVizPresetPan && stateMode != 2) {
+            fallbackSrc = WithPanStateDisabled(sceneSrc);
+            sceneSrc = fallbackSrc.c_str();
+        }
+        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, sceneSrc);
+        if (!fs) {
+            OH_LOG_ERROR(LOG_APP, "[%s] scene %{public}d compile failed", LOG_TAG, i);
+            glDeleteShader(vs);
+            return out;
+        }
+        out.scene[i] = LinkProgram(vs, fs, &out.locs[i]);
+        glDeleteShader(fs);
+        if (!out.scene[i]) {
+            glDeleteShader(vs);
+            return out;
+        }
+    }
+    GLuint fsBlit = CompileShader(GL_FRAGMENT_SHADER, kFragBlit);
+    if (!fsBlit) {
+        glDeleteShader(vs);
+        return out;
+    }
+    out.blit = LinkProgram(vs, fsBlit, nullptr);
+    if (!out.blit) {
+        glDeleteShader(vs);
+        glDeleteShader(fsBlit);
+        return out;
+    }
+    out.blitTex = glGetUniformLocation(out.blit, "uTex");
+    glDeleteShader(vs);
+    glDeleteShader(fsBlit);
+    out.ok = true;
+    return out;
+}
+
+/** 后台线程：建 pbuffer + 共享 context，编译链接全部场景 program */
+void BuildProgramsAsync(int stateMode) {
+    EGLint ctxAttrs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
+    // 共享主线程 context 的 share group：产出的 program 主线程可直接用
+    EGLContext shared = eglCreateContext(gEglDisplay, gEglConfig, gEglContext, ctxAttrs);
+    if (shared == EGL_NO_CONTEXT) {
+        OH_LOG_ERROR(LOG_APP, "[%s] async: create shared context failed", LOG_TAG);
+        gProgramsBuilding = false;
+        return;
+    }
+    // pbuffer：只需一个能让 context 变成 current 的最小表面
+    EGLint pbAttrs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+    EGLSurface pb = eglCreatePbufferSurface(gEglDisplay, gEglConfig, pbAttrs);
+    if (pb == EGL_NO_SURFACE) {
+        OH_LOG_ERROR(LOG_APP, "[%s] async: pbuffer failed", LOG_TAG);
+        eglDestroyContext(gEglDisplay, shared);
+        gProgramsBuilding = false;
+        return;
+    }
+    if (!eglMakeCurrent(gEglDisplay, pb, pb, shared)) {
+        OH_LOG_ERROR(LOG_APP, "[%s] async: makeCurrent failed", LOG_TAG);
+        eglDestroySurface(gEglDisplay, pb);
+        eglDestroyContext(gEglDisplay, shared);
+        gProgramsBuilding = false;
+        return;
+    }
+    ScenePrograms built = BuildScenePrograms(stateMode);
+    // 交还主线程前解绑，避免占用 context
+    eglMakeCurrent(gEglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(gEglDisplay, pb);
+    eglDestroyContext(gEglDisplay, shared);
+    if (built.ok) {
+        gPrograms = built;
+        gProgramsReady = true;
+        OH_LOG_INFO(LOG_APP, "[%s] programs built async, presets=%{public}d", LOG_TAG,
+            kVizPresetCount);
+    }
+    gProgramsBuilding = false;
+}
+
+/** 主线程取用：后台已就绪则装填（glUseProgram 前调用） */
+void AdoptProgramsIfReady() {
+    if (!gProgramsReady) {
+        return;
+    }
+    for (int i = 0; i < kVizPresetCount; i++) {
+        gProgramScene[i] = gPrograms.scene[i];
+        gLocs[i] = gPrograms.locs[i];
+    }
+    gProgramBlit = gPrograms.blit;
+    gBlitTex = gPrograms.blitTex;
+    gProgramsReady = false;
+    OH_LOG_INFO(LOG_APP, "[%s] programs adopted", LOG_TAG);
 }
 
 void SwapFbo() {
@@ -295,51 +418,23 @@ void VizOnSurfaceCreated(OH_NativeXComponent* component, void* window) {
     }
     gStateMode = floatColor ? 2 : 0;
 
-    // 顶点 shader 编译一次，供全部 program 复用
-    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertSrc);
-    if (!vs) {
-        OH_LOG_ERROR(LOG_APP, "[%s] vertex shader compile failed", LOG_TAG);
-        return;
-    }
-    // 每个场景一个 program（程序清单由 CMake 的 SHADER_SCENES 决定）；
-    // pan 在无浮点 FBO 时编译带 PAN_NO_STATE_TEX 的回退变体（同一份源码
-    // 插一个编译期开关，两条路径的寄存器压力互不影响）
-    for (int i = 0; i < kVizPresetCount; i++) {
-        const char* sceneSrc = kFragScene[i];
-        std::string fallbackSrc;
-        if (i == kVizPresetPan && gStateMode != 2) {
-            fallbackSrc = WithPanStateDisabled(sceneSrc);
-            sceneSrc = fallbackSrc.c_str();
+    gStateMode = floatColor ? 2 : 0;
+
+    // 场景 program 改为**后台编译**：编译+链接可达数百毫秒，同步做在 UI
+    // 线程会卡住进页（真机实测）。子线程用共享 context 编译，就绪后主线程
+    // 取用（AdoptProgramsIfReady）——未就绪期间 renderFrame 直接跳过绘制，
+    // 画面随后自然出现，UI 线程零阻塞。
+    gProgramsReady = false;
+    if (!gProgramsBuilding) {
+        gProgramsBuilding = true;
+        if (gBuildThread.joinable()) {
+            gBuildThread.join();
         }
-        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, sceneSrc);
-        if (!fs) {
-            OH_LOG_ERROR(LOG_APP, "[%s] scene %{public}d compile failed", LOG_TAG, i);
-            glDeleteShader(vs);
-            return;
-        }
-        gProgramScene[i] = LinkProgram(vs, fs, &gLocs[i]);
-        glDeleteShader(fs);
-        if (!gProgramScene[i]) {
-            glDeleteShader(vs);
-            return;
-        }
+        gBuildThread = std::thread(BuildProgramsAsync, gStateMode);
     }
-    GLuint fsBlit = CompileShader(GL_FRAGMENT_SHADER, kFragBlit);
-    if (!fsBlit) {
-        glDeleteShader(vs);
-        return;
-    }
-    gProgramBlit = LinkProgram(vs, fsBlit, nullptr);
-    if (!gProgramBlit) {
-        glDeleteShader(vs);
-        return;
-    }
-    gBlitTex = glGetUniformLocation(gProgramBlit, "uTex");
-    glDeleteShader(vs);
-    glDeleteShader(fsBlit);
     gReady = true;
-    OH_LOG_INFO(LOG_APP, "[%s] GLES init ok, size=%{public}dx%{public}d, presets=%{public}d",
-        LOG_TAG, gWidth, gHeight, kVizPresetCount);
+    OH_LOG_INFO(LOG_APP, "[%s] GLES init ok (programs async), size=%{public}dx%{public}d, "
+        "presets=%{public}d", LOG_TAG, gWidth, gHeight, kVizPresetCount);
 }
 
 void VizOnSurfaceShow(OH_NativeXComponent* component, void* window) {
@@ -443,6 +538,12 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
         return;
     }
     if (gEglDisplay == EGL_NO_DISPLAY || !eglMakeCurrent(gEglDisplay, gEglSurface, gEglSurface, gEglContext)) {
+        return;
+    }
+    // 取用后台编译好的 program（首次挂载后几百毫秒内就绪）；未就绪直接
+    // 跳过本帧——画面随后自然出现，绝不阻塞 UI 线程等待编译
+    AdoptProgramsIfReady();
+    if (gProgramScene[0] == 0 || gProgramBlit == 0) {
         return;
     }
     // 场景选择：presetLock 越界时回落 0（ArkTS 保证 0..kVizPresetCount-1）

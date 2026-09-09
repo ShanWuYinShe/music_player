@@ -49,6 +49,10 @@ export struct PlayerPage {
   /** 舞台双态（互斥）：true 封面舞台（默认，Poweramp 习惯，可视化停渲染）；
    * false 纯可视化全屏 */
   @Local coverMode: boolean = true;
+  /** 可视化是否已挂载（单调：一旦挂载不再卸载）——默认封面模式不挂
+   * XComponent，省掉 UI 线程同步编译全场景 shader 的进页卡顿；首次切入
+   * 可视化才挂载，之后保持（卸载重建会触发 EGL 黑屏坑，见 AGENTS） */
+  @Local vizMounted: boolean = false;
   /** 播放模式 @Local 镜像：经状态订阅维护（player 的 @Trace 在真机上不驱动
    * glyph/文案插值，已踩坑； cyclePlayMode/setVolume/启停定时器末尾会调
    * notifyState，见 PlayerController 前提契约） */
@@ -117,6 +121,16 @@ export struct PlayerPage {
     this.player.removeStateListener(this.stateListener);
   }
 
+  /** 切入可视化时才挂载 XComponent（延迟挂载：默认封面模式用不到它，挂载
+   * 会在 UI 线程同步编译全场景 shader，是首次进页卡顿的根因）；切回封面
+   * 不卸载——卸载重建会触发 EGL 黑屏坑（见 AGENTS 真机踩坑①） */
+  @Monitor('coverMode')
+  onCoverModeChange(): void {
+    if (!this.coverMode && !this.vizMounted) {
+      this.vizMounted = true;
+    }
+  }
+
   /**
    * 播放页沉浸态：只维护 stageImmersion 标记并经 applyWindowChrome 统一出口
    * 应用——进入置位后应用恒定深色舞台 chrome（封面/可视化舞台底色恒定深，
@@ -142,25 +156,30 @@ export struct PlayerPage {
     Stack({ alignContent: Alignment.Top }) {
       // 全屏可视化（可视化舞台的视觉主体）：MilkDrop 风格频谱流动层，
       // 延伸至系统栏下自然融合。封面模式下停帧并隐藏——封面与可视化
-      // 互斥：XComponent 保持挂载（避免 EGL 重建黑屏坑），切回即恢复。
+      // 互斥：XComponent 一旦挂载就保持（避免 EGL 重建黑屏坑），切回即
+      // 恢复。**延迟挂载**：默认封面模式用不到它，而 XComponent 挂载会在
+      // UI 线程同步编译全场景 shader（首次进页卡顿的根因）——首次切入
+      // 可视化才挂载，之后不再卸载（vizMounted 只增不减）。
       // 注意其原生表面区域不接收点击——可视化舞台"点画面回封面"由
       // 前景层的舞台占位 Blank 承担（见下方 else 分支）
-      VisualizerView({
-        isPlaying: this.isPlaying,
-        songId: this.song?.id ?? '',
-        presetIndex: this.vizPreset,
-        active: !this.coverMode
-      })
-        .width('100%')
-        .height('100%')
-        .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（PanGesture 位移
-        // 阈值 12vp 与点击不冲突：未达阈值的触摸由 onClick 承担）
-        .gesture(
-          PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
-            .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
-        )
+      if (this.vizMounted) {
+        VisualizerView({
+          isPlaying: this.isPlaying,
+          songId: this.song?.id ?? '',
+          presetIndex: this.vizPreset,
+          active: !this.coverMode
+        })
+          .width('100%')
+          .height('100%')
+          .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+          // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（PanGesture 位移
+          // 阈值 12vp 与点击不冲突：未达阈值的触摸由 onClick 承担）
+          .gesture(
+            PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
+              .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
+          )
+      }
 
       // 封面舞台氛围背景（仅封面模式渲染）：模糊放大的封面做环境光，
       // 叠深色遮罩保证前景可读——封面即舞台光源，无可视化渲染；无封面
