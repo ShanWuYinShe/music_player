@@ -12,9 +12,8 @@ const SWAP_FADE_MS: number = 260;
 const PLAYSCALE_MS: number = 360;
 /** 暂停态缩放比例 */
 const PAUSED_SCALE: number = 0.94;
-/** 纸带吸附安全兜底（毫秒）：交接由动画 onFinish 驱动（弹簧长尾被掐断
- * 会导致肉眼可见的跳变——旧 bug），此定时器只防动画未回调的极端情况
- * （页面隐藏动画挂起等）；finishSettle 幂等可重入 */
+/** 纸带吸附安全兜底（毫秒）：交接由动画 onFinish 驱动，此定时器只防动画
+ * 未回调的极端情况（页面隐藏动画挂起等）；finishSettle 幂等可重入 */
 const SAFETY_SETTLE_MS: number = 1500;
 /** 宽度量不到时的兜底（vp） */
 const FALLBACK_WIDTH_VP: number = 320;
@@ -33,17 +32,19 @@ const RUBBER_MAX_VP: number = 24;
 
 /**
  * 封面滑动纸带（成熟播放器的 pager 模型）：
- * 三格纸带 [上一首 | 当前 | 下一首] 常驻挂载（邻居图进场前已解码，拖动
- * 零首帧卡顿），格间留 CELL_GAP_VP 空隙，窗口 .clip 裁剪——整条纸带只有
- * stripX 一次平移，跟手即时（链上无隐式动画）。松手：
- *   成歌（超阈值/甩动 + 目标侧预览与切歌结果一致）→ 松手瞬间冻结三格
- *   快照，纸带沿手指方向弹簧滑向相邻格位——吸附全程内容纹丝不动（不随
- *   父组件参数异步刷新漂移），落定同帧切回实况 + 纸带瞬时复位（两步互抵
- *   画面零变化，视觉无缝）；
- *   未达阈值/曲目未变 → 弹簧回中；
- *   目标侧无封面（随机/空队列/5 秒回曲首）→ 该侧 rubber-band 阻尼 +
- *   回中（拖不出去是明确的"这边没有了"）；
- *   落定时曲目与预期不符（罕见竞态）→ 交叉淡化遮交接。
+ * 三格 [上一首 | 当前 | 下一首] 常驻挂载（邻居图进场前已解码，拖动零首帧
+ * 卡顿），格间 CELL_GAP_VP 空隙，窗口 .clip 裁剪，整条纸带只有 stripX 一次
+ * 平移，跟手即时（链上无隐式动画）。
+ *
+ * 三格内容是**权威来源**（trioL/trioM/trioR），静止态从实况参数同步。
+ * 松手成歌时一次性完成"内容旋转 + 位移补偿"：
+ *   左滑（下一首）：[上,当,下] → [当,下(目标),空]，stripX += 格距
+ *   右滑（上一首）：[上,当,下] → [空,上(目标),当]，stripX -= 格距
+ * 内容与位移同帧互抵，**屏幕像素一动不动**，且从此中间格就是目标曲——
+ * 后续滑行到落定再无任何"换内容"动作（旧版落定把中格从旧曲换成目标曲，
+ * 正是"滑动完成瞬间文字闪一下"的根因）。
+ * 落定只做收尾：吸附动画由 onFinish 驱动收敛（禁止固定时长掐断弹簧），
+ * 之后同步实况（中格同为它，仅右格补新下一首——在窗外不可见）。
  */
 @ComponentV2
 export struct CoverSwipe {
@@ -59,45 +60,42 @@ export struct CoverSwipe {
   @Param nextCover: CoverRef | null = null;
   @Param prevCover: CoverRef | null = null;
   /** 滑动切歌回调（超阈值/甩动才调）：返回 'same'（曲目未变→回中）或新曲 id
-   * （真换轨→滑向相邻格位）；父组件内同步完成切歌 */
+   * （真换轨→内容旋转+吸附）；父组件内同步完成切歌 */
   @Event onSwipeEnd: (offsetX: number) => string = () => '';
   /** 点按封面回调（父组件切入可视化舞台） */
   @Event onTap: () => void = () => {
   };
-  /** 纸带平移：静止 = -(格宽+间距)（当前格居中），拖动叠加跟手位移，
-   * 收尾动画滑向相邻格位或回中（逐 tick 唯一的 @Local 写） */
+  /** 纸带平移：静止 = -(格宽+间距)（中格居中），拖动叠加跟手位移；内容
+   * 旋转时反向补偿一格（逐 tick 唯一的 @Local 写） */
   @Local stripX: number = 0;
-  /** 是否已测量（widthVp>0 后纸带才有意义，未测量只画当前格） */
+  /** 是否已测量（widthVp>0 后纸带才有意义，未测量不画） */
   @Local measured: boolean = false;
   /** 暂停态缩放（显式动画驱动，无隐式 animation） */
   @Local playScale: number = 1;
-  /** 按钮切歌交叉淡化（1 常态，0 瞬隐后显式淡入；纸带成歌路径不用它，
-   * 仅落定竞态兜底） */
+  /** 按钮切歌交叉淡化（1 常态，0 瞬隐后显式淡入；外部切歌走它） */
   @Local swapFade: number = 1;
   /** 组件实宽（vp）＝格宽 */
   @Local widthVp: number = 0;
-  /** 吸附中：纸带内容一律读松手冻结快照（fz*），实况参数更新被忽略——
-   * 否则滑行途中格子内容就换新、落定再翻一次，出现"来回变一下" */
-  @Local settling: boolean = false;
-  /** 松手冻结快照·左格（旧上一首） */
-  @Local fzPrev: CoverRef | null = null;
-  /** 松手冻结快照·中格（旧当前曲） */
-  @Local fzMid: CoverRef = { path: '', seed: '', title: '' };
-  /** 松手冻结快照·中格透明度（播放态变化不影响滑出者亮度） */
-  @Local fzMidOpacity: number = 1;
-  /** 松手冻结快照·右格（目标新曲） */
-  @Local fzNext: CoverRef | null = null;
-  /** 手势进行中（拖动跟手，纸带内容此时冻结不换） */
+  /** 三格内容·左（上一首；旋转后可能为 null＝未知，静止同步时补齐） */
+  @Local trioL: CoverRef | null = null;
+  /** 三格内容·中（当前曲；成歌后恒为目标曲） */
+  @Local trioM: CoverRef = { path: '', seed: '', title: '' };
+  /** 三格内容·右（下一首；旋转后可能为 null＝未知，静止同步时补齐） */
+  @Local trioR: CoverRef | null = null;
+  /** 吸附中（内容与位移已旋转补偿，等待吸附动画收敛） */
+  private settling: boolean = false;
+  /** 手势进行中（拖动跟手） */
   private dragging: boolean = false;
-  /** 吸附落定定时器（滑向相邻格位后回中） */
+  /** 吸附安全兜底定时器 */
   private settleTimer: number = -1;
-  /** 期望的新曲 id（落定核对：落定时实际曲目不符则交叉淡化遮交接） */
+  /** 期望的新曲 id（落定核对：实际曲目不符则交叉淡化遮交接） */
   private expectedSeed: string = '';
   /** 甩速采样（[位移, 时间戳]，松手前 120ms 窗口算平均速度；private 不触发重建） */
   private velPts: number[][] = [];
 
   aboutToAppear(): void {
     this.playScale = this.isPlaying ? 1 : PAUSED_SCALE;
+    this.syncTrio();
   }
 
   aboutToDisappear(): void {
@@ -118,32 +116,53 @@ export struct CoverSwipe {
     }
   }
 
-  /** 曲目变化：拖动/吸附中不动纸带（吸附中内容读冻结快照，实况更新被
-   * 忽略；静止态即外部切歌——按钮/队列/播完连播——走交叉淡化） */
+  /** 曲目变化（外部切歌：按钮/队列/播完连播）：静止态才同步三格并交叉淡化；
+   * 拖动/吸附中不动（吸附中中格已是目标曲，同步反而是干扰） */
   @Monitor('seedId')
   onSeedChange(): void {
-    if (this.dragging || this.settleTimer >= 0) {
+    if (this.dragging || this.settling) {
       return;
     }
+    this.syncTrio();
     this.swapFade = 0;
     this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
       this.swapFade = 1;
     });
   }
 
+  /** 邻居变化（队列增删等）：静止态静默同步，不动淡化 */
+  @Monitor('prevCover', 'nextCover')
+  onNeighborChange(): void {
+    if (this.dragging || this.settling) {
+      return;
+    }
+    this.syncTrio();
+  }
+
+  /** 从实况参数同步三格（静止态调用：进入页/落定/外部切歌/邻居变化） */
+  private syncTrio(): void {
+    this.trioL = this.prevCover;
+    this.trioM = { path: this.coverPath, seed: this.seedId, title: this.fallbackCurrent };
+    this.trioR = this.nextCover;
+  }
+
   private cellW(): number {
     return this.widthVp > 0 ? this.widthVp : FALLBACK_WIDTH_VP;
   }
 
-  /** 静止纸带位移：当前格居中（左格完全在窗外） */
-  private restX(): number {
-    return -(this.cellW() + CELL_GAP_VP);
+  /** 格距（格宽+间距）：内容旋转一格的位移补偿量 */
+  private pitch(): number {
+    return this.cellW() + CELL_GAP_VP;
   }
 
-  /** 目标侧是否有封面（决定成歌后能否滑过去；松手时实况仍为旧曲，peek
-   * 参数此刻就是旧曲的邻居） */
+  /** 静止纸带位移：中格居中 */
+  private restX(): number {
+    return -this.pitch();
+  }
+
+  /** 目标侧是否有封面（决定能否滑过去；静止/拖动时实况即当前曲的邻居） */
   private sideHasCover(dir: number): boolean {
-    return dir < 0 ? this.nextCover !== null : this.prevCover !== null;
+    return dir < 0 ? this.trioR !== null : this.trioL !== null;
   }
 
   /** 甩动判定：位移未达阈值但松手前 120ms 平均速度达标、且方向一致——
@@ -176,40 +195,42 @@ export struct CoverSwipe {
     return Math.abs(v) >= FLING_VP_PER_MS && (v < 0) === (offsetX < 0);
   }
 
-  /** 松手成功：冻结三格快照 → 切歌 → 纸带沿手指方向滑向相邻格位。
-   * 成歌条件：目标侧有封面（松手实况）且返回值 == 冻结的目标格种子
-   * （预览与切歌一致；不一致说明 peek 判定与实际切歌分叉，退回弹） */
+  /** 松手成功：切歌 → 内容旋转一格（目标进中格）+ 位移反向补偿一格 →
+   * 吸附动画滑到居中。旋转与补偿同帧互抵，屏幕像素不动；此后中格恒为
+   * 目标曲，落定不再换内容 */
   private commitSwipe(offsetX: number): void {
     const dir = offsetX < 0 ? -1 : 1;
-    // 冻结快照必须先于切歌：切歌后父组件参数异步刷新，滑行途中格子
-    // 内容若跟着变，落定时就会看到内容来回翻（用户报障根因）
-    this.fzPrev = this.prevCover;
-    this.fzMid = { path: this.coverPath, seed: this.seedId, title: this.fallbackCurrent };
-    this.fzMidOpacity = this.swapFade * (this.isPlaying ? 1.0 : 0.7);
-    this.fzNext = this.nextCover;
-    this.settling = true;
+    const target = dir < 0 ? this.trioR : this.trioL;
     const result = this.onSwipeEnd(offsetX);
-    const sideSeed = dir < 0
-      ? (this.fzNext !== null ? this.fzNext.seed : '')
-      : (this.fzPrev !== null ? this.fzPrev.seed : '');
-    if (result === 'same' || sideSeed === '' || sideSeed !== result) {
-      this.settling = false;
+    if (result === 'same' || target === null || target.seed !== result) {
+      // 曲目未变（回曲首）/目标格缺失（随机模式）/目标与切歌分叉：回中。
+      // 分叉时实况已换轨，同步三格并用交叉淡化遮交接
+      if (result !== 'same') {
+        this.syncTrio();
+        this.swapFade = 0;
+        this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
+          this.swapFade = 1;
+        });
+      }
       this.springBack();
       return;
     }
     this.dragging = false;
+    this.settling = true;
     this.expectedSeed = result;
-    // 纸带朝手指方向滑：左滑(dir=-1)纸带左移露出右格(下一首)——与手指
-    // 推动方向一致。内容交接由动画 onFinish 驱动：弹簧按固定时长掐断
-    // 会在收敛前跳变（用户仍能看到"文字快速变一下"），onFinish 保证
-    // 弹簧完整收敛到格位后才交内容；LOGICALLY_COMPLETE 在逻辑到位即
-    // 回调，不等弹簧长尾，交接不拖泥带水
+    this.rotateTrio(dir);
+    // 内容旋转一格 → 位移反向补偿一格（左滑 +格距 / 右滑 -格距）：每首歌
+    // 在屏幕上的位置原地不动（本次唯一"变化"是纯状态重排，无像素位移）
+    this.stripX = this.stripX + (dir < 0 ? this.pitch() : -this.pitch());
+    // 吸附：从当前（补偿后的）位置继续沿手指方向滑到中格居中。onFinish
+    // 在弹簧逻辑到位时回调（FinishCallbackType.LOGICALLY_COMPLETE 语义），
+    // 严禁按固定时长掐断——剩余路程瞬移肉眼可见
     this.getUIContext().animateTo({
       duration: 350,
       curve: curves.springMotion(0.75, 0.9),
       onFinish: (): void => this.finishSettle()
     }, () => {
-      this.stripX = this.restX() + dir * (this.cellW() + CELL_GAP_VP);
+      this.stripX = this.restX();
     });
     this.settleTimer = setTimeout(() => {
       this.settleTimer = -1;
@@ -217,18 +238,32 @@ export struct CoverSwipe {
     }, SAFETY_SETTLE_MS);
   }
 
-  /** 吸附落定（动画 onFinish 或安全兜底触发，幂等）：同一帧两步互抵——
-   * 纸带复位到居中 + 内容切回实况。此刻居中的实况中格 == 冻结的目标格
-   * （同曲同图同字），画面零变化；竞态（曲目与预期不符）才交叉淡化遮
-   * 交接。关键：只在弹簧完整收敛后执行——提前掐断动画会让剩余路程瞬移，
-   * 肉眼可见"文字快速变一下" */
+  /** 三格内容旋转一格：目标格内容进中格，另一侧空出（静止同步时补齐）
+   *   左滑（下一首）：[上,当,下] → [当,下,空]
+   *   右滑（上一首）：[上,当,下] → [空,上,当] */
+  private rotateTrio(dir: number): void {
+    if (dir < 0) {
+      this.trioL = this.trioM;
+      this.trioM = this.trioR as CoverRef;
+      this.trioR = null;
+      return;
+    }
+    this.trioR = this.trioM;
+    this.trioM = this.trioL as CoverRef;
+    this.trioL = null;
+  }
+
+  /** 吸附落定（onFinish 或安全兜底触发，幂等）：此刻中格已是目标曲，只需
+   * 收尾——同步实况（中格同为它；右格补上新下一首，在窗外不可见）+ 竞态
+   * （实际曲目与预期不符）才交叉淡化遮交接。**不做任何中格内容替换** */
   private finishSettle(): void {
     if (!this.settling) {
       return;
     }
-    this.settleTimer = -1;
+    this.clearSafety();
     this.settling = false;
     this.stripX = this.restX();
+    this.syncTrio();
     if (this.seedId !== this.expectedSeed) {
       this.swapFade = 0;
       this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
@@ -241,52 +276,28 @@ export struct CoverSwipe {
   /** 未达阈值（且非甩动）/ 曲目未变：弹簧回中（取消语义；音频动作如回曲首已生效） */
   private springBack(): void {
     this.dragging = false;
-    this.settling = false;
     this.getUIContext().animateTo({ curve: curves.springMotion(0.4, 0.8) }, () => {
       this.stripX = this.restX();
     });
   }
 
-  /** 左格内容：吸附中 = 冻结快照（旧上一首）；否则 = 实况上一首 */
-  private leftCell(): CoverRef | null {
-    return this.settling ? this.fzPrev : this.prevCover;
-  }
-
-  /** 中格内容：吸附中 = 冻结快照（旧当前曲，滑出者）；否则 = 实况当前曲 */
-  private midCell(): CoverRef {
-    if (this.settling) {
-      return this.fzMid;
+  private clearSafety(): void {
+    if (this.settleTimer >= 0) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = -1;
     }
-    return { path: this.coverPath, seed: this.seedId, title: this.fallbackCurrent };
-  }
-
-  /** 中格透明度：吸附中 = 冻结值（滑出者亮度不随新曲播放态跳变）；
-   * 否则随 swapFade/播放态 */
-  private midCellOpacity(): number {
-    if (this.settling) {
-      return this.fzMidOpacity;
-    }
-    return this.swapFade * (this.isPlaying ? 1.0 : 0.7);
-  }
-
-  /** 右格内容：吸附中 = 冻结快照（目标新曲，滑入者）；否则 = 实况下一首 */
-  private rightCell(): CoverRef | null {
-    return this.settling ? this.fzNext : this.nextCover;
   }
 
   build() {
     Stack() {
       if (this.measured) {
-        // 三格纸带：整条只有 stripX 一次平移；邻居常驻挂载（解码预热），
-        // 拖动零首帧卡顿；格间 CELL_GAP_VP 空隙，窗口裁剪。
-        // 吸附中(settling)三格全读冻结快照，落定同帧切实况+复位互抵
+        // 三格纸带：整条只有 stripX 一次平移（内容旋转时同帧补偿，像素不动）
         Row({ space: CELL_GAP_VP }) {
-          // 左格：上一首或无（空格配合 rubber-band 表达"这边没有了"）
-          if (this.leftCell() !== null) {
+          if (this.trioL !== null) {
             CoverArt({
-              coverPath: (this.leftCell() as CoverRef).path,
-              seedId: (this.leftCell() as CoverRef).seed,
-              fallbackText: (this.leftCell() as CoverRef).title,
+              coverPath: (this.trioL as CoverRef).path,
+              seedId: (this.trioL as CoverRef).seed,
+              fallbackText: (this.trioL as CoverRef).title,
               radius: 16, glyphSize: 88, onStage: true
             })
               .width(this.widthVp)
@@ -298,24 +309,23 @@ export struct CoverSwipe {
               .width(this.widthVp)
               .height(this.widthVp)
           }
-          // 中格：当前曲（吸附中为旧当前曲，被滑出）
+          // 中格：静止=当前曲，成歌后恒为目标曲（全程不再替换）
           CoverArt({
-            coverPath: this.midCell().path,
-            seedId: this.midCell().seed,
-            fallbackText: this.midCell().title,
+            coverPath: this.trioM.path,
+            seedId: this.trioM.seed,
+            fallbackText: this.trioM.title,
             radius: 16, glyphSize: 88, onStage: true
           })
             .width(this.widthVp)
             .height(this.widthVp)
             .scale({ x: this.playScale, y: this.playScale })
-            .opacity(this.midCellOpacity())
+            .opacity(this.swapFade * (this.isPlaying ? 1.0 : 0.7))
             .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
-          // 右格：下一首或无
-          if (this.rightCell() !== null) {
+          if (this.trioR !== null) {
             CoverArt({
-              coverPath: (this.rightCell() as CoverRef).path,
-              seedId: (this.rightCell() as CoverRef).seed,
-              fallbackText: (this.rightCell() as CoverRef).title,
+              coverPath: (this.trioR as CoverRef).path,
+              seedId: (this.trioR as CoverRef).seed,
+              fallbackText: (this.trioR as CoverRef).title,
               radius: 16, glyphSize: 88, onStage: true
             })
               .width(this.widthVp)
@@ -346,19 +356,19 @@ export struct CoverSwipe {
     .gesture(
       PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
         .onActionStart((): void => {
-          if (this.settleTimer >= 0) {
+          if (this.settling) {
             return;
           }
           this.dragging = true;
           this.velPts = [];
         })
         .onActionUpdate((e: GestureEvent): void => {
-          if (this.settleTimer >= 0 || !this.dragging) {
+          if (this.settling || !this.dragging) {
             return;
           }
           const raw = e.offsetX;
           // 空侧 rubber-band：没有相邻封面的一侧拖不动（阻尼 + 封顶），
-          // 拖出去多少弹回多少，"这边没有了"的手感
+          // "这边没有了"的手感
           const dir = raw < 0 ? -1 : 1;
           const eff = this.sideHasCover(dir) ? raw
             : Math.sign(raw) * Math.min(Math.abs(raw) * RUBBER_FACTOR, RUBBER_MAX_VP);
@@ -370,7 +380,7 @@ export struct CoverSwipe {
           this.velPts.push([raw, Date.now()]);
         })
         .onActionEnd((e: GestureEvent): void => {
-          if (this.settleTimer >= 0 || !this.dragging) {
+          if (this.settling || !this.dragging) {
             return;
           }
           const offsetX = e.offsetX;
@@ -381,7 +391,7 @@ export struct CoverSwipe {
           this.springBack();
         })
         .onActionCancel((): void => {
-          if (this.settleTimer >= 0) {
+          if (this.settling) {
             return;
           }
           this.springBack();
