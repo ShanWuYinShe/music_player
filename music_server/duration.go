@@ -12,6 +12,7 @@ package main
 // format / ISO 14496-12 / RIFF / Ogg framing）。
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"os"
@@ -193,23 +194,32 @@ func mp4Duration(f *os.File, size int64) int64 {
 	return scanMvhd(readAtFull(f, tailStart, int(size-tailStart)))
 }
 
+// mvhdMarker 是 mp4 盒类型标记,scanMvhd 用 bytes.Index 跳跃定位。
+var mvhdMarker = []byte("mvhd")
+
 // scanMvhd 在字节流中定位 "mvhd" 并解析 timescale/duration（版本 0/1）。
 // 外层门槛按版本 0 的最小 body(20B)放行,版本 1 在分支内再校验长度。
+// 逐个候选位置推进(off=i+1),与原逐字节扫描语义一致,只是用 Index 跳过
+// 无标记区间。
 func scanMvhd(b []byte) int64 {
-	for i := 0; i+24 <= len(b); i++ {
-		if b[i] != 'm' || b[i+1] != 'v' || b[i+2] != 'h' || b[i+3] != 'd' {
-			continue
+	for off := 0; off+24 <= len(b); {
+		i := bytes.Index(b[off:], mvhdMarker)
+		if i < 0 {
+			return 0
+		}
+		i += off
+		if i+24 > len(b) {
+			return 0
 		}
 		body := b[i+4:]
 		version := body[0]
 		if version == 1 {
-			if len(body) < 32 {
-				continue
-			}
-			timescale := binary.BigEndian.Uint32(body[20:24])
-			duration := binary.BigEndian.Uint64(body[24:32])
-			if timescale > 0 && duration > 0 {
-				return int64(duration) * 1000 / int64(timescale)
+			if len(body) >= 32 {
+				timescale := binary.BigEndian.Uint32(body[20:24])
+				duration := binary.BigEndian.Uint64(body[24:32])
+				if timescale > 0 && duration > 0 {
+					return int64(duration) * 1000 / int64(timescale)
+				}
 			}
 		} else {
 			timescale := binary.BigEndian.Uint32(body[12:16])
@@ -218,6 +228,7 @@ func scanMvhd(b []byte) int64 {
 				return int64(duration) * 1000 / int64(timescale)
 			}
 		}
+		off = i + 1
 	}
 	return 0
 }
@@ -259,6 +270,9 @@ func wavDuration(f *os.File) int64 {
 
 // ---- ogg/opus ----
 
+// oggPageMarker 是 Ogg 页同步标记,尾页回扫用 bytes.LastIndex 定位。
+var oggPageMarker = []byte("OggS")
+
 // oggDuration：尾页 granulepos 即总样本数，除以采样率。
 // opus 头声明 48000 恒定；vorbis 采样率在首页 identification header。
 func oggDuration(f *os.File) int64 {
@@ -287,14 +301,20 @@ func oggDuration(f *os.File) int64 {
 		start = 0
 	}
 	tail := readAtFull(f, start, int(size-start))
-	// 从尾向前找最后一个 "OggS" 页头，granulepos 在页头 offset 6（8 字节 LE）
-	for i := len(tail) - 27; i >= 0; i-- {
-		if tail[i] == 'O' && tail[i+1] == 'g' && tail[i+2] == 'g' && tail[i+3] == 'S' {
-			granule := int64(binary.LittleEndian.Uint64(tail[i+6 : i+14]))
-			if granule > 0 {
+	// 从尾向前找最后一个 granulepos 非零的 "OggS" 页头,granulepos 在页头
+	// offset 6（8 字节 LE）;用 LastIndex 逐页回退,语义与原逐字节回扫一致。
+	rest := tail
+	for len(rest) >= 14 {
+		i := bytes.LastIndex(rest, oggPageMarker)
+		if i < 0 {
+			break
+		}
+		if i+14 <= len(rest) {
+			if granule := int64(binary.LittleEndian.Uint64(rest[i+6 : i+14])); granule > 0 {
 				return granule * 1000 / sampleRate
 			}
 		}
+		rest = rest[:i]
 	}
 	return 0
 }

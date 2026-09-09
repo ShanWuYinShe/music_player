@@ -35,7 +35,7 @@ func mkLibrary(t *testing.T) string {
 
 func TestScanLibrary(t *testing.T) {
 	dir := mkLibrary(t)
-	library, byID, err := scanLibrary(dir)
+	library, byID, err := scanLibrary(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestHandleSongsSearchAndLimit(t *testing.T) {
 func TestHandleStreamRange(t *testing.T) {
 	dir := mkLibrary(t)
 	server := newTestServer(t, dir)
-	library, _, err := scanLibrary(dir)
+	library, _, err := scanLibrary(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,5 +195,24 @@ func TestRateLimit(t *testing.T) {
 func TestLoadAppConfigRequiresLibrary(t *testing.T) {
 	if _, err := loadAppConfig(); err == nil {
 		t.Fatal("expect error when library dir missing")
+	}
+}
+
+// 时长增量缓存:命中时路径根本不存在也直接返回旧时长(证明跳过容器
+// 解析);大小/修改时间任一变化即视为未命中,走解析(不存在文件得 0)。
+func TestDurationForCacheReuse(t *testing.T) {
+	mod := time.Now().Truncate(time.Second)
+	old := map[string]cachedDuration{
+		"a/b.mp3": {size: 123, modTime: mod, duration: 456789},
+	}
+	missing := filepath.Join(t.TempDir(), "nope.mp3")
+	if d := durationFor(missing, ".mp3", 123, mod, old, "a/b.mp3"); d != 456789 {
+		t.Fatalf("expect cached duration on hit, got %d", d)
+	}
+	if d := durationFor(missing, ".mp3", 124, mod, old, "a/b.mp3"); d != 0 {
+		t.Fatalf("expect re-probe (0 for missing) on size change, got %d", d)
+	}
+	if d := durationFor(missing, ".mp3", 123, mod.Add(time.Second), old, "a/b.mp3"); d != 0 {
+		t.Fatalf("expect re-probe (0 for missing) on modtime change, got %d", d)
 	}
 }

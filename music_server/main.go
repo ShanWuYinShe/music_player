@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -45,8 +46,9 @@ var supportedExt = map[string]bool{
 	".ogg": true, ".oga": true, ".aac": true, ".opus": true,
 }
 
-// Song 是对外暴露的曲目元数据。本地曲目 DurationMs 恒为 0(音频时长解析
-// 成本高,由客户端在 prepared 后回填);netease 源带真实时长。
+// Song 是对外暴露的曲目元数据。本地曲目 DurationMs 在扫描时由
+// duration.go 解析容器元数据填入(解析失败为 0,由客户端在 prepared 后
+// 回填);netease 源带真实时长。
 // Source 标识来源(library 省略保持兼容,netease 网络源);VIP 标记网易
 // 付费曲目(未配置登录 cookie 时上游只给 30~60s 试听片段,客户端据此提示)。
 type Song struct {
@@ -59,6 +61,10 @@ type Song struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 	Source     string `json:"source,omitempty"`
 	VIP        bool   `json:"vip,omitempty"`
+	// titleLower/artistLower 是扫描时一次算好的小写索引,供本地搜索复用,
+	// 不导出故永不进 JSON。
+	titleLower  string
+	artistLower string
 }
 
 // musicServer 聚合配置、限流器与带 TTL 缓存的曲库索引。
@@ -71,10 +77,14 @@ type musicServer struct {
 	library   []Song
 	byID      map[string]songFile
 	scannedAt time.Time
+	// refreshing 是后台刷新的单飞标记:过期分支同时最多起一个扫描协程。
+	refreshing atomic.Bool
 }
 
 // songFile 是服务端内部条目:对外 Song 元数据 + 磁盘相对路径(流式读取用)。
 // 对外只暴露 ID,磁盘路径永不离开服务进程,杜绝路径穿越。
+// 本地搜索用的小写索引(titleLower/artistLower)由内嵌 Song 携带,扫描时
+// 一次算好(不导出,不进 JSON)。
 type songFile struct {
 	Song
 	relPath string
@@ -110,6 +120,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "共 %d 首\n", len(server.library))
 		return
 	}
+
+	// 启动预热:后台先扫一次,失败只记日志(首请求经 snapshot 同步兜底)。
+	go func() {
+		if err := server.refreshLibrary(); err != nil {
+			log.Printf("preload library: %v", err)
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:              config.Addr(),
@@ -203,14 +220,16 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	songs := s.snapshot()
-	matched := make([]Song, 0, len(songs))
+	// q 为空直接复用快照视图;搜索分支按需从小容量增长,不再按全库预分配。
+	var matched []Song
 	if query == "" {
 		matched = songs
 	} else {
+		matched = make([]Song, 0, 16)
 		needle := strings.ToLower(query)
 		for _, song := range songs {
-			if strings.Contains(strings.ToLower(song.Title), needle) ||
-				strings.Contains(strings.ToLower(song.Artist), needle) {
+			if strings.Contains(song.titleLower, needle) ||
+				strings.Contains(song.artistLower, needle) {
 				matched = append(matched, song)
 			}
 		}
@@ -295,7 +314,8 @@ func (s *musicServer) handleStream(w http.ResponseWriter, r *http.Request) {
 // snapshot 返回当前曲库切片(与 s.library 共享底层数组的只读视图,调用方
 // 只做截断与遍历,追加内容前必须拷贝)。首次访问同步扫描保证首请求可用;
 // 索引过期时触发后台刷新并先返回旧数据——大曲库全量扫描耗时,不让请求
-// 跟着等;刷新失败同样推进 scannedAt(冷却一个 TTL 再试),避免失败风暴。
+// 跟着等;后台刷新单飞(同时最多一个扫描协程),刷新失败同样推进
+// scannedAt(冷却一个 TTL 再试),避免失败风暴。
 func (s *musicServer) snapshot() []Song {
 	s.mu.RLock()
 	scanned := s.scannedAt
@@ -312,20 +332,32 @@ func (s *musicServer) snapshot() []Song {
 		return s.library
 	}
 	if time.Since(scanned) >= scanTTL {
-		go s.refreshLibraryOnce()
+		if s.refreshing.CompareAndSwap(false, true) {
+			go func() {
+				defer s.refreshing.Store(false)
+				_ = s.refreshLibraryOnce()
+			}()
+		}
 	}
 	return library
 }
 
-// refreshLibraryOnce 刷新曲库索引(带双检查,并发调用只扫一次);扫描失败
-// 保留旧索引并推进时间戳(冷却一个 TTL),只记日志不报错。
+// refreshLibraryOnce 刷新曲库索引:过期检查与旧缓存构建持读锁,磁盘扫描
+// 在锁外执行(读请求零阻塞),完成后持写锁一次性替换索引。扫描失败保留
+// 旧索引并推进时间戳(冷却一个 TTL),只记日志不报错。
 func (s *musicServer) refreshLibraryOnce() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	if !s.scannedAt.IsZero() && time.Since(s.scannedAt) < scanTTL {
+		s.mu.RUnlock()
 		return nil
 	}
-	library, byID, err := scanLibrary(s.config.LibraryDir)
+	old := buildDurationCache(s.byID)
+	dir := s.config.LibraryDir
+	s.mu.RUnlock()
+
+	library, byID, err := scanLibrary(dir, old)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil {
 		log.Printf("scan library: %v", err)
 		s.scannedAt = time.Now()
@@ -337,23 +369,46 @@ func (s *musicServer) refreshLibraryOnce() error {
 	return nil
 }
 
-// refreshLibrary 强制同步扫描一次(启动自检/library-review 用)。
+// refreshLibrary 强制同步扫描一次(启动预热/启动自检/library-review 用),
+// 全量解析时长。
 func (s *musicServer) refreshLibrary() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	library, byID, err := scanLibrary(s.config.LibraryDir)
+	library, byID, err := scanLibrary(s.config.LibraryDir, nil)
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.library = library
 	s.byID = byID
 	s.scannedAt = time.Now()
 	return nil
 }
 
+// cachedDuration 是上次索引留下的时长复用依据:大小与修改时间都未变才
+// 视为同一文件,跳过容器解析。
+type cachedDuration struct {
+	size     int64
+	modTime  time.Time
+	duration int64
+}
+
+// buildDurationCache 从当前索引构建旧时长缓存(调用方须至少持读锁)。
+func buildDurationCache(byID map[string]songFile) map[string]cachedDuration {
+	if len(byID) == 0 {
+		return nil
+	}
+	old := make(map[string]cachedDuration, len(byID))
+	for _, e := range byID {
+		old[e.relPath] = cachedDuration{size: e.SizeBytes, modTime: e.modTime, duration: e.DurationMs}
+	}
+	return old
+}
+
 // scanLibrary 递归扫描曲库目录,解析文件名元数据并构建 ID 索引。
 // 一级子目录名作为专辑名,根目录文件专辑为空。
-func scanLibrary(dir string) ([]Song, map[string]songFile, error) {
+// old 为上次索引的时长缓存:大小与修改时间未变的文件跳过容器解析,
+// 直接复用旧时长;nil 表示全量解析。
+func scanLibrary(dir string, old map[string]cachedDuration) ([]Song, map[string]songFile, error) {
 	byID := make(map[string]songFile)
 	library := make([]Song, 0, 64)
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -391,13 +446,15 @@ func scanLibrary(dir string) ([]Song, map[string]songFile, error) {
 		}
 		entry := songFile{
 			Song: Song{
-				ID:         id,
-				Title:      title,
-				Artist:     artist,
-				Album:      album,
-				Format:     strings.TrimPrefix(ext, "."),
-				SizeBytes:  info.Size(),
-				DurationMs: probeDurationSafe(path, ext, info.Size()),
+				ID:          id,
+				Title:       title,
+				Artist:      artist,
+				Album:       album,
+				Format:      strings.TrimPrefix(ext, "."),
+				SizeBytes:   info.Size(),
+				DurationMs:  durationFor(path, ext, info.Size(), info.ModTime(), old, relSlash),
+				titleLower:  strings.ToLower(title),
+				artistLower: strings.ToLower(artist),
 			},
 			relPath: relSlash,
 			modTime: info.ModTime(),
@@ -416,6 +473,15 @@ func scanLibrary(dir string) ([]Song, map[string]songFile, error) {
 		return library[i].ID < library[j].ID
 	})
 	return library, byID, nil
+}
+
+// durationFor 返回文件时长:旧缓存命中(大小与修改时间未变)直接复用,
+// 新增或变更的文件才解析容器元数据。
+func durationFor(path, ext string, size int64, modTime time.Time, old map[string]cachedDuration, relSlash string) int64 {
+	if o, ok := old[relSlash]; ok && o.size == size && o.modTime.Equal(modTime) {
+		return o.duration
+	}
+	return probeDurationSafe(path, ext, size)
 }
 
 // probeDurationSafe 打开文件解析时长,任何失败静默返回 0(客户端 prepared

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -256,6 +257,10 @@ func TestNeteaseCookieFileHotReload(t *testing.T) {
 	c.mu.Lock()
 	c.fileRead = time.Time{} // 绕过 30s 间隔
 	c.mu.Unlock()
+	// 搜索缓存会跳过上游直返旧结果,热加载断言须直达上游,先清缓存。
+	c.searchMu.Lock()
+	c.searchCache = nil
+	c.searchMu.Unlock()
 	if _, err := c.search(ctx, "x", 1); err != nil {
 		t.Fatal(err)
 	}
@@ -427,5 +432,49 @@ func TestNeteaseDiscoverFailCooldown(t *testing.T) {
 	}
 	if n := upstreamHits.Load(); n != 2 {
 		t.Fatalf("expect retry after cooldown, got %d hits", n)
+	}
+}
+
+// 搜索缓存命中 + 并发单飞:相同 query|limit 只打一次上游。
+func TestNeteaseSearchCacheAndSingleflight(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cloudsearch" {
+			hits.Add(1)
+			time.Sleep(100 * time.Millisecond) // 放大并发重叠窗口
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"songs":[]}}`))
+	}))
+	defer srv.Close()
+	c := newNeteaseClient(srv.URL, "", "")
+	ctx := context.Background()
+	if _, err := c.search(ctx, "cache-hit", 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.search(ctx, "cache-hit", 5); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("expect 1 upstream hit after cache hit, got %d", n)
+	}
+	// 并发单飞:8 路同 query 同时只打一次上游。
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = c.search(ctx, "singleflight", 5)
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("expect 1 more upstream hit for singleflight batch, got %d total", n)
 	}
 }

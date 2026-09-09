@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +62,37 @@ type neteaseClient struct {
 	discoverMu     sync.Mutex
 	discoverCache  []Song
 	discoverAt     time.Time
+	discoverCached bool
 	discoverFailAt time.Time
+
+	// searchCache 是网易搜索的短 TTL 缓存(key=query|limit);searchFail 为
+	// 同 key 的失败冷却;searchInflight 为同 query 并发单飞(手写,不引依赖)。
+	searchMu       sync.Mutex
+	searchCache    map[string]searchCacheEntry
+	searchFail     map[string]time.Time
+	searchInflight map[string]*searchCall
+}
+
+// searchCacheTTL 是搜索缓存有效期;searchFailCooldown 是搜索失败冷却期;
+// searchCacheMaxEntries 是缓存条数上限,超限整体丢弃重建(防无界增长)。
+const (
+	searchCacheTTL        = 90 * time.Second
+	searchFailCooldown    = 60 * time.Second
+	searchCacheMaxEntries = 64
+)
+
+// searchCacheEntry 是单条搜索缓存。
+type searchCacheEntry struct {
+	songs []Song
+	at    time.Time
+}
+
+// searchCall 是单飞中的一次上游搜索:等 done 关闭后读 songs/err;同时
+// 监听 ctx,调用方取消不阻塞。
+type searchCall struct {
+	done  chan struct{}
+	songs []Song
+	err   error
 }
 
 // cookieReloadInterval 是 cookie 文件的重读检查间隔。
@@ -76,9 +107,13 @@ func newNeteaseClient(base, cookie, cookieFile string) *neteaseClient {
 		cookieFile: cookieFile,
 		cookie:     cookie,
 		api:        &http.Client{Timeout: neteaseUpstreamTimeout},
-		// 流代理不设整体超时(长音频),仅限制上游响应头等待时间防挂死。
+		// 流代理不设整体超时(长音频),仅限制上游响应头等待时间防挂死;
+		// 连接池复用上游 keep-alive 连接,无行为变化。
 		stream: &http.Client{Transport: &http.Transport{
 			ResponseHeaderTimeout: 15 * time.Second,
+			MaxIdleConns:          32,
+			MaxIdleConnsPerHost:   8,
+			IdleConnTimeout:       90 * time.Second,
 		}},
 	}
 }
@@ -160,7 +195,8 @@ func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("upstream %s: %s", path, resp.Status)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	// 2MB 上限防异常大响应撑内存;超限截断后 Decode 失败,走既有上游错误降级。
+	return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out)
 }
 
 // cloudsearchSongs / songURLData 是上游响应的用到的子集。
@@ -208,12 +244,13 @@ type topSongResp struct {
 }
 
 // discover 返回网易「新歌速递」推荐曲目(匿名可用),供空曲库时回填在线
-// 列表,让"在线"开箱即有歌。结果缓存 60s(与曲库扫描 TTL 一致),上游
-// 失败降级为空(不影响请求成功)并进入同长度的失败冷却期,避免上游故障时
-// 每个空列表请求都反复打上游。
+// 列表,让"在线"开箱即有歌。结果缓存 60s(与曲库扫描 TTL 一致,含空结果),
+// 上游失败降级为空(不影响请求成功)并进入同长度的失败冷却期,避免上游
+// 故障时每个空列表请求都反复打上游。discoverCached 显式区分「已缓存
+// (含空)」与「未缓存」,与失败冷却是正交的两份状态。
 func (c *neteaseClient) discover(ctx context.Context) []Song {
 	c.discoverMu.Lock()
-	if time.Since(c.discoverAt) < scanTTL && c.discoverCache != nil {
+	if c.discoverCached && time.Since(c.discoverAt) < scanTTL {
 		defer c.discoverMu.Unlock()
 		return c.discoverCache
 	}
@@ -252,15 +289,70 @@ func (c *neteaseClient) discover(ctx context.Context) []Song {
 	c.discoverMu.Lock()
 	c.discoverCache = songs
 	c.discoverAt = time.Now()
+	c.discoverCached = true
 	c.discoverMu.Unlock()
 	return songs
 }
 
 // search 调上游 /cloudsearch 并映射为对外 Song(id 加 ne_ 前缀)。
+// 结果按 query|limit 短 TTL 缓存,同 query 并发单飞只打一次上游,
+// 失败进入 60s 冷却(冷却期内直接报错,由调用方降级为仅本地结果)。
 func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]Song, error) {
 	if limit <= 0 || limit > neteaseSearchCap {
 		limit = neteaseSearchCap
 	}
+	key := query + "|" + strconv.Itoa(limit)
+
+	c.searchMu.Lock()
+	if e, ok := c.searchCache[key]; ok && time.Since(e.at) < searchCacheTTL {
+		songs := e.songs
+		c.searchMu.Unlock()
+		return songs, nil
+	}
+	if t, ok := c.searchFail[key]; ok && time.Since(t) < searchFailCooldown {
+		c.searchMu.Unlock()
+		return nil, fmt.Errorf("netease search %q cooling down", query)
+	}
+	if call, ok := c.searchInflight[key]; ok {
+		c.searchMu.Unlock()
+		select {
+		case <-call.done:
+			return call.songs, call.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	call := &searchCall{done: make(chan struct{})}
+	if c.searchInflight == nil {
+		c.searchInflight = make(map[string]*searchCall)
+	}
+	c.searchInflight[key] = call
+	c.searchMu.Unlock()
+
+	songs, err := c.searchUpstream(ctx, query, limit)
+
+	c.searchMu.Lock()
+	delete(c.searchInflight, key)
+	if err != nil {
+		if c.searchFail == nil {
+			c.searchFail = make(map[string]time.Time)
+		}
+		c.searchFail[key] = time.Now()
+	} else {
+		if c.searchCache == nil || len(c.searchCache) >= searchCacheMaxEntries {
+			c.searchCache = make(map[string]searchCacheEntry, searchCacheMaxEntries)
+		}
+		c.searchCache[key] = searchCacheEntry{songs: songs, at: time.Now()}
+		delete(c.searchFail, key)
+	}
+	call.songs, call.err = songs, err
+	close(call.done)
+	c.searchMu.Unlock()
+	return songs, err
+}
+
+// searchUpstream 实际打一次上游 /cloudsearch 并映射结果。
+func (c *neteaseClient) searchUpstream(ctx context.Context, query string, limit int) ([]Song, error) {
 	path := fmt.Sprintf("/cloudsearch?keywords=%s&type=1&limit=%d",
 		url.QueryEscape(query), limit)
 	var resp cloudsearchSongs
