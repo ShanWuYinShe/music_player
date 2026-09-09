@@ -116,10 +116,9 @@ export struct MiniPlayerBar {
     // 单一全向手势 + 路径分类器（不拆互斥组：弧线「<」的起始段是横向的，
     // 拆组会被横滑手势抢先认领）。onActionUpdate 采样轨迹点（间隔取样，
     // 上限 32 点），onActionEnd 按轨迹形状一次判定四类：
-    //   纵拉（|dy| 大、横向跨度小）→ 下拉悬停
-    //   折返笔画（横向跨度大 + 纵向有推进 = 走出去又折回来，不要求
-    //   标准 </> 形）→ 源切换
-    //   平直横滑（横向跨度达标、纵向净移小）→ 分类标签切换
+    //   折返笔画（横向跨度 ≥70vp + 折回量 ≥30vp + 纵向轻微推进）→ 源循环
+    //   纵拉（下滑为主：纵向 >60vp 且 ≥ 横向）→ 下拉悬停
+    //   平直横滑（纵向净移 <40vp、横向净移 ≥40vp）→ 分类标签循环
     //   其余（普通斜滑）→ 忽略，不误触发
     .priorityGesture(
       PanGesture({ fingers: 1, direction: PanDirection.All, distance: 25 })
@@ -155,21 +154,20 @@ export struct MiniPlayerBar {
           const xSpan = maxX - minX;
           const ady = Math.abs(dyNet);
           const adx = Math.abs(dxNet);
-          // 纵拉：下拉悬停（只认下拉，上推忽略）
-          if (ady > 60 && xSpan < 60) {
-            if (dyNet > 0) {
-              this.onPullDown();
-            }
-            return;
-          }
           // 折返笔画（不要求标准 < / > 形，任何「横向走出去又折回来」的
-          // 笔画都算——用户决策）：横向跨度大（有过明显的来回）+ 纵向有
-          // 推进（与平直横滑区分）。折返侧定方向：
-          //   向左折返（顶点在左，minX 越出起点左侧多）= 上一个源
-          //   向右折返（顶点在右）= 下一个源
-          if (xSpan >= 90 && ady >= 30) {
+          // 笔画都算——用户决策）：横向跨度达标 + 有明确折回量（跨度−净移，
+          // 平直横滑虽跨度大但无折回，靠它区分，不再要求纵向大推进——压平
+          // 的 </> 也认）；纵向只要求轻微推进（15vp），过滤手指抖动。
+          // 折返侧定方向：向左折返（顶点在左）= 上一个源，向右折返 = 下一个源
+          if (xSpan >= 70 && (xSpan - adx) >= 30 && ady >= 15) {
             const apexLeft = -minX > maxX - dxNet;
             this.onSwipeSource(apexLeft ? -1 : 1);
+            return;
+          }
+          // 纵拉：下拉悬停（只认下拉，上推忽略）。以下滑为主（纵向 ≥ 横向）
+          // 即认——斜着往下拉不再被忽略；横向跨度大的先走上面的折返判定
+          if (dyNet > 0 && ady > 60 && ady >= xSpan) {
+            this.onPullDown();
             return;
           }
           // 平直横滑：切分类标签（无折返倾向：跨度 ≈ |净移|）

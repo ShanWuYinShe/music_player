@@ -1,6 +1,6 @@
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
-import { PlayerController } from '../player/PlayerController';
+import { PlayerController, CoverRef } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
 import { PlayMode, playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
@@ -59,6 +59,10 @@ export struct PlayerPage {
   @Local sleepRemainSec: number = -1;
   /** 音量拖动预览（-1 无拖动）：Moving 只写它不调 setVolume，End 才真正生效 */
   @Local volumePreview: number = -1;
+  /** 相邻封面预览 @Local 镜像（状态订阅里经 peek 同步，下发 CoverSwipe
+   * 做 pager 跟进；随机模式为 null——无预览退化为淡入） */
+  @Local prevCover: CoverRef | null = null;
+  @Local nextCover: CoverRef | null = null;
   private volumeBeforeMute: number = 1;
 
   /** swipe 判定阈值（vp）由 CoverSwipe 导出：封面路径在子组件内判定，
@@ -66,14 +70,30 @@ export struct PlayerPage {
   private static readonly SWIPE_THRESHOLD: number = COVER_SWIPE_THRESHOLD;
 
   /** 横向滑动结束的切歌判定（左滑下一首 / 右滑上一首）。
-   * 封面路径：CoverSwipe 已做阈值判定与滑出/滑入过渡，这里只做实际切歌；
-   * 可视化路径：无封面过渡，在此做阈值判定 */
+   * 封面路径：CoverSwipe 做阈值判定与 pager 过渡，这里只做实际切歌并返回
+   * 结果——'same'（曲目未变：右滑回曲首/单曲重播/空队列→子组件回弹）或
+   * 新曲 id（真换轨→子组件滑出/归位）；切歌同步生效，返回值即对账依据 */
   private onSwipeEnd(offsetX: number): void {
     if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
       this.player.next();
     } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
       this.player.previous();
     }
+  }
+
+  /** 封面滑动对账入口（CoverSwipe 事件）：阈值由子组件判定，这里切歌并
+   * 返回结果供子组件选视觉路径 */
+  private swipeOutcome(offsetX: number): string {
+    const before = this.player.currentSongId;
+    if (offsetX < -PlayerPage.SWIPE_THRESHOLD) {
+      this.player.next();
+    } else if (offsetX > PlayerPage.SWIPE_THRESHOLD) {
+      this.player.previous();
+    } else {
+      return 'same';
+    }
+    const after = this.player.currentSongId;
+    return after === '' || after === before ? 'same' : after;
   }
 
   aboutToAppear(): void {
@@ -86,6 +106,8 @@ export struct PlayerPage {
       this.playMode = this.player.playMode;
       this.volume = this.player.volume;
       this.sleepRemainSec = this.player.sleepRemainSec;
+      this.prevCover = this.player.peekPrevCover();
+      this.nextCover = this.player.peekNextCover();
     };
     this.stateListener(); // 进入即同步一次当前状态
     this.player.addStateListener(this.stateListener);
@@ -243,14 +265,16 @@ export struct PlayerPage {
         // 可视化模式点击画面切风格（由 VisualizerView 内部处理）。
         if (this.coverMode) {
           Column() {
-            // 大封面滑动容器（跟手位移下沉子组件 @Local，拖动不重建页面；
-            // 链上无隐式 animation，跟手即时；滑动成功旧滑出新滑入，
-            // 未达阈值弹簧回弹；点按切入可视化舞台）
+            // 大封面滑动 pager（三层：live 跟手 + 快照滑出 + 隔壁预览跟进；
+            // 链上无隐式 animation，跟手即时；预判命中滑出/归位，曲目未变
+            // 回弹，无预览/预判落空淡入；点按切入可视化舞台）
             CoverSwipe({
               isPlaying: this.isPlaying,
               coverPath: this.song?.coverPath ?? '',
               seedId: this.song?.id ?? '',
-              onSwipeEnd: (offsetX: number): void => this.onSwipeEnd(offsetX),
+              prevCover: this.prevCover,
+              nextCover: this.nextCover,
+              onSwipeEnd: (offsetX: number): string => this.swipeOutcome(offsetX),
               onTap: (): void => {
                 // 点按大封面切入可视化舞台（可视化里点画面回封面）；返回曲库
                 // 只走左上箭头/系统侧滑，内容区点击不做导航，避免轻扫切歌

@@ -25,6 +25,21 @@ function isNetworkUrl(fileName: string): boolean {
   return fileName.startsWith('http://') || fileName.startsWith('https://');
 }
 
+/** 封面预览（路径+种子）：播放页 pager 拖动时展示隔壁封面用。
+ * 注意 V2 规则——对象字面量必须对应 interface，构造一律走 coverRefOf */
+export interface CoverRef {
+  path: string;
+  seed: string;
+}
+
+/** 构造 CoverRef（song 为 null 即无预览） */
+function coverRefOf(song: SongRecord | null): CoverRef | null {
+  if (song === null) {
+    return null;
+  }
+  return { path: song.coverPath, seed: song.id };
+}
+
 /**
  * 播放内核与 UI 状态中心：
  * 封装 AVPlayer 状态机、播放队列与播放模式，@Trace 字段直接驱动界面刷新。
@@ -265,6 +280,46 @@ export class PlayerController {
     }
     const prevIndex = (index - 1 + this.songs.length) % this.songs.length;
     this.playSong(this.songs[prevIndex].id);
+  }
+
+  /** 相邻封面预览（播放页 pager 用）：只做"展示用"的尽力预判——插播头/
+   * 顺序/单曲可确定；随机模式掷骰在切歌瞬间，预判必错直接给 null（子组件
+   * 无预览退化为淡入）；上一首不含 5 秒回曲首规则（那是释放后的对账事，
+   * 子组件拿返回值 'same' 回弹）。纯读状态，无副作用 */
+  peekNextCover(): CoverRef | null {
+    if (this.songs.length === 0) {
+      return null;
+    }
+    // 插播队列：跳过已失效 id，取首个仍存在的（与 shiftQueuedExisting 同语义）
+    for (const id of this.playNextQueue) {
+      const queued = this.findSong(id);
+      if (queued) {
+        return coverRefOf(queued);
+      }
+    }
+    const index = this.currentIndex();
+    if (index < 0) {
+      return coverRefOf(this.songs[0]);
+    }
+    if (this.playMode === PlayMode.SHUFFLE) {
+      return null;
+    }
+    return coverRefOf(this.songs[(index + 1) % this.songs.length]);
+  }
+
+  /** 上一首预览（previous 不消费插播队列，纯按索引；随机给 null） */
+  peekPrevCover(): CoverRef | null {
+    if (this.songs.length === 0) {
+      return null;
+    }
+    const index = this.currentIndex();
+    if (index < 0) {
+      return coverRefOf(this.songs[0]);
+    }
+    if (this.playMode === PlayMode.SHUFFLE) {
+      return null;
+    }
+    return coverRefOf(this.songs[(index - 1 + this.songs.length) % this.songs.length]);
   }
 
   /** 循环切换播放模式并持久化（播放页依赖此 notify 刷新模式图标） */
