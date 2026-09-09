@@ -6,8 +6,6 @@ import { CoverRef } from '../player/PlayerController';
 export const COVER_SWIPE_THRESHOLD: number = 60;
 /** 相邻封面间距（vp）：成熟播放器（Poweramp/Apple Music）的页间留白 */
 const CELL_GAP_VP: number = 24;
-/** 按钮/队列切歌的交叉淡化时长（ms）：旧 crossfade 效果不退化 */
-const SWAP_FADE_MS: number = 260;
 /** 暂停态缩放过渡时长（ms）：沿用旧隐式动画的 360ms 手感 */
 const PLAYSCALE_MS: number = 360;
 /** 暂停态缩放比例 */
@@ -72,8 +70,6 @@ export struct CoverSwipe {
   @Local measured: boolean = false;
   /** 暂停态缩放（显式动画驱动，无隐式 animation） */
   @Local playScale: number = 1;
-  /** 按钮切歌交叉淡化（1 常态，0 瞬隐后显式淡入；外部切歌走它） */
-  @Local swapFade: number = 1;
   /** 组件实宽（vp）＝格宽 */
   @Local widthVp: number = 0;
   /** 三格内容·左（上一首；旋转后可能为 null＝未知，静止同步时补齐） */
@@ -116,18 +112,14 @@ export struct CoverSwipe {
     }
   }
 
-  /** 曲目变化（外部切歌：按钮/队列/播完连播）：静止态才同步三格并交叉淡化；
-   * 拖动/吸附中不动（吸附中中格已是目标曲，同步反而是干扰） */
+  /** 曲目变化（外部切歌：按钮/队列/播完连播）：静止态同步三格。
+   * 亮度恒定不做交叉淡化——用户决策 2026-09：封面加载前后亮度不应变化 */
   @Monitor('seedId')
   onSeedChange(): void {
     if (this.dragging || this.settling) {
       return;
     }
     this.syncTrio();
-    this.swapFade = 0;
-    this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
-      this.swapFade = 1;
-    });
   }
 
   /** 邻居变化（队列增删等）：静止态静默同步，不动淡化 */
@@ -204,13 +196,9 @@ export struct CoverSwipe {
     const result = this.onSwipeEnd(offsetX);
     if (result === 'same' || target === null || target.seed !== result) {
       // 曲目未变（回曲首）/目标格缺失（随机模式）/目标与切歌分叉：回中。
-      // 分叉时实况已换轨，同步三格并用交叉淡化遮交接
+      // 分叉时实况已换轨，同步三格即可（亮度恒定，无淡化）
       if (result !== 'same') {
         this.syncTrio();
-        this.swapFade = 0;
-        this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
-          this.swapFade = 1;
-        });
       }
       this.springBack();
       return;
@@ -254,8 +242,8 @@ export struct CoverSwipe {
   }
 
   /** 吸附落定（onFinish 或安全兜底触发，幂等）：此刻中格已是目标曲，只需
-   * 收尾——同步实况（中格同为它；右格补上新下一首，在窗外不可见）+ 竞态
-   * （实际曲目与预期不符）才交叉淡化遮交接。**不做任何中格内容替换** */
+   * 收尾——同步实况（中格同为它；右格补上新下一首，在窗外不可见）。
+   * **不做任何中格内容替换**；亮度恒定，竞态也不淡化 */
   private finishSettle(): void {
     if (!this.settling) {
       return;
@@ -264,12 +252,6 @@ export struct CoverSwipe {
     this.settling = false;
     this.stripX = this.restX();
     this.syncTrio();
-    if (this.seedId !== this.expectedSeed) {
-      this.swapFade = 0;
-      this.getUIContext().animateTo({ duration: SWAP_FADE_MS, curve: Curve.EaseOut }, () => {
-        this.swapFade = 1;
-      });
-    }
     this.expectedSeed = '';
   }
 
@@ -333,7 +315,6 @@ export struct CoverSwipe {
             .width(this.widthVp)
             .height(this.widthVp)
             .scale({ x: this.playScale, y: this.playScale })
-            .opacity(this.swapFade * (this.isPlaying ? 1.0 : 0.7))
             .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
           if (this.trioR !== null) {
             CoverArt({

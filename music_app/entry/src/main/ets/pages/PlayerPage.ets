@@ -333,21 +333,21 @@ export struct PlayerPage {
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示
-            if (this.song !== null) {
-              Text() {
-                Span(this.songMetaText(this.song))
-                  .fontColor($r('app.color.viz_fg_faint'))
-                if (this.songTrialHint(this.song) !== '') {
-                  Span(` · ${this.songTrialHint(this.song)}`)
-                    .fontColor($r('app.color.accent'))
-                }
+            // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示。
+            // **常驻占位**（无曲目时空串保留行高）：该行出现/消失会顶推上方
+            // 封面区域，正是"封面位置随歌名区域变化"的根因
+            Text() {
+              Span(this.song !== null ? this.songMetaText(this.song) : ' ')
+                .fontColor($r('app.color.viz_fg_faint'))
+              if (this.song !== null && this.songTrialHint(this.song) !== '') {
+                Span(` · ${this.songTrialHint(this.song)}`)
+                  .fontColor($r('app.color.accent'))
               }
-              .fontSize(11)
-              .letterSpacing(0.8)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
             }
+            .fontSize(11)
+            .letterSpacing(0.8)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
