@@ -119,8 +119,18 @@ export class UserData {
       return [];
     }
     try {
-      const value = this.pref.getSync(key, [] as string[]);
-      return value as string[];
+      // getSync 返回泛型 ValueType（联合类型）：先断言为数组形态（编译期），
+      // 再逐项复核元素类型——版本迁移/手改偏好可能塞进脏数据；非数组运行时
+      // 无 length 即得空数组，null 则抛错走外层 catch
+      const arr = this.pref.getSync(key, [] as string[]) as string[];
+      const clean: string[] = [];
+      for (let i = 0; i < arr.length; i++) {
+        const item: string = arr[i];
+        if (typeof item === 'string') {
+          clean.push(item);
+        }
+      }
+      return clean;
     } catch (err) {
       return [];
     }

@@ -77,20 +77,22 @@ export class PlayerController {
   onPlaybackError: ((message: string) => void) | null = null;
   /** 播放状态变化订阅（切歌/启停）：真机上经 @ObservedV2/@Computed 的 UI
    * 依赖对本实例不触发（仅 Text 内容插值存活，已实测），页面靠订阅维护
-   * @Local 镜像驱动渲染 */
-  private stateListeners: Set<() => void> = new Set();
+   * @Local 镜像驱动渲染；reason 语义：'song'=队列/曲目变化（需重建列表），
+   * 'playing'=启停变化（需重建列表当前行），'prefs'=偏好变化（音量/模式/
+   * 定时器，无需重建列表），'state'=其他 */
+  private stateListeners: Set<(reason: string) => void> = new Set();
 
-  addStateListener(fn: () => void): void {
+  addStateListener(fn: (reason: string) => void): void {
     this.stateListeners.add(fn);
   }
 
-  removeStateListener(fn: () => void): void {
+  removeStateListener(fn: (reason: string) => void): void {
     this.stateListeners.delete(fn);
   }
 
-  private notifyState(): void {
+  private notifyState(reason: string = 'state'): void {
     for (const fn of this.stateListeners) {
-      fn();
+      fn(reason);
     }
   }
   /** 连续播放失败计数：任一曲 prepared 成功即清零 */
@@ -118,6 +120,7 @@ export class PlayerController {
   async destroy(): Promise<void> {
     this.generation++;
     this.cancelSleepTimer();
+    this.onlineCache.flush(); // 落盘节流攒下的 lastAccess 刷盘（后台/退出钩子）
     this.persistState();
     await this.releasePlayer();
     await this.session.destroy();
@@ -170,15 +173,22 @@ export class PlayerController {
     this.playNextQueue = [];
   }
 
-  /** 点击列表项播放指定曲目 */
+  /** 点击列表项播放指定曲目（手动动作：清熔断计数，重新开始计数） */
   playSong(id: string): void {
+    this.errorStreak = 0;
+    this.playSongInternal(id);
+  }
+
+  /** 切歌实装：自动链路（失败跳过/播完连播/插播）走此入口，不碰熔断计数，
+   * 否则自动跳过每次清零会导致连续失败永远达不到熔断阈值 */
+  private playSongInternal(id: string): void {
     const song = this.findSong(id);
     if (!song) {
       hilog.warn(DOMAIN, TAG, 'playSong: song not found %{public}s', id);
       return;
     }
     this.currentSongId = id;
-    this.notifyState();
+    this.notifyState('song');
     this.pendingSeekMs = 0;
     this.userData.addRecent(id);
     this.loadAndPlay(song);
@@ -203,31 +213,39 @@ export class PlayerController {
     }
   }
 
-  /** 下一首（手动操作，单曲循环模式下同样切歌）；优先消费插播队列 */
+  /** 下一首（手动操作，单曲循环模式下同样切歌）；优先消费插播队列。
+   * 迷你条/播放页/锁屏调的都是此入口，语义即手动，清熔断计数 */
   next(): void {
+    this.errorStreak = 0;
+    this.autoNext();
+  }
+
+  /** 内部自动前进（失败跳过/播完连播）：原 next 逻辑，不碰熔断计数 */
+  private autoNext(): void {
     if (this.songs.length === 0) {
       return;
     }
     const queuedId = this.shiftQueuedExisting();
     if (queuedId !== '') {
-      this.playSong(queuedId);
+      this.playSongInternal(queuedId);
       return;
     }
     const index = this.currentIndex();
     if (index < 0) {
-      this.playSong(this.songs[0].id);
+      this.playSongInternal(this.songs[0].id);
       return;
     }
     if (this.playMode === PlayMode.SHUFFLE) {
-      this.playSong(this.songs[this.randomIndex(index)].id);
+      this.playSongInternal(this.songs[this.randomIndex(index)].id);
       return;
     }
     const nextIndex = (index + 1) % this.songs.length;
-    this.playSong(this.songs[nextIndex].id);
+    this.playSongInternal(this.songs[nextIndex].id);
   }
 
-  /** 上一首 */
+  /** 上一首（手动操作，清熔断计数） */
   previous(): void {
+    this.errorStreak = 0;
     if (this.songs.length === 0) {
       return;
     }
@@ -249,10 +267,11 @@ export class PlayerController {
     this.playSong(this.songs[prevIndex].id);
   }
 
-  /** 循环切换播放模式并持久化 */
+  /** 循环切换播放模式并持久化（播放页依赖此 notify 刷新模式图标） */
   cyclePlayMode(): void {
     this.playMode = nextPlayMode(this.playMode);
     this.persistState();
+    this.notifyState('prefs');
   }
 
   /** 进度拖拽（毫秒）；拖完即持久化断点，拖动后直接杀进程也不丢进度 */
@@ -268,11 +287,12 @@ export class PlayerController {
     }
   }
 
-  /** 设置音量（0~1），对后续曲目同样生效 */
+  /** 设置音量（0~1），对后续曲目同样生效（播放页依赖此 notify 刷新音量条） */
   setVolume(value: number): void {
     const clamped = Math.min(1, Math.max(0, value));
     this.volume = clamped;
     this.applyVolume();
+    this.notifyState('prefs');
   }
 
   private applyVolume(): void {
@@ -287,10 +307,12 @@ export class PlayerController {
     }
   }
 
-  /** 启动定时关闭（分钟） */
+  /** 启动定时关闭（分钟）：每秒 tick 只改内存不 notify，
+   * 倒计时 Text 插值在真机自存活，无需广播（播放页依赖启停 notify 刷新） */
   startSleepTimer(minutes: number): void {
     this.cancelSleepTimer();
     this.sleepRemainSec = Math.max(1, Math.round(minutes * 60));
+    this.notifyState('prefs');
     this.sleepTimerId = setInterval(() => {
       this.sleepRemainSec -= 1;
       if (this.sleepRemainSec <= 0) {
@@ -306,6 +328,7 @@ export class PlayerController {
       this.sleepTimerId = -1;
     }
     this.sleepRemainSec = -1;
+    this.notifyState('prefs');
   }
 
   /** 删除歌曲：若删除的是当前曲则停止播放，并清理用户数据引用与插播队列（仅本地曲目） */
@@ -353,7 +376,7 @@ export class PlayerController {
     this.generation++;
     this.releasePlayer();
     this.currentSongId = '';
-    this.notifyState();
+    this.notifyState('song');
     this.isPlaying = false;
     this.isPrepared = false;
     this.currentTime = 0;
@@ -373,7 +396,11 @@ export class PlayerController {
       this.pref.putSync(KEY_LAST_SONG, this.currentSongId);
       this.pref.putSync(KEY_LAST_POS, Math.floor(this.currentTime));
       this.pref.putSync(KEY_PLAY_MODE, this.playMode);
-      this.pref.flush();
+      // flush 异步落盘：失败捕获记日志，避免 unhandled rejection（与
+      // AppStore.saveOnlineBaseUrl / UserData.persist 同模式）
+      this.pref.flush().catch((err: Object) => {
+        hilog.warn(DOMAIN, TAG, 'persist state flush failed: %{public}s', JSON.stringify(err));
+      });
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'persist state failed: %{public}s', JSON.stringify(err));
     }
@@ -490,6 +517,16 @@ export class PlayerController {
       await this.session.updateMetadata(song);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load song failed: %{public}s', JSON.stringify(err));
+      // openSync 成功后 url 赋值/元数据更新抛错会留下已打开的 fd：此处回收，
+      // 代际号过期（已有新切歌接管 currentFd）时不得关闭新曲的 fd
+      if (gen === this.generation && this.currentFd >= 0) {
+        try {
+          fs.closeSync(this.currentFd);
+        } catch (closeErr) {
+          hilog.warn(DOMAIN, TAG, 'close leaked fd: %{public}s', JSON.stringify(closeErr));
+        }
+        this.currentFd = -1;
+      }
       this.isPlaying = false;
       this.handlePlaybackFailure(gen, song, '加载失败');
     }
@@ -514,7 +551,7 @@ export class PlayerController {
       return; // 保留现场：用户可手动重试或切歌
     }
     this.onPlaybackError?.(`「${song.title}」${reason}，已跳过`);
-    this.next();
+    this.autoNext();
   }
 
   private registerPlayerEvents(player: media.AVPlayer, gen: number, song: SongRecord): void {
@@ -544,6 +581,8 @@ export class PlayerController {
     if (state === 'initialized') {
       player.prepare().catch((err: Object) => {
         hilog.error(DOMAIN, TAG, 'prepare failed: %{public}s', JSON.stringify(err));
+        // prepare 异步失败同样走统一失败处理（代际去重防与 error 事件双触发）
+        this.handlePlaybackFailure(gen, song, '加载失败');
       });
     } else if (state === 'prepared') {
       this.isPrepared = true;
@@ -567,8 +606,8 @@ export class PlayerController {
           this.rebuildIndex(this.songs);
           // 时长属 SongRecord 普通字段，列表 '--:--' → 时长的刷新须广播：
           // 在线列表展示已与队列解耦（Index.onlineSongs 直持对象引用），
-          // 数组替换不再触发其重算，靠订阅方 reload 兜底
-          this.notifyState();
+          // 数组替换不再触发其重算，订阅方收到 'song' 后 reload 兜底
+          this.notifyState('song');
         }
       } else if (player.duration > 0) {
         this.duration = player.duration;
@@ -588,15 +627,18 @@ export class PlayerController {
       this.pendingSeekMs = 0;
       player.play().catch((err: Object) => {
         hilog.error(DOMAIN, TAG, 'play failed: %{public}s', JSON.stringify(err));
+        // prepared 成功后 play 异步失败同样走统一失败处理（熔断计数保留：
+        // prepared 已清零，此处失败从 0 起计）
+        this.handlePlaybackFailure(gen, song, '播放失败');
       });
     } else if (state === 'playing') {
       this.isPlaying = true;
-      this.notifyState();
+      this.notifyState('playing');
       this.session.updatePlaybackState(true, this.currentTime, 1.0);
       this.session.startBackground();
     } else if (state === 'paused') {
       this.isPlaying = false;
-      this.notifyState();
+      this.notifyState('playing');
       this.session.updatePlaybackState(false, this.currentTime, 1.0);
     } else if (state === 'completed') {
       this.onCompleted();
@@ -609,6 +651,12 @@ export class PlayerController {
   /** 一曲播完，按播放模式决定后续行为 */
   private onCompleted(): void {
     if (this.playMode === PlayMode.SINGLE) {
+      // 单曲循环不再吞插播：有插播先消费插播，否则回到曲首重播
+      const queuedId = this.shiftQueuedExisting();
+      if (queuedId !== '') {
+        this.playSongInternal(queuedId);
+        return;
+      }
       this.currentTime = 0;
       if (this.player) {
         this.player.seek(0);
@@ -627,7 +675,7 @@ export class PlayerController {
       this.persistState();
       return;
     }
-    this.next();
+    this.autoNext();
   }
 
   private currentIndex(): number {

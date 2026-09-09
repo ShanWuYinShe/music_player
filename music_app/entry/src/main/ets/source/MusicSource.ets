@@ -14,6 +14,9 @@ const REQUEST_TIMEOUT_MS = 8000;
 export class OnlineSource {
   /** 用户配置的服务地址（原始输入 trim），空串表示未配置（用默认） */
   configuredUrl: string = '';
+  /** 在途列表查询句柄：新查询先 abort 旧的（latest-wins，弱网连点/清空
+   * 抖动不堆连接；旧响应本就按代际号丢弃，中止只省流量） */
+  private inflightSongs: http.HttpRequest | null = null;
 
   /** 生效地址：配置值非空用它，否则默认服务地址（永不为空） */
   get baseUrl(): string {
@@ -26,7 +29,15 @@ export class OnlineSource {
    * Error 由调用方提示。
    */
   async fetchSongs(query: string = ''): Promise<SongRecord[]> {
+    if (this.inflightSongs !== null) {
+      try {
+        this.inflightSongs.destroy();
+      } catch (err) {
+      }
+      this.inflightSongs = null;
+    }
     const request = http.createHttp();
+    this.inflightSongs = request;
     try {
       const response = await request.request(songsUrl(this.baseUrl, query), {
         method: http.RequestMethod.GET,
@@ -40,6 +51,9 @@ export class OnlineSource {
       }
       return parseOnlineSongs(this.baseUrl, `${response.result}`);
     } finally {
+      if (this.inflightSongs === request) {
+        this.inflightSongs = null;
+      }
       request.destroy();
     }
   }

@@ -50,9 +50,12 @@ export struct MiniPlayerBar {
     Column() {
         Stack({ alignContent: Alignment.TopStart }) {
           Row({ space: 12 }) {
+            // 封面也承担打开播放页（行点击已下沉到文本区，按钮不再被冒泡误带跳页：
+            // ClickEvent 无 stopPropagation，只能结构规避）
             CoverArt({ coverPath: this.info.coverPath, seedId: this.info.seedId, radius: 8, glyphSize: 20 })
               .width(40)
               .height(40)
+              .onClick(() => this.onTapOpen())
 
             Column() {
               Text(this.info.title)
@@ -69,6 +72,8 @@ export struct MiniPlayerBar {
             }
             .layoutWeight(1)
             .alignItems(HorizontalAlign.Start)
+            .accessibilityText(`正在播放：${this.info.title}，${this.info.artist}，点按打开播放页`)
+            .onClick(() => this.onTapOpen())
 
             SymbolGlyph(this.info.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
               .fontSize(26)
@@ -87,8 +92,6 @@ export struct MiniPlayerBar {
           .width('100%')
           .height(BAR_HEIGHT)
           .padding({ left: 16, right: 16 })
-          .accessibilityText(`正在播放：${this.info.title}，${this.info.artist}，点按打开播放页`)
-          .onClick(() => this.onTapOpen())
 
           // 实时进度细线
           Row()

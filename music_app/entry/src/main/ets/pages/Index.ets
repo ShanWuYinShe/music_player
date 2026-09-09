@@ -19,6 +19,10 @@ enum SourceTab {
 
 /** 在线搜索防抖：输入停顿该时长后触发服务端搜索（毫秒） */
 const SEARCH_DEBOUNCE_MS = 600;
+/** 在线清空小防抖：清除键连点 150ms 后直发全量（毫秒） */
+const CLEAR_DEBOUNCE_MS = 150;
+/** 本地搜索微防抖：击键停顿该时长后触发过滤重算（毫秒） */
+const LOCAL_DEBOUNCE_MS = 120;
 
 /**
  * 歌曲列表数据源：包装过滤结果供 LazyForEach 按需创建列表项。
@@ -78,6 +82,14 @@ struct Index {
   @Local onlineSongs: SongRecord[] = [];
   /** 在线搜索防抖定时器 id（-1 无待触发任务） */
   private searchTimerId: number = -1;
+  /** 在线清空小防抖 id：清除键连点不堆连接（600ms 主防抖不动） */
+  private clearTimerId: number = -1;
+  /** 本地搜索微防抖 id：击键 120ms 后同步过滤词（O(n) 双遍不同时刷） */
+  private localTimerId: number = -1;
+  /** 本地过滤词（微防抖后同步 searchText，击键不直接触发全量重算） */
+  @Local debouncedQuery: string = '';
+  /** 网易云登录态 @Local 镜像：VIP 徽标淡化用（enterOnline 等 providers 后同步） */
+  @Local loggedIn: boolean = false;
   /** 在线列表下拉刷新态（Refresh 组件绑定） */
   @Local isRefreshing: boolean = false;
   /** 在线请求代际号：新查询使旧响应作废（latest-wins，慢网下不再丢新查询） */
@@ -98,7 +110,7 @@ struct Index {
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
    * onStateChanged 显式回调驱动 @Local（@Local 的 if 分支可靠） */
   @Local mini: MiniInfo | null = null;
-  private stateListener: () => void = (): void => {
+  private stateListener: (reason: string) => void = (_reason: string): void => {
   };
 
   aboutToAppear(): void {
@@ -110,7 +122,7 @@ struct Index {
     };
     // 播放状态镜像：切歌/启停时刷新 mini bar 并重建列表当前行。
     // 上轮提交此处接线丢失（文本替换静默失败），导致 mini bar 永不出现——已回踩
-    this.stateListener = (): void => {
+    this.stateListener = (reason: string): void => {
       const song = appStore.player.currentSong;
       const hadMini = this.mini !== null;
       this.mini = song === null ? null : {
@@ -125,25 +137,37 @@ struct Index {
         promptAction.showToast({ message: '在迷你条上向下滑，可把顶部拉下来单手操作', duration: 3000 });
         appStore.userData.markReachHintSeen();
       }
-      // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动
-      this.songSource.reload(this.filteredSongs);
+      // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动；
+      // 偏好变化（音量/模式/定时，reason='prefs'）不涉及行状态，跳过重建
+      if (reason !== 'prefs') {
+        this.songSource.reload(this.filteredSongs);
+      }
     };
     appStore.player.addStateListener(this.stateListener);
     // 冷启动恢复的播放态发生在本组件挂载前(init 早于 aboutToAppear)，补一次同步
-    this.stateListener();
+    this.stateListener('song');
+  }
+
+  aboutToDisappear(): void {
+    // 根页面常驻导航栈底，状态订阅不摘（摘了若不再触发 aboutToAppear 会断
+    // mini 更新）；只清短时防抖定时器
+    this.cancelPendingSearch();
+    this.cancelClearSearch();
+    this.cancelLocalFilter();
   }
 
   /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
    * 在线模式展示 onlineSongs（最近一次成功结果，q 已在服务端匹配并聚合
    * 网络源），不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉，
-   * 也不直读 player.songs——它是播放队列，加载期间还是本地曲库。 */
+   * 也不直读 player.songs——它是播放队列，加载期间还是本地曲库。
+   * 本地分支读微防抖后的 debouncedQuery：击键不同时触发全量 filter+sort */
   @Computed
   get filteredSongs(): SongRecord[] {
     if (this.sourceTab === SourceTab.ONLINE) {
       return this.onlineSongs;
     }
     const opts: FilterOptions = {
-      query: this.searchText,
+      query: this.debouncedQuery,
       tab: this.tab,
       sort: this.sortMode,
       favoriteIds: appStore.userData.favoriteIds,
@@ -251,10 +275,17 @@ struct Index {
               this.searchText = value;
               if (this.sourceTab === SourceTab.ONLINE) {
                 // 在线搜索由服务端完成（含网络源聚合），输入停顿后触发；
-                // 框内清除键清空即回到服务器曲库全量
+                // 框内清除键清空走 150ms 小防抖回到服务器曲库全量（连点清空
+                // 不堆连接，在途旧查询由 OnlineSource abort）
                 if (value === '' && prev !== '') {
-                  this.enterOnline('');
+                  this.cancelPendingSearch();
+                  this.cancelClearSearch();
+                  this.clearTimerId = setTimeout(() => {
+                    this.clearTimerId = -1;
+                    this.enterOnline('');
+                  }, CLEAR_DEBOUNCE_MS);
                 } else {
+                  this.cancelClearSearch();
                   this.scheduleOnlineSearch();
                 }
                 return;
@@ -263,12 +294,19 @@ struct Index {
                 // 搜索时自动切回全部，避免「喜欢」子集里搜不到造成困惑
                 this.tab = LibraryTab.ALL;
               }
+              // 本地即时过滤改 120ms 微防抖：击键不同时触发全量 filter+sort
+              // 双遍重算（千首量级输入卡），120ms 体感仍即时
+              this.scheduleLocalFilter();
             })
             .onSubmit((value: string) => {
-              // 键盘搜索键：在线立即触发一次（不等防抖），本地已是即时过滤
+              // 键盘搜索键：在线立即触发一次（不等防抖），本地已是微防抖过滤
               if (this.sourceTab === SourceTab.ONLINE) {
                 this.cancelPendingSearch();
+                this.cancelClearSearch();
                 this.enterOnline(value.trim());
+              } else {
+                this.cancelLocalFilter();
+                this.debouncedQuery = value;
               }
             })
         }
@@ -403,6 +441,7 @@ struct Index {
               isCurrent: song.id === appStore.player.currentSongId,
               isPlaying: appStore.player.isPlaying,
               keyword: this.searchText,
+              loggedIn: this.loggedIn,
               onItemClick: (id: string) => appStore.player.playSong(id)
             })
               .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
@@ -423,8 +462,9 @@ struct Index {
     .padding({ left: 16, right: 16, bottom: 12 })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
-      // 远离顶部才在拇指区露出回顶按钮，回到顶部自动收起
-      this.showBackTop = start > 2;
+      // 滚过约一屏半才在拇指区露出回顶按钮（阈值太小稍滚即出，抢底部拇指区），
+      // 回到顶部自动收起
+      this.showBackTop = start > 8;
     })
   }
 
@@ -837,6 +877,9 @@ struct Index {
     this.sourceTab = tab;
     this.showBackTop = false;
     this.cancelPendingSearch();
+    this.cancelClearSearch();
+    this.cancelLocalFilter();
+    this.debouncedQuery = this.searchText;
     if (tab === SourceTab.ONLINE) {
       this.enterOnline(this.searchText.trim());
     } else {
@@ -891,15 +934,48 @@ struct Index {
     }
   }
 
+  /** 清空小防抖取消（切源/新输入/提交时调用） */
+  private cancelClearSearch(): void {
+    if (this.clearTimerId >= 0) {
+      clearTimeout(this.clearTimerId);
+      this.clearTimerId = -1;
+    }
+  }
+
+  /** 本地微防抖：120ms 后把 searchText 同步给 debouncedQuery 触发过滤 */
+  private scheduleLocalFilter(): void {
+    this.cancelLocalFilter();
+    this.localTimerId = setTimeout(() => {
+      this.localTimerId = -1;
+      this.debouncedQuery = this.searchText;
+    }, LOCAL_DEBOUNCE_MS);
+  }
+
+  private cancelLocalFilter(): void {
+    if (this.localTimerId >= 0) {
+      clearTimeout(this.localTimerId);
+      this.localTimerId = -1;
+    }
+  }
+
   /** 进入在线源：按关键词拉取曲目（空=曲库全量），成功后更新展示列表
    * (onlineSongs) 并替换播放队列；失败时保留旧列表并提示。
-   * latest-wins：在途请求期间的新查询立即发出，旧响应按代际号作废丢弃 */
+   * latest-wins：在途请求期间的新查询立即发出，旧响应按代际号作废丢弃；
+   * 在途旧查询由 OnlineSource abort，不占连接 */
   private async enterOnline(query: string): Promise<void> {
     const reqId = ++this.onlineRequestId;
     this.onlineLoading = true;
     this.onlineError = '';
-    appStore.refreshOnlineProviders().catch(() => {
-    });
+    // 先等登录态（本地 /providers 一次短 RTT）：VIP 完整曲的 prefetch 判定
+    // 依赖它；fire-and-forget 会让首批曲目在登录态晚到时误判试听跳过缓存
+    try {
+      await appStore.refreshOnlineProviders();
+    } catch (err) {
+    }
+    if (reqId !== this.onlineRequestId) {
+      return; // 等待期间被新查询取代
+    }
+    this.loggedIn = appStore.neteaseLoggedIn;
     try {
       const list = await appStore.onlineSource.fetchSongs(query);
       if (reqId !== this.onlineRequestId) {
@@ -917,8 +993,8 @@ struct Index {
       }
       this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
       if (this.onlineSongs.length > 0) {
-        // 拉取失败但有旧缓存：继续用旧列表，不打断已有队列
-        appStore.player.setOnlineQueue(this.onlineSongs);
+        // 拉取失败但有旧缓存：队列本就是旧列表，无需重复 setOnlineQueue，
+        // 只提示继续用旧列表
         promptAction.showToast({ message: '在线列表拉取失败，正在展示上次结果' });
       }
     } finally {
@@ -956,6 +1032,10 @@ struct Index {
           message = `${result.dup} 首已在曲库，${result.failed} 首导入失败`;
         } else {
           message = '导入失败，请重试';
+        }
+        // 选择器单次上限 100：选满即可能截断，提示分批
+        if (uris.length >= 100) {
+          message += '（单次最多 100 首，剩余请分批导入）';
         }
         promptAction.showToast({ message: message });
       }

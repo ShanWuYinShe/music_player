@@ -11,6 +11,10 @@ const MAX_CACHE_BYTES = 500 * 1024 * 1024;
 /** 下载连接/读取超时（毫秒）：整曲下载给足读取宽限 */
 const CONNECT_TIMEOUT_MS = 8000;
 const READ_TIMEOUT_MS = 60000;
+/** 索引落盘节流：命中攒够该次数才落盘（高频切歌不写文件） */
+const PERSIST_DIRTY_LIMIT = 20;
+/** 索引落盘节流：距上次落盘超该时长（毫秒）也落盘（低频命中不丢 lastAccess） */
+const PERSIST_INTERVAL_MS = 30000;
 /** 索引文件名（存于缓存目录内） */
 const INDEX_FILE = 'index.json';
 
@@ -33,6 +37,9 @@ export class OnlineCache {
   private index: Map<string, CacheEntry> = new Map<string, CacheEntry>();
   /** 正在后台下载的 key（防重复下载；切歌取消后移出） */
   private inflight: Set<string> = new Set<string>();
+  /** 落盘节流态：攒够次数或超间隔才写文件（高频切歌不碰磁盘） */
+  private dirtyCount: number = 0;
+  private lastPersistMs: number = 0;
 
   init(context: common.UIAbilityContext): void {
     this.dir = `${context.filesDir}/online_cache`;
@@ -61,16 +68,35 @@ export class OnlineCache {
     try {
       if (!fs.accessSync(path)) {
         this.index.delete(songId);
-        this.persistIndex();
+        this.markDirty(true); // 条目删除须落盘（低频，立即写）
         return '';
       }
     } catch (err) {
       return '';
     }
     entry.lastAccess = Date.now();
-    this.persistIndex();
+    this.markDirty(false); // 高频命中只记内存，攒够再落盘
     hilog.info(DOMAIN, TAG, 'cache hit: %{public}s', songId);
     return path;
+  }
+
+  /** 索引变脏：攒够次数或超间隔才落盘；force 立即落盘（删除/淘汰/退出） */
+  private markDirty(force: boolean): void {
+    if (force) {
+      this.flush();
+      return;
+    }
+    this.dirtyCount += 1;
+    if (this.dirtyCount >= PERSIST_DIRTY_LIMIT || Date.now() - this.lastPersistMs >= PERSIST_INTERVAL_MS) {
+      this.flush();
+    }
+  }
+
+  /** 立即落盘（退出/后台钩子与强制点调用，顺手清零节流计数） */
+  flush(): void {
+    this.dirtyCount = 0;
+    this.lastPersistMs = Date.now();
+    this.persistIndex();
   }
 
   /**

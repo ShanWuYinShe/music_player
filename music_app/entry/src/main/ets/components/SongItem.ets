@@ -18,6 +18,8 @@ export struct SongItem {
   @Param @Require song: SongRecord;
   @Param isCurrent: boolean = false;
   @Param isPlaying: boolean = false;
+  /** 网易云已登录：VIP 曲为完整播放，徽标淡化（试听态才强调；播放页另有试听标注） */
+  @Param loggedIn: boolean = false;
   /** 搜索关键词（大小写不敏感高亮命中片段，空串不高亮） */
   @Param keyword: string = '';
   @Event onItemClick: (id: string) => void = () => {
@@ -69,12 +71,14 @@ export struct SongItem {
         Row({ space: 6 }) {
           this.HighlightText(this.titleSegments,
             this.isCurrent ? CURRENT_COLOR : $r('app.color.editorial_title'), 17, FontWeight.Bold)
-          // 网易云付费曲目徽标：轻量小字（未登录时播放页追加「VIP 试听」标注）
+          // 网易云付费曲目徽标：轻量小字（未登录时播放页追加「VIP 试听」标注）；
+          // 已登录播完整版，徽标淡化只做身份说明
           if (this.song.vip === true) {
             Text('VIP')
               .fontSize(9)
               .fontWeight(FontWeight.Medium)
               .fontColor(CURRENT_COLOR)
+              .opacity(this.loggedIn ? 0.45 : 1)
               .letterSpacing(1)
           }
         }
