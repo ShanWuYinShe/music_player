@@ -56,12 +56,12 @@ export struct SettingsPage {
         Column() {
           SymbolGlyph($r('sys.symbol.music_note_list'))
             .fontSize(24)
-            .fontColor([$r('app.color.paper')])
+            .fontColor([$r('app.color.on_accent')])
         }
         .width(44)
         .height(44)
         .borderRadius(12)
-        .backgroundColor($r('app.color.ink'))
+        .backgroundColor($r('app.color.accent'))
         .justifyContent(FlexAlign.Center)
 
         Column({ space: 3 }) {
@@ -153,12 +153,12 @@ export struct SettingsPage {
         Column() {
           SymbolGlyph($r('sys.symbol.music_note_list'))
             .fontSize(26)
-            .fontColor([$r('app.color.paper')])
+            .fontColor([$r('app.color.on_accent')])
         }
         .width(52)
         .height(52)
         .borderRadius(12)
-        .backgroundColor($r('app.color.ink'))
+        .backgroundColor($r('app.color.accent'))
         .justifyContent(FlexAlign.Center)
         Column({ space: 4 }) {
           Text('音乐播放器')
@@ -187,8 +187,8 @@ export struct SettingsPage {
           .fontSize(15)
           .fontWeight(FontWeight.Medium)
           .borderRadius(23)
-          .backgroundColor($r('app.color.ink'))
-          .fontColor($r('app.color.paper'))
+          .backgroundColor($r('app.color.accent'))
+          .fontColor($r('app.color.on_accent'))
           .onClick(() => this.saveAndTest())
       }
       .width('100%')
