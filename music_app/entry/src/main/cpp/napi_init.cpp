@@ -89,7 +89,9 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     napi_value args[12] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     if (argc < 12) {
-        return nullptr;
+        napi_value no = nullptr;
+        napi_get_boolean(env, false, &no);
+        return no;
     }
     double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1, transition = 1;
     double tiltX = 0, tiltY = 0, spin = 0, kick = 0;
@@ -106,9 +108,13 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     napi_get_value_double(env, args[9], &tiltY);
     napi_get_value_double(env, args[10], &spin);
     napi_get_value_double(env, args[11], &kick);
-    VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition, tiltX, tiltY,
-                   spin, kick);
-    return nullptr;
+    bool drew = VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition,
+                               tiltX, tiltY, spin, kick);
+    // 返回是否真的绘制：未就绪（场景 program 后台编译中）时 false，ArkTS
+    // 侧据此显示编译中占位过渡，避免切到可视化时的空屏
+    napi_value out = nullptr;
+    napi_get_boolean(env, drew, &out);
+    return out;
 }
 
 napi_value Destroy(napi_env env, napi_callback_info info) {

@@ -64,6 +64,13 @@ export struct VisualizerView {
   private running = false;
   private disposed = false;
   private ready = false;
+  /** 场景 program 是否已画出首帧（后台编译完成标志）：false 时叠编译中
+   * 占位层，true 后淡出——避免切到可视化时的空屏 */
+  @Local vizReady: boolean = false;
+  /** 占位层可见性（跟随 vizReady 淡出后彻底移除） */
+  @Local placeholderOn: boolean = true;
+  /** 占位柔光呼吸值（0.35~0.6 循环，displaySync 已有帧驱动，复用它） */
+  @Local placeholderBreath: number = 0.5;
 
   private lastSongId = '';
   private seed = 0;
@@ -220,6 +227,10 @@ export struct VisualizerView {
     }
     if (this.isPlaying) {
       this.startLoop();
+    } else if (!this.vizReady) {
+      // 编译期间暂停态也保持帧循环：占位呼吸与"编译完成检测"都靠它驱动，
+      // 否则暂停时切入可视化，占位静止且就绪检测永不触发
+      this.startLoop();
     } else {
       this.fadeDeadline = Date.now() + FADE_MS;
     }
@@ -292,10 +303,26 @@ export struct VisualizerView {
         this.kick = 0;
       }
     }
-    entry.renderFrame(t, this.seed, playing, beat, bass, treble, this.presetLock, this.presetTrans,
-      this.tiltX, this.tiltY, this.spin, this.kick);
+    const drew: boolean = entry.renderFrame(t, this.seed, playing, beat, bass, treble,
+      this.presetLock, this.presetTrans, this.tiltX, this.tiltY, this.spin, this.kick);
+    // 占位柔光呼吸：正弦涨落 0.35~0.6（周期 ~1.6s，只动亮度，防闪烁合规）
+    if (!this.vizReady) {
+      this.placeholderBreath = 0.475 + 0.125 * Math.sin(now / 260);
+    }
+    // 首个成功绘制的帧 = 后台编译完成：撤下编译中占位（淡出）
+    if (drew && !this.vizReady) {
+      this.vizReady = true;
+      this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
+        this.placeholderOn = false;
+      });
+    }
     if (!playing && now > this.fadeDeadline) {
-      this.stopLoop();
+      // 占位还在时不自动停帧（呼吸与就绪检测靠循环驱动），撤占位后恢复原逻辑
+      if (this.placeholderOn) {
+        this.fadeDeadline = now + FADE_MS;
+      } else {
+        this.stopLoop();
+      }
     }
   }
 
@@ -322,6 +349,28 @@ export struct VisualizerView {
           this.ready = true;
           this.syncState();
         })
+      // 编译中占位：场景 program 在子线程编译的窗口期（挂载后几百毫秒）
+      // 遮住空屏——恒暗舞台底 + 中央柔光缓慢呼吸，暗示"正在点亮"；
+      // 首个绘制帧后 300ms 淡出。不叠任何文字/图标，避免抢戏。
+      // 呼吸动画防闪烁合规：只动亮度，色相恒定
+      if (this.placeholderOn) {
+        Stack({ alignContent: Alignment.Center }) {
+          Column()
+            .width('62%')
+            .aspectRatio(1)
+            .radialGradient({
+              center: ['50%', '50%'],
+              radius: '62%',
+              colors: [[$r('app.color.viz_line'), 0], [$r('app.color.viz_fg_faint'), 1]]
+            })
+            .opacity(this.placeholderBreath)
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.viz_fg_faint'))
+        .opacity(this.vizReady ? 0 : 1)
+        .visibility(this.vizReady ? Visibility.Hidden : Visibility.Visible)
+      }
     }
     .width('100%')
     .height('100%')

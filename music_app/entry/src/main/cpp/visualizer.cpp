@@ -531,20 +531,20 @@ void ResizeFeedbackTextures(int newW, int newH) {
     gTexH = newH;
 }
 
-void VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
+bool VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
                      double presetLock, double transition, double tiltX, double tiltY,
                      double spin, double kick) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
-        return;
+        return false;
     }
     if (gEglDisplay == EGL_NO_DISPLAY || !eglMakeCurrent(gEglDisplay, gEglSurface, gEglSurface, gEglContext)) {
-        return;
+        return false;
     }
     // 取用后台编译好的 program（首次挂载后几百毫秒内就绪）；未就绪直接
     // 跳过本帧——画面随后自然出现，绝不阻塞 UI 线程等待编译
     AdoptProgramsIfReady();
     if (gProgramScene[0] == 0 || gProgramBlit == 0) {
-        return;
+        return false;
     }
     // 场景选择：presetLock 越界时回落 0（ArkTS 保证 0..kVizPresetCount-1）
     int idx = static_cast<int>(presetLock + 0.5);
@@ -622,4 +622,5 @@ void VizRenderFrame(double t, double seed, bool playing, double beat, double bas
     glBindVertexArray(0);
     SwapFbo();
     eglSwapBuffers(gEglDisplay, gEglSurface);
+    return true;
 }

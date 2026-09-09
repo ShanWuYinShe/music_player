@@ -8,7 +8,6 @@ const DOMAIN = 0x0004;
 const KEY_FAVORITE_IDS = 'favorite_ids';
 const KEY_RECENT_IDS = 'recent_ids';
 const KEY_SORT_MODE = 'library_sort_mode';
-const KEY_REACH_HINT = 'reach_hint_seen';
 
 /** 最近播放记录条数上限 */
 export const RECENT_LIMIT = 200;
@@ -133,33 +132,6 @@ export class UserData {
       return clean;
     } catch (err) {
       return [];
-    }
-  }
-
-  /** 下拉悬停手势提示是否已展示过（入口无可见控件，只教一次） */
-  hasSeenReachHint(): boolean {
-    if (!this.pref) {
-      return true;
-    }
-    try {
-      return (this.pref.getSync(KEY_REACH_HINT, false) as boolean) === true;
-    } catch (err) {
-      return true;
-    }
-  }
-
-  /** 标记悬停提示已展示（持久化，失败仅多展示一次） */
-  markReachHintSeen(): void {
-    if (!this.pref) {
-      return;
-    }
-    try {
-      this.pref.putSync(KEY_REACH_HINT, true);
-      this.pref.flush().catch((err: Object) => {
-        hilog.warn(DOMAIN, TAG, 'flush reach hint failed: %{public}s', JSON.stringify(err));
-      });
-    } catch (err) {
-      hilog.warn(DOMAIN, TAG, 'persist reach hint failed: %{public}s', JSON.stringify(err));
     }
   }
 }

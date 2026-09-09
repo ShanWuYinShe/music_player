@@ -24,9 +24,6 @@ export struct MiniPlayerBar {
   @Param @Require info: MiniInfo;
   @Event onTapOpen: () => void = () => {
   };
-  /** 迷你条下滑：单手够不到顶部时，把首页内容下拉悬停到拇指区（Reachability） */
-  @Event onPullDown: () => void = () => {
-  };
   /** 水平滑 = 分类标签切换（全部→喜欢→最近循环，方向即顺序），仅本地源 */
   @Event onSwipeTab: (direction: number) => void = (_direction: number) => {
   };
@@ -51,7 +48,6 @@ export struct MiniPlayerBar {
   /** 折返早认：`>`/`<` 的本质特征是 x 方向反转（顶点）——向一侧走出
    * OUT_VP 后折回 BACK_VP 即触发，不等抬手（抬手分类只做兜底）。顶点在
    * 右（先右后左，`>`）= 下一个源，顶点在左（`<`）= 上一个源。
-   * 纵拉早认：下滑深且横向没散开即下拉悬停（ deliberate 的下拉不等抬手）。
    * 直线横滑故意不等抬手早认——它是折返的前半段，早认必误杀 `>`/`<`。
    * 一次触摸只触发一次，触发后锁定到抬手 */
   private earlyClassify(): void {
@@ -71,7 +67,7 @@ export struct MiniPlayerBar {
       maxX = Math.max(maxX, rx);
     }
     // 折返顶点：走出 45vp + 折回 25vp；纵向漂移 <50vp 才认（大对角下滑
-    // 走纵拉通道，不在这里抢）
+    // 走抬手兜底通道，不在这里抢）
     if (Math.abs(ey) < 50) {
       // 右顶点（`>`：向右走出 maxX，从顶点折回 maxX-ex）
       if (maxX >= 45 && maxX - ex >= 25) {
@@ -85,13 +81,6 @@ export struct MiniPlayerBar {
         this.onSwipeSource(-1);
         return;
       }
-    }
-    // 纵拉早认：下滑超 80vp 且横向跨度 <50vp（横向散开的不认，防横滑抖动
-    // 下坠 half-way 被提前认成下拉；阈值高于抬手兜底的 60vp，早认只接
-    // 明确的下拉意图）
-    if (ey > 80 && maxX - minX < 50) {
-      this.gestureFired = true;
-      this.onPullDown();
     }
   }
 
@@ -165,12 +154,11 @@ export struct MiniPlayerBar {
     .backgroundColor($r('app.color.surface'))
     // 单一全向手势 + 路径分类器（不拆互斥组：弧线「<」的起始段是横向的，
     // 拆组会被横滑手势抢先认领）。onActionUpdate 采样轨迹点（间隔取样，
-    // 上限 32 点）并做早认——折返顶点/纵拉成形即触发，不等抬手；
+    // 上限 32 点）并做早认——折返顶点成形即触发，不等抬手；
     // onActionEnd 只做兜底分类（慢笔画/漂移大没触发早认的）：
     //   折返笔画（横向跨度 ≥70vp + 折回量 ≥30vp + 纵向轻微推进）→ 源循环
-    //   纵拉（下滑为主：纵向 >60vp 且 ≥ 横向）→ 下拉悬停
     //   平直横滑（纵向净移 <40vp、横向净移 ≥40vp）→ 分类标签循环
-    //   其余（普通斜滑）→ 忽略，不误触发
+    //   其余（普通斜滑/纵向）→ 忽略，不误触发
     .priorityGesture(
       PanGesture({ fingers: 1, direction: PanDirection.All, distance: 25 })
         .onActionUpdate((e: GestureEvent): void => {
@@ -219,12 +207,6 @@ export struct MiniPlayerBar {
           if (xSpan >= 70 && (xSpan - adx) >= 30 && ady >= 15) {
             const apexLeft = -minX > maxX - dxNet;
             this.onSwipeSource(apexLeft ? -1 : 1);
-            return;
-          }
-          // 纵拉：下拉悬停（只认下拉，上推忽略）。以下滑为主（纵向 ≥ 横向）
-          // 即认——斜着往下拉不再被忽略；横向跨度大的先走上面的折返判定
-          if (dyNet > 0 && ady > 60 && ady >= xSpan) {
-            this.onPullDown();
             return;
           }
           // 平直横滑：切分类标签（无折返倾向：跨度 ≈ |净移|）

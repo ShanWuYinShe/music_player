@@ -101,10 +101,6 @@ struct Index {
   private onlineScroller: Scroller = new Scroller();
   /** 远离顶部时在拇指区露出回顶按钮（onScrollIndex 驱动） */
   @Local showBackTop: boolean = false;
-  /** 下拉悬停位移（vp）：>0 时整页内容下沉，顶部控件落入拇指区（同一套 UI 映射，无重复入口） */
-  @Local reachY: number = 0;
-  /** 页面可视高度（vp）：悬停目标位移按该值比例计算 */
-  private pageH: number = 800;
 
   /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
@@ -124,7 +120,6 @@ struct Index {
     // 上轮提交此处接线丢失（文本替换静默失败），导致 mini bar 永不出现——已回踩
     this.stateListener = (reason: string): void => {
       const song = appStore.player.currentSong;
-      const hadMini = this.mini !== null;
       this.mini = song === null ? null : {
         seedId: song.id,
         title: song.title,
@@ -132,11 +127,6 @@ struct Index {
         coverPath: song.coverPath,
         isPlaying: appStore.player.isPlaying
       };
-      // 迷你条首次出现时教一次下滑悬停（手势入口无可见控件，须告知）
-      if (!hadMini && this.mini !== null && !appStore.userData.hasSeenReachHint()) {
-        promptAction.showToast({ message: '在迷你条上向下滑，可把顶部拉下来单手操作', duration: 3000 });
-        appStore.userData.markReachHintSeen();
-      }
       // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动；
       // 偏好变化（音量/模式/定时，reason='prefs'）不涉及行状态，跳过重建
       if (reason !== 'prefs') {
@@ -385,13 +375,12 @@ struct Index {
         }
 
         // 底部迷你播放条（内容经 @Local 镜像，见 mini 字段注释）：
-        // 其上的手势 = 半屏拇指遥控：下滑拉悬停 / 横滑切分类 / 画 <> 切源
+        // 其上的手势 = 半屏拇指遥控：横滑切分类 / 画 <> 切源
         if (this.mini !== null) {
           MiniPlayerBar({
             player: appStore.player,
             info: this.mini,
             onTapOpen: () => this.pathStack.pushPathByName('player', null),
-            onPullDown: () => this.setReach(true),
             onSwipeTab: (direction: number) => this.cycleTab(direction),
             onSwipeSource: (direction: number) => this.cycleSource(direction)
           })
@@ -400,21 +389,8 @@ struct Index {
         .width('100%')
         .height('100%')
         // 顶部避让已并入源切换行 padding（safeTopVp+8），此处只留底部避让
-        // （背景层仍延伸进系统栏）；下拉悬停时整体下沉（translate 由
-        // reachY 驱动，动画在 setReach 内指定）
+        // （背景层仍延伸进系统栏）
         .padding({ bottom: appStore.safeBottomVp })
-        .translate({ y: this.reachY })
-        .onAreaChange((_old: Area, area: Area) => {
-          const h = area.height as number;
-          if (h > 0) {
-            this.pageH = h;
-          }
-        })
-
-        // 悬停收起 pill：悬停态才叠在底部中央；内容整体下沉后它仍固定可点
-        if (this.reachY > 0) {
-          this.ReachExit()
-        }
       }
       .width('100%')
       .height('100%')
@@ -538,34 +514,6 @@ struct Index {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 4, bottom: 8 })
-  }
-
-  /** 下拉悬停开关：整页内容下沉 45% 高度，顶部控件落入拇指区；
-   * 同一套 UI 做位移映射，不复制入口，审美保持经典布局 */
-  private setReach(on: boolean): void {
-    const target = on ? Math.round(this.pageH * 0.45) : 0;
-    this.getUIContext().animateTo({ duration: 280, curve: Curve.EaseInOut }, () => {
-      this.reachY = target;
-    });
-  }
-
-  /** 悬停收起 pill：悬停态才叠在底部中央，点按回弹（不挡顶部操作区） */
-  @Builder
-  ReachExit() {
-    Row({ space: 4 }) {
-      SymbolGlyph($r('sys.symbol.chevron_up'))
-        .fontSize(14)
-        .fontColor([$r('app.color.on_accent')])
-      Text('收起')
-        .fontSize(13)
-        .fontColor($r('app.color.on_accent'))
-    }
-    .padding({ left: 16, right: 16, top: 11, bottom: 11 })
-    .borderRadius(20)
-    .backgroundColor($r('app.color.accent'))
-    .accessibilityText('收起悬停，回到正常布局')
-    .margin({ bottom: 40 })
-    .onClick(() => this.setReach(false))
   }
 
   /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口）。
@@ -888,15 +836,12 @@ struct Index {
     this.activeScroller().scrollToIndex(0);
   }
 
-  /** 迷你条弧线手势：顶层源循环切换（> 下一个 / < 上一个，两源即往返） */
+  /** 迷你条弧线手势：顶层源循环切换（> 下一个 / < 上一个，两源即往返）。
+   * 不弹 toast——切换结果由源切换行高亮直接可见（2026-09 用户决策去提示） */
   private cycleSource(direction: number): void {
     const next = direction > 0 ? SourceTab.ONLINE : SourceTab.LOCAL;
     if (next !== this.sourceTab) {
       this.switchSource(next);
-      promptAction.showToast({
-        message: next === SourceTab.ONLINE ? '已切换到在线' : '已切换到本地',
-        duration: 1200
-      });
     }
   }
 
@@ -913,8 +858,7 @@ struct Index {
       this.tab = next;
       this.showBackTop = false;
       this.localScroller.scrollToIndex(0);
-      const label = next === LibraryTab.ALL ? '全部' : (next === LibraryTab.FAVORITES ? '喜欢' : '最近');
-      promptAction.showToast({ message: label, duration: 1000 });
+      // 不弹 toast——分类高亮直接可见（2026-09 用户决策去提示）
     }
   }
 
