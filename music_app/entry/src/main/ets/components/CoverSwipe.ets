@@ -12,8 +12,10 @@ const SWAP_FADE_MS: number = 260;
 const PLAYSCALE_MS: number = 360;
 /** 暂停态缩放比例 */
 const PAUSED_SCALE: number = 0.94;
-/** 纸带吸附时长（ms）：松手后滑向相邻格位 */
-const SETTLE_MS: number = 300;
+/** 纸带吸附安全兜底（毫秒）：交接由动画 onFinish 驱动（弹簧长尾被掐断
+ * 会导致肉眼可见的跳变——旧 bug），此定时器只防动画未回调的极端情况
+ * （页面隐藏动画挂起等）；finishSettle 幂等可重入 */
+const SAFETY_SETTLE_MS: number = 1500;
 /** 宽度量不到时的兜底（vp） */
 const FALLBACK_WIDTH_VP: number = 320;
 /** 甩动成歌最小位移（vp）：低于此值只认阈值，防抖动误甩 */
@@ -197,21 +199,34 @@ export struct CoverSwipe {
     }
     this.dragging = false;
     this.expectedSeed = result;
-    // 纸带朝手指方向滑：左滑(dir=-1)纸带左移露出右格(下一首)——
-    // 与手指推动方向一致
-    this.getUIContext().animateTo({ duration: SETTLE_MS, curve: curves.springMotion(0.75, 0.9) }, () => {
+    // 纸带朝手指方向滑：左滑(dir=-1)纸带左移露出右格(下一首)——与手指
+    // 推动方向一致。内容交接由动画 onFinish 驱动：弹簧按固定时长掐断
+    // 会在收敛前跳变（用户仍能看到"文字快速变一下"），onFinish 保证
+    // 弹簧完整收敛到格位后才交内容；LOGICALLY_COMPLETE 在逻辑到位即
+    // 回调，不等弹簧长尾，交接不拖泥带水
+    this.getUIContext().animateTo({
+      duration: 350,
+      curve: curves.springMotion(0.75, 0.9),
+      onFinish: (): void => this.finishSettle()
+    }, () => {
       this.stripX = this.restX() + dir * (this.cellW() + CELL_GAP_VP);
     });
     this.settleTimer = setTimeout(() => {
       this.settleTimer = -1;
       this.finishSettle();
-    }, SETTLE_MS + 60);
+    }, SAFETY_SETTLE_MS);
   }
 
-  /** 吸附落定：同一帧两步互抵——纸带复位到居中 + 内容切回实况。此刻居中
-   * 的实况中格 == 冻结的目标格（同曲同图同字），画面零变化；竞态（落定时
-   * 曲目与预期不符）才交叉淡化遮交接 */
+  /** 吸附落定（动画 onFinish 或安全兜底触发，幂等）：同一帧两步互抵——
+   * 纸带复位到居中 + 内容切回实况。此刻居中的实况中格 == 冻结的目标格
+   * （同曲同图同字），画面零变化；竞态（曲目与预期不符）才交叉淡化遮
+   * 交接。关键：只在弹簧完整收敛后执行——提前掐断动画会让剩余路程瞬移，
+   * 肉眼可见"文字快速变一下" */
   private finishSettle(): void {
+    if (!this.settling) {
+      return;
+    }
+    this.settleTimer = -1;
     this.settling = false;
     this.stripX = this.restX();
     if (this.seedId !== this.expectedSeed) {
