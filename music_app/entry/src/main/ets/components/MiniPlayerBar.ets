@@ -1,4 +1,5 @@
 import { PlayerController } from '../player/PlayerController';
+import displaySync from '@ohos.graphics.displaySync';
 import { CoverArt } from './CoverArt';
 
 const BAR_HEIGHT = 62;
@@ -48,6 +49,84 @@ export struct MiniPlayerBar {
   /** 是否有可操作的曲目（占位态下禁用播放/下一首） */
   private hasTrack(): boolean {
     return this.info !== null;
+  }
+
+  /** 进度条百分比（@Local 镜像）：真机上 player 的 @Trace 不驱动属性插值
+   * （width 就是属性插值），必须在帧回调里显式写入 @Local 才会跟着走 */
+  @Local progressPct: number = 0;
+  private ds: displaySync.DisplaySync | null = null;
+  /** frame 具名回调：匿名闭包无法 off('frame') 注销，重进会堆积 */
+  private frameCb: () => void = () => this.tickProgress();
+  private running = false;
+  private progressClock = 0;
+
+  aboutToAppear(): void {
+    this.ds = displaySync.create();
+    // 进度线 4Hz 足够（细线宽度变化肉眼无感，30fps 纯浪费）
+    this.ds.setExpectedFrameRateRange({ min: 0, max: 4, expected: 4 });
+    this.ds.on('frame', this.frameCb);
+    this.tickProgress();
+    this.syncLoop();
+  }
+
+  aboutToDisappear(): void {
+    this.stopLoop();
+    if (this.ds !== null) {
+      this.ds.off('frame', this.frameCb);
+      this.ds = null;
+    }
+  }
+
+  /** 播放态/曲目变化：进度线随播放推进，暂停即停帧（省电） */
+  @Monitor('info.isPlaying', 'info.seedId')
+  onInfoChange(): void {
+    this.tickProgress();
+    this.syncLoop();
+  }
+
+  /** 按可见性启停（被下级页面盖住时不必推进）：visible 由 onVisibleAreaChange
+   * 回调维护。方法名避开组件内置属性 onVisibleAreaChange（重名会与基类签名
+   * 冲突，编译报错——与 onDragStart 同类坑） */
+  private applyVisible(ratio: number): void {
+    this.visible = ratio > 0;
+    this.syncLoop();
+  }
+
+  @Local visible: boolean = true;
+
+  private syncLoop(): void {
+    const want = this.visible && this.info !== null && this.info.isPlaying;
+    if (want) {
+      this.startLoop();
+    } else {
+      this.stopLoop();
+    }
+  }
+
+  private startLoop(): void {
+    if (this.running || this.ds === null) {
+      return;
+    }
+    this.running = true;
+    this.ds.start();
+  }
+
+  private stopLoop(): void {
+    if (!this.running) {
+      return;
+    }
+    this.running = false;
+    if (this.ds !== null) {
+      this.ds.stop();
+    }
+  }
+
+  /** 每帧：读一次 player 进度写 @Local（变化才赋值，避免无谓重建） */
+  private tickProgress(): void {
+    const pct = this.progressPercent();
+    if (Math.abs(pct - this.progressPct) >= 0.05) {
+      this.progressPct = pct;
+    }
   }
 
   /** 手势轨迹采样点（[相对起点的 dx, dy]，间隔 >6vp 记一条，上限 32 点）：
@@ -161,9 +240,9 @@ export struct MiniPlayerBar {
           .height(BAR_HEIGHT)
           .padding({ left: 16, right: 16 })
 
-          // 实时进度细线
+          // 实时进度细线（progressPct 为 @Local 镜像，帧驱动写入）
           Row()
-            .width(`${this.progressPercent()}%`)
+            .width(`${this.progressPct}%`)
             .height(2.5)
             .borderRadius({ bottomRight: 2 })
             .backgroundColor($r('app.color.accent'))
@@ -173,6 +252,10 @@ export struct MiniPlayerBar {
       }
     .width('100%')
     .clip(true)
+    // 进度线帧循环随可见性启停（被下级页面盖住时不必推进）
+    .onVisibleAreaChange([0.0, 1.0], (_isExpanding: boolean, ratio: number) => {
+      this.applyVisible(ratio);
+    })
     // 排印风：无胶囊圆角——底部通栏（与页面同宽），上缘一根发丝线分隔
     // （EdgeWidths 对象需四边齐全，单边省略会绘制异常）
     .border({

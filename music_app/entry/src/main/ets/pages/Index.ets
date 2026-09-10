@@ -37,6 +37,16 @@ class SongListDataSource implements IDataSource {
     this.listeners.forEach((listener) => listener.onDataReloaded());
   }
 
+  /** 精确刷新单个 id 所在行（行内 isPlaying/高亮状态变化）：只重建该 index
+   * 的列表项，避免全量 onDataReloaded（大曲库下每次播放/暂停都整列表重排） */
+  notifySongChanged(id: string): void {
+    const index = this.list.findIndex((song) => song.id === id);
+    if (index < 0) {
+      return;
+    }
+    this.listeners.forEach((listener) => listener.onDataChange(index));
+  }
+
   totalCount(): number {
     return this.list.length;
   }
@@ -127,9 +137,18 @@ struct Index {
         coverPath: song.coverPath,
         isPlaying: appStore.player.isPlaying
       };
-      // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，重建列表驱动；
-      // 偏好变化（音量/模式/定时，reason='prefs'）不涉及行状态，跳过重建
-      if (reason !== 'prefs') {
+      // 当前播放行(高亮/EQ)在 LazyForEach 项内不随状态刷新，需主动通知：
+      //   reason='playing' → 只有启停变化，精确刷新当前行（EQ 跳动/暂停态），
+      //                      避免大曲库下每次播放/暂停全列表重建
+      //   reason='song'    → 切歌，旧行与新行当前态都要刷，走整表 reload
+      //   reason='prefs'   → 音量/模式/定时，不涉及行状态，跳过
+      // 其余（曲库变更等）同样整表 reload
+      if (reason === 'playing') {
+        const id = appStore.player.currentSongId;
+        if (id !== '') {
+          this.songSource.notifySongChanged(id);
+        }
+      } else if (reason !== 'prefs') {
         this.songSource.reload(this.filteredSongs);
       }
     };

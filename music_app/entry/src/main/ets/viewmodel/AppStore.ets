@@ -43,6 +43,12 @@ export class AppStore {
   private pref: preferences.Preferences | null = null;
   /** 在线源地址已变更待生效（首页 onPageShow 消费后重拉在线列表） */
   private onlineConfigDirty: boolean = false;
+  /** providers 摘要缓存时间戳（0 = 从未取过）与 TTL：登录态低频变化，
+   * 进在线页不必每次都等一个 RTT */
+  private providersFetchedAt: number = 0;
+  private static readonly PROVIDERS_TTL_MS: number = 30000;
+  /** 在途 providers 请求（同刻并发去重，避免重复打上游） */
+  private providersInflight: Promise<void> | null = null;
 
   constructor() {
     // 字段按声明顺序初始化，userData 先于 player 构造
@@ -82,14 +88,29 @@ export class AppStore {
     });
   }
 
-  /** 刷新在线源能力摘要（网易云登录态）；失败静默保留旧值（标注非关键路径） */
-  async refreshOnlineProviders(): Promise<void> {
-    try {
-      const state = await this.onlineSource.fetchProviders();
-      this.neteaseLoggedIn = state.neteaseLoggedIn;
-    } catch (err) {
-      hilog.info(DOMAIN, TAG, 'fetch providers failed: %{public}s', JSON.stringify(err));
+  /** 刷新在线源能力摘要（网易云登录态）；失败静默保留旧值（标注非关键路径）。
+   * TTL 缓存 + 在途去重：登录态低频变化，进在线页不必每次都等一个 RTT；
+   * force=true 绕过缓存（设置页保存地址后主动刷新） */
+  async refreshOnlineProviders(force: boolean = false): Promise<void> {
+    if (!force && Date.now() - this.providersFetchedAt < AppStore.PROVIDERS_TTL_MS) {
+      return;
     }
+    if (this.providersInflight !== null) {
+      return this.providersInflight;
+    }
+    const task = (async (): Promise<void> => {
+      try {
+        const state = await this.onlineSource.fetchProviders();
+        this.neteaseLoggedIn = state.neteaseLoggedIn;
+        this.providersFetchedAt = Date.now();
+      } catch (err) {
+        hilog.info(DOMAIN, TAG, 'fetch providers failed: %{public}s', JSON.stringify(err));
+      } finally {
+        this.providersInflight = null;
+      }
+    })();
+    this.providersInflight = task;
+    return task;
   }
 
   /**
@@ -149,6 +170,8 @@ export class AppStore {
     }
     this.onlineSource.configuredUrl = trimmed;
     this.onlineConfigDirty = true;
+    // 地址变更即 providers 缓存失效：换服务端后登录态可能不同
+    this.providersFetchedAt = 0;
     if (this.pref) {
       try {
         this.pref.putSync(KEY_ONLINE_BASE_URL, trimmed);
