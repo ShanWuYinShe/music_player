@@ -28,7 +28,12 @@
   整刷会让大曲库每次切歌全量重建列表；⑥`deviceTypes` 收敛为 phone（布局
   未做 sm/md/lg 断点适配，声明 tablet/2in1 会构成审核风险，做一多适配前
   勿加回）；⑦AVSession `mediaImage` 直接支持本地封面路径字符串（锁屏封面，
-  无需手动转 PixelMap）；⑧迷你条频谱经 `onVisibleAreaChange` 随可见性启停；
+  无需手动转 PixelMap）；⑧迷你条进度线经 `@Local` 镜像 + displaySync(4Hz)
+  帧驱动（**不能**直读 `player.currentTime` 做 `width()` 插值——真机上
+  `@Trace` 不驱动属性插值，线是死的），随 `onVisibleAreaChange` 与播放态
+  启停；**注意回调方法名不得叫 `onVisibleAreaChange`**（与组件内置属性重名
+  会与基类签名冲突、编译报错，与 `onDragStart` 同类坑），且该回调签名为
+  `(isExpanding: boolean, ratio: number)`（单值非数组）；
   ⑨避让区高度入口是 `AppStore.readSafeArea()`，配置变更（旋转/折叠展开，
   `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点；
   ⑪首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」与「全部 N」
