@@ -53,6 +53,10 @@ export struct PlayerPage {
    * XComponent，省掉 UI 线程同步编译全场景 shader 的进页卡顿；首次切入
    * 可视化才挂载，之后保持（卸载重建会触发 EGL 黑屏坑，见 AGENTS） */
   @Local vizMounted: boolean = false;
+  /** 可视化舞台本次笔触是否已判为滑动（达阈值切歌）——用于吞掉同一笔触
+   * 尾随的 onClick，避免"滑一下跳回封面"（XComponent 表面收不到手势，交互
+   * 全在前景占位上，点击与滑动必须自己区分） */
+  private vizSwipeMoved: boolean = false;
   /** 播放模式 @Local 镜像：经状态订阅维护（player 的 @Trace 在真机上不驱动
    * glyph/文案插值，已踩坑； cyclePlayMode/setVolume/启停定时器末尾会调
    * notifyState，见 PlayerController 前提契约） */
@@ -173,12 +177,8 @@ export struct PlayerPage {
           .height('100%')
           .visibility(this.coverMode ? Visibility.Hidden : Visibility.Visible)
           .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-          // Poweramp 对齐：可视化全屏同样支持左右滑动切歌（PanGesture 位移
-          // 阈值 12vp 与点击不冲突：未达阈值的触摸由 onClick 承担）
-          .gesture(
-            PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
-              .onActionEnd((e: GestureEvent): void => this.onSwipeEnd(e.offsetX))
-          )
+          // 不在此挂手势：XComponent 原生表面收不到触摸事件（真机实测），
+          // 可视化舞台的点击/滑动统一绑在前景占位 Blank 上（见 else 分支）
       }
 
       // 封面舞台氛围背景（仅封面模式渲染）：模糊放大的封面做环境光，
@@ -309,14 +309,47 @@ export struct PlayerPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
         } else {
-          // 可视化舞台的布局占位 + 点击目标：占住舞台区域（顶栏与控制面板
-          // 之间），点击即回封面——与封面点击进可视化对称。XComponent 原生
-          // 表面收不到点击（旧版"点画面切风格"在真机上无响应的根因），
-          // 点击必须绑在这个前景层占位上，不能绑到可视化组件里
-          Blank()
+          // 可视化舞台的交互层（顶栏与控制面板之间）：**点击回封面** +
+          // **左右滑动切歌**都绑在这里。原因（真机实测）：VisualizerView 是
+          // XComponent 原生表面，其区域收不到触摸事件——挂它上面的
+          // PanGesture 是死的（点画面切风格当年无响应、左右滑也不生效），
+          // 唯一能收到事件的是这个前景层。
+          // 用 layoutWeight(1) 的实心容器而非 Blank：与封面分支同构、占位
+          // 确定（Blank 对 PanGesture 的命中不如实体容器可靠），背景透明
+          // 不影响可视化画面
+          Column()
+            .layoutWeight(1)
+            .width('100%')
+            .backgroundColor(Color.Transparent)
             .onClick(() => {
+              // 同一笔触刚做过滑动：这次 click 是滑动收尾的副作用，忽略
+              // （否则一滑就误判成点击跳回封面——用户报障的现象）
+              if (this.vizSwipeMoved) {
+                this.vizSwipeMoved = false;
+                return;
+              }
               this.coverMode = true;
             })
+            .gesture(
+              PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 12 })
+                .onActionStart((): void => {
+                  this.vizSwipeMoved = false;
+                })
+                .onActionUpdate((e: GestureEvent): void => {
+                  if (Math.abs(e.offsetX) >= PlayerPage.SWIPE_THRESHOLD) {
+                    this.vizSwipeMoved = true;
+                  }
+                })
+                .onActionEnd((e: GestureEvent): void => {
+                  if (Math.abs(e.offsetX) < PlayerPage.SWIPE_THRESHOLD) {
+                    // 未达阈值：不算滑动（留给 onClick 判定为点击）
+                    this.vizSwipeMoved = false;
+                    return;
+                  }
+                  this.vizSwipeMoved = true;
+                  this.onSwipeEnd(e.offsetX);
+                })
+            )
         }
 
         // 底部控制面板：歌名 → 进度 → 主控制 → 音量，聚拢为一个整体。
