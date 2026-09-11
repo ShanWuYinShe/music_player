@@ -199,29 +199,39 @@ func (c *neteaseClient) getJSON(ctx context.Context, path string, out any) error
 	return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out)
 }
 
-// cloudsearchSongs / songURLData 是上游响应的用到的子集。
-// /cloudsearch 走新版 eapi 形态：ar=歌手数组、al=专辑对象、dt=时长(毫秒)；
-// 旧版 /search 形态为 artists/album/duration。两种形态都解析，取非零者，
-// 只认旧形态会把搜索结果的歌手/时长全部丢成空值(已踩坑)。
+// cloudsearchSong 是上游曲目条目的通用子集:/cloudsearch、/playlist/
+// track/all 的 songs 同构。新版 eapi 形态：ar=歌手数组、al=专辑对象、
+// dt=时长(毫秒)；旧版 /search 形态为 artists/album/duration。两种形态
+// 都解析，取非零者，只认旧形态会把搜索结果的歌手/时长全部丢成空值(已踩坑)。
+type cloudsearchSong struct {
+	ID   int64 `json:"id"`
+	Name string
+	Ar   []struct{ Name string } `json:"ar"`
+	Al   struct{ Name string }   `json:"al"`
+	Dt   int64                   `json:"dt"`
+	// Fee 顶层付费标记;privilege.fee 为同值的权限位形态,取非零者。
+	Fee       int `json:"fee"`
+	Privilege struct {
+		Fee int `json:"fee"`
+	} `json:"privilege"`
+
+	Artists  []struct{ Name string } `json:"artists"`
+	Album    struct{ Name string }   `json:"album"`
+	Duration int64                   `json:"duration"`
+}
+
+// cloudsearchSongs / songURLData / playlistTrackAllResp 是上游响应的
+// 用到的子集。
 type cloudsearchSongs struct {
 	Result struct {
-		Songs []struct {
-			ID   int64 `json:"id"`
-			Name string
-			Ar   []struct{ Name string } `json:"ar"`
-			Al   struct{ Name string }   `json:"al"`
-			Dt   int64                   `json:"dt"`
-			// Fee 顶层付费标记;privilege.fee 为同值的权限位形态,取非零者。
-			Fee       int `json:"fee"`
-			Privilege struct {
-				Fee int `json:"fee"`
-			} `json:"privilege"`
-
-			Artists  []struct{ Name string } `json:"artists"`
-			Album    struct{ Name string }   `json:"album"`
-			Duration int64                   `json:"duration"`
-		} `json:"songs"`
+		Songs []cloudsearchSong `json:"songs"`
 	} `json:"result"`
+}
+
+// playlistTrackAllResp 是上游 /playlist/track/all(歌单全部曲目)响应的
+// 用到的子集,songs 条目与 /cloudsearch 同构。
+type playlistTrackAllResp struct {
+	Songs []cloudsearchSong `json:"songs"`
 }
 
 type songURLData struct {
@@ -231,23 +241,55 @@ type songURLData struct {
 	} `json:"data"`
 }
 
-// topSongResp 是上游 /top/song(新歌速递)响应的用到的子集。
-type topSongResp struct {
-	Data []struct {
-		ID       int64 `json:"id"`
-		Name     string
-		Artists  []struct{ Name string } `json:"artists"`
-		Album    struct{ Name string }   `json:"album"`
-		Duration int64                   `json:"duration"`
-		Fee      int                     `json:"fee"`
-	} `json:"data"`
+// toExternalSong 把上游曲目条目映射为对外 Song(id 加 ne_ 前缀),供
+// 搜索与榜单发现共用。
+func toExternalSong(s cloudsearchSong) Song {
+	ar := s.Ar
+	if len(ar) == 0 {
+		ar = s.Artists // 旧形态回退
+	}
+	artists := make([]string, 0, len(ar))
+	for _, a := range ar {
+		artists = append(artists, a.Name)
+	}
+	duration := s.Dt
+	if duration <= 0 {
+		duration = s.Duration // 旧形态回退
+	}
+	album := s.Al.Name
+	if album == "" {
+		album = s.Album.Name // 旧形态回退
+	}
+	fee := s.Fee
+	if fee == 0 {
+		fee = s.Privilege.Fee // 权限位形态回退
+	}
+	return Song{
+		ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, s.ID),
+		Title:      s.Name,
+		Artist:     strings.Join(artists, "/"),
+		Album:      album,
+		DurationMs: duration,
+		Format:     "mp3",
+		Source:     "netease",
+		VIP:        isVIPFee(fee),
+	}
 }
 
-// discover 返回网易「新歌速递」推荐曲目(匿名可用),供空曲库时回填在线
-// 列表,让"在线"开箱即有歌。结果缓存 60s(与曲库扫描 TTL 一致,含空结果),
-// 上游失败降级为空(不影响请求成功)并进入同长度的失败冷却期,避免上游
-// 故障时每个空列表请求都反复打上游。discoverCached 显式区分「已缓存
-// (含空)」与「未缓存」,与失败冷却是正交的两份状态。
+// neteaseHotPlaylistID 是网易官方「热歌榜」歌单 id(约 200 首在榜热歌,
+// 播放量验证的大众曲目)。
+const neteaseHotPlaylistID = 3778678
+
+// neteaseDiscoverLimit 单次发现拉取的热歌榜条数(榜前 100)。
+const neteaseDiscoverLimit = 100
+
+// discover 返回网易「热歌榜」在榜曲目(匿名可用),供空搜索时回填在线
+// 列表,让"在线"开箱即有歌。热歌榜是官方播放量运营榜,内容为大众验证
+// 过的在榜热歌;旧的「新歌速递」/top/song 是无筛选的新发行流水,大量
+// 小众投放与翻唱混音混杂,推荐观感差,已替换。结果缓存 60s(与曲库扫描
+// TTL 一致,含空结果),上游失败降级为空(不影响请求成功)并进入同长度
+// 的失败冷却期,避免上游故障时每个空列表请求都反复打上游。discoverCached
+// 显式区分「已缓存(含空)」与「未缓存」,与失败冷却是正交的两份状态。
 func (c *neteaseClient) discover(ctx context.Context) []Song {
 	c.discoverMu.Lock()
 	if c.discoverCached && time.Since(c.discoverAt) < scanTTL {
@@ -260,30 +302,19 @@ func (c *neteaseClient) discover(ctx context.Context) []Song {
 		return nil
 	}
 
-	var resp topSongResp
-	if err := c.getJSON(ctx, "/top/song", &resp); err != nil {
+	path := fmt.Sprintf("/playlist/track/all?id=%d&limit=%d",
+		neteaseHotPlaylistID, neteaseDiscoverLimit)
+	var resp playlistTrackAllResp
+	if err := c.getJSON(ctx, path, &resp); err != nil {
 		log.Printf("netease discover: %v", err)
 		c.discoverMu.Lock()
 		c.discoverFailAt = time.Now()
 		c.discoverMu.Unlock()
 		return nil
 	}
-	songs := make([]Song, 0, len(resp.Data))
-	for _, item := range resp.Data {
-		artists := make([]string, 0, len(item.Artists))
-		for _, a := range item.Artists {
-			artists = append(artists, a.Name)
-		}
-		songs = append(songs, Song{
-			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, item.ID),
-			Title:      item.Name,
-			Artist:     strings.Join(artists, "/"),
-			Album:      item.Album.Name,
-			DurationMs: item.Duration,
-			Format:     "mp3",
-			Source:     "netease",
-			VIP:        isVIPFee(item.Fee),
-		})
+	songs := make([]Song, 0, len(resp.Songs))
+	for _, item := range resp.Songs {
+		songs = append(songs, toExternalSong(item))
 	}
 
 	c.discoverMu.Lock()
@@ -361,36 +392,7 @@ func (c *neteaseClient) searchUpstream(ctx context.Context, query string, limit 
 	}
 	songs := make([]Song, 0, len(resp.Result.Songs))
 	for _, s := range resp.Result.Songs {
-		ar := s.Ar
-		if len(ar) == 0 {
-			ar = s.Artists // 旧形态回退
-		}
-		artists := make([]string, 0, len(ar))
-		for _, a := range ar {
-			artists = append(artists, a.Name)
-		}
-		duration := s.Dt
-		if duration <= 0 {
-			duration = s.Duration // 旧形态回退
-		}
-		album := s.Al.Name
-		if album == "" {
-			album = s.Album.Name // 旧形态回退
-		}
-		fee := s.Fee
-		if fee == 0 {
-			fee = s.Privilege.Fee // 权限位形态回退
-		}
-		songs = append(songs, Song{
-			ID:         fmt.Sprintf("%s%d", neteaseIDPrefix, s.ID),
-			Title:      s.Name,
-			Artist:     strings.Join(artists, "/"),
-			Album:      album,
-			DurationMs: duration,
-			Format:     "mp3",
-			Source:     "netease",
-			VIP:        isVIPFee(fee),
-		})
+		songs = append(songs, toExternalSong(s))
 	}
 	return songs, nil
 }

@@ -289,16 +289,20 @@ func TestNeteaseCookieFallback(t *testing.T) {
 	}
 }
 
-// 在线列表回填:q 为空时本地曲库在前、网易新歌推荐追加在后(在线页开箱
+// 在线列表回填:q 为空时本地曲库在前、网易热歌榜推荐追加在后(在线页开箱
 // 即有内容);本地为空时纯推荐;上游失败降级仅本地。
 func TestNeteaseDiscoverBackfill(t *testing.T) {
 	f := newFakeNetease(t)
-	// 假上游补 /top/song(fee=1 → VIP 标记)。
+	// 假上游补 /playlist/track/all(fee=1 → VIP 标记;热歌榜 songs 条目
+	// 与 /cloudsearch 同构,即 ar/al/dt 形态)。
 	handler := f.api.Config.Handler
 	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/top/song" {
+		if r.URL.Path == "/playlist/track/all" {
+			if got := r.URL.Query().Get("id"); got != "3778678" {
+				t.Errorf("discover should hit hot playlist 3778678, got %s", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":[{"id":111,"name":"新歌A","artists":[{"name":"歌手甲"}],"album":{"name":"专辑"},"duration":200000,"fee":1}]}`))
+			_, _ = w.Write([]byte(`{"songs":[{"id":111,"name":"热歌A","ar":[{"name":"歌手甲"}],"al":{"name":"专辑"},"dt":200000,"fee":1}]}`))
 			return
 		}
 		handler.ServeHTTP(w, r)
@@ -394,12 +398,12 @@ func TestProvidersNeteaseLoginState(t *testing.T) {
 	}
 }
 
-// discover 失败冷却:上游 /top/song 故障时,冷却期内的重复请求不再打上游。
+// discover 失败冷却:上游热歌榜接口故障时,冷却期内的重复请求不再打上游。
 func TestNeteaseDiscoverFailCooldown(t *testing.T) {
 	var upstreamHits atomic.Int64
 	f := newFakeNetease(t)
 	f.api.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/top/song" {
+		if r.URL.Path == "/playlist/track/all" {
 			upstreamHits.Add(1)
 			http.Error(w, "upstream broken", http.StatusInternalServerError)
 			return
