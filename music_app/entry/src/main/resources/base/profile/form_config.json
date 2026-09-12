@@ -15,6 +15,22 @@
       "supportDimensions": ["2*2"],
       "updateEnabled": false,
       "transparencyEnabled": false
+    },
+    {
+      "name": "MusicCardWide",
+      "isDefault": false,
+      "uiSyntax": "arkts",
+      "displayName": "$string:form_MusicCard_displayName",
+      "description": "$string:form_MusicCard_desc",
+      "src": "./ets/form/pages/MusicCardWide.ets",
+      "window": {
+        "designWidth": 720,
+        "autoDesignWidth": false
+      },
+      "defaultDimension": "2*4",
+      "supportDimensions": ["2*4"],
+      "updateEnabled": false,
+      "transparencyEnabled": false
     }
   ]
 }

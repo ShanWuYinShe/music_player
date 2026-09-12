@@ -19,6 +19,10 @@
     {
       "name": "form_MusicCard_desc",
       "value": "桌面播放控制卡片"
+    },
+    {
+      "name": "perm_mic_reason",
+      "value": "用于采集环境声，让可视化舞台跟随外放的真实音乐跳动"
     }
   ]
 }

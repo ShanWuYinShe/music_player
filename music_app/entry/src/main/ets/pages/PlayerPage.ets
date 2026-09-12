@@ -1,5 +1,9 @@
-import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier, componentSnapshot } from '@kit.ArkUI';
 import { vibrator } from '@kit.SensorServiceKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { image } from '@kit.ImageKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController, CoverRef } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -72,6 +76,10 @@ export struct PlayerPage {
    * 做 pager 跟进；随机模式为 null——无预览退化为淡入） */
   @Local prevCover: CoverRef | null = null;
   @Local nextCover: CoverRef | null = null;
+  /** 麦克风律动 @Local 镜像（状态订阅刷新，下发 VisualizerView） */
+  @Local micOn: boolean = appStore.micOn;
+  /** 分享卡片半模态开关（魔法棒菜单入口） */
+  @Local shareShow: boolean = false;
   private volumeBeforeMute: number = 1;
 
   /** swipe 判定阈值（vp）由 CoverSwipe 导出：封面路径在子组件内判定，
@@ -116,6 +124,7 @@ export struct PlayerPage {
       this.sleepRemainSec = this.player.sleepRemainSec;
       this.prevCover = this.player.peekPrevCover();
       this.nextCover = this.player.peekNextCover();
+      this.micOn = appStore.micOn;
     };
     this.stateListener(); // 进入即同步一次当前状态
     this.player.addStateListener(this.stateListener);
@@ -172,7 +181,8 @@ export struct PlayerPage {
           isPlaying: this.isPlaying,
           songId: this.song?.id ?? '',
           presetIndex: this.vizPreset,
-          active: !this.coverMode
+          active: !this.coverMode,
+          micLive: this.micOn
         })
           .width('100%')
           .height('100%')
@@ -256,6 +266,26 @@ export struct PlayerPage {
             .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
             .onClick(() => this.navPathStack.pop())
           Blank()
+          SymbolGlyph($r('sys.symbol.arrow_up_and_rectangle_on_rectangle'))
+            .fontSize(20)
+            .fontColor([$r('app.color.viz_fg')])
+            .padding(12)
+            .accessibilityText('分享歌曲卡片')
+            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
+            .onClick(() => {
+              this.shareShow = true;
+            })
+            .bindSheet(this.shareShow, this.ShareSheet(), {
+              // 分享半模态：预览 + 安全控件保存（SaveButton 临时授权写相册，
+              // 免申请受限的 WRITE_IMAGEVIDEO 权限）
+              detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+              showClose: true,
+              backgroundColor: $r('app.color.surface'),
+              title: { title: '分享歌曲卡片' },
+              onDisappear: (): void => {
+                this.shareShow = false;
+              }
+            })
           SymbolGlyph(this.coverMode ? $r('sys.symbol.waveform') : $r('sys.symbol.picture'))
             .fontSize(20)
             .fontColor([$r('app.color.viz_fg')])
@@ -742,6 +772,97 @@ export struct PlayerPage {
             })
         }, (name: string) => name)
       }
+    }
+  }
+
+  /** 分享卡片半模态：深色舞台风预览卡（封面/纸带 + 歌名歌手 + 落款），
+   * 保存走 SaveButton 安全控件（点击即临时授权写相册，无需受限权限） */
+  @Builder
+  ShareSheet() {
+    Column({ space: 16 }) {
+      // 预览卡片（快照即截它；id 是 componentSnapshot 的定位锚）
+      Column({ space: 14 }) {
+        if (this.song !== null && this.song.coverPath !== '') {
+          Image(this.song.coverPath)
+            .width('100%')
+            .aspectRatio(1)
+            .borderRadius(18)
+            .objectFit(ImageFit.Cover)
+        } else {
+          Stack() {
+            Text(this.song !== null ? this.song.title.substring(0, 1) : '♪')
+              .fontSize(72)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#8E8878')
+          }
+          .width('100%')
+          .aspectRatio(1)
+          .borderRadius(18)
+          .backgroundColor('#2A2823')
+        }
+        Text(this.song !== null ? this.song.title : '未在播放')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#F3EFE4')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+        Text(this.song !== null ? this.song.artist : '')
+          .fontSize(14)
+          .fontColor('#C6C0B0')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+        Text('音乐播放器')
+          .fontSize(11)
+          .fontColor('#8E8878')
+          .letterSpacing(2)
+          .margin({ top: 2 })
+          .width('100%')
+      }
+      .padding(18)
+      .borderRadius(24)
+      .backgroundColor('#1D1C1A')
+      .id('share_card')
+
+      SaveButton({ text: SaveDescription.SAVE_IMAGE, buttonType: ButtonType.Capsule })
+        .width('60%')
+        .constraintSize({ minHeight: 44 })
+        .onClick((event: ClickEvent, result: SaveButtonOnClickResult): void => {
+          if (result === SaveButtonOnClickResult.SUCCESS) {
+            this.saveShareCard();
+          } else {
+            promptAction.showToast({ message: '保存未授权' });
+          }
+        })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Center)
+    .padding({ left: 24, right: 24, bottom: 16 })
+  }
+
+  /** 生成预览卡快照并写入相册（SaveButton onClick 内调用，已在临时授权期） */
+  private async saveShareCard(): Promise<void> {
+    const ctx = appStore.abilityContext;
+    if (ctx === null) {
+      return;
+    }
+    try {
+      const pixelMap = await componentSnapshot.get('share_card');
+      const helper = photoAccessHelper.getPhotoAccessHelper(ctx);
+      const uri = await helper.createAsset(photoAccessHelper.PhotoType.IMAGE, 'png');
+      const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      try {
+        const packer = image.createImagePacker();
+        await packer.packToFile(pixelMap, file.fd, { format: 'image/png', quality: 100 });
+      } finally {
+        fs.closeSync(file);
+      }
+      promptAction.showToast({ message: '已保存到相册' });
+    } catch (err) {
+      hilog.warn(0x0004, 'PlayerPage', 'save share card failed: %{public}s',
+        JSON.stringify(err));
+      promptAction.showToast({ message: '保存失败' });
     }
   }
 

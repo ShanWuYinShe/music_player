@@ -14,6 +14,7 @@ import {
   normalizeSpin, wrapAngleDelta, accelKickLevel
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
+import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
 function mk(id: string, title: string, artist: string, duration: number): SongRecord {
@@ -467,6 +468,47 @@ export default function LocalUnitSuite() {
       expectRgb(hslToRgb(240, 1, 0.5), 0, 0, 255);
       expectRgb(hslToRgb(210, 0.5, 0), 0, 0, 0);
       expectRgb(hslToRgb(-120, 1, 0.5), 0, 0, 255);
+    });
+  });
+
+  describe('FftTest', () => {
+    it('isPowerOfTwo', 0, () => {
+      expect(isPowerOfTwo(1)).assertTrue();
+      expect(isPowerOfTwo(1024)).assertTrue();
+      expect(isPowerOfTwo(0)).assertFalse();
+      expect(isPowerOfTwo(1000)).assertFalse();
+    });
+
+    it('sinePeakAtExpectedBin', 0, () => {
+      // 16kHz 采样、1024 点窗：440Hz 正弦主峰应落在 bin 28（440/15.625）
+      const n = 1024;
+      const sig = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        sig[i] = 0.5 * Math.sin(2 * Math.PI * 440 * i / 16000);
+      }
+      const mag = fftMagnitudes(sig);
+      expect(mag.length).assertEqual(n / 2);
+      let peak = 0;
+      for (let i = 1; i < mag.length; i++) {
+        if (mag[i] > mag[peak]) {
+          peak = i;
+        }
+      }
+      expect(peak).assertEqual(28);
+      // 汉宁窗前主峰幅度 0.5（0.5 幅度正弦归一化后 ≈ 0.5），容差 0.1
+      expect(mag[peak] > 0.4).assertTrue();
+      expect(mag[peak] < 0.6).assertTrue();
+    });
+
+    it('dcInputOnlyBin0', 0, () => {
+      const sig = new Float32Array(256);
+      sig.fill(0.25);
+      const mag = fftMagnitudes(sig);
+      // 直流信号能量全在 bin 0，其余 bin 应近零
+      expect(mag[0] > 0.24).assertTrue();
+      for (let i = 1; i < mag.length; i++) {
+        expect(mag[i] < 1e-6).assertTrue();
+      }
     });
   });
 }

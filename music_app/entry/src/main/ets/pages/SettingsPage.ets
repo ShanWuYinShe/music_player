@@ -11,6 +11,9 @@ export struct SettingsPage {
   @Param navPathStack: NavPathStack = new NavPathStack();
   /** 地址输入的本地草稿：失焦/离开页面时统一持久化 */
   @Local urlInput: string = appStore.onlineSource.configuredUrl;
+  /** 麦克风律动开关 @Local 镜像：切换经 appStore.setMicLive（权限+采集启动
+   * 可能失败回退），以返回值校正 UI */
+  @Local micOn: boolean = appStore.micOn;
 
   aboutToDisappear(): void {
     // 系统返回键不触发输入框失焦，离开页面兜底保存一次（值未变则内部早退）
@@ -116,6 +119,29 @@ export struct SettingsPage {
       .backgroundColor($r('app.color.surface'))
       .alignItems(HorizontalAlign.Start)
 
+      // 麦克风律动：可视化舞台用环境声真频谱驱动（外放场景有效）
+      Row({ space: 14 }) {
+        Column({ space: 3 }) {
+          Text('麦克风律动')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.ink'))
+          Text('开启动后，可视化舞台将跟随外放的真实音乐跳动（需播放外放出声）。')
+            .fontSize(12)
+            .fontColor($r('app.color.ink_soft'))
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.micOn })
+          .onClick(() => this.toggleMic())
+      }
+      .width('100%')
+      .padding(20)
+      .borderRadius(16)
+      .backgroundColor($r('app.color.surface'))
+      .alignItems(VerticalAlign.Top)
+
       // 清空曲库（危险操作）：统计只看本地曲库——在线模式下 player.songs
       // 是在线列表，用它计数会把服务器/网络源歌曲误报成本地文件
       Row({ space: 14 }) {
@@ -199,6 +225,17 @@ export struct SettingsPage {
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 切换麦克风律动：权限弹窗与采集启动都在 appStore.setMicLive，失败
+   * （权限被拒/无麦克风）回退并提示；Toggle isOn 以实际结果校正 */
+  private async toggleMic(): Promise<void> {
+    const target = !this.micOn;
+    const ok = await appStore.setMicLive(target);
+    this.micOn = ok;
+    if (!ok && target) {
+      promptAction.showToast({ message: '无法启用麦克风律动（权限或设备不支持）' });
+    }
   }
 
   /** 保存并测试连接：先落盘地址（值未变内部早退），再用轻量 providers 接口

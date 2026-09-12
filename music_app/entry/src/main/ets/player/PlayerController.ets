@@ -93,6 +93,9 @@ export class PlayerController {
   private songIndex: Map<string, SongRecord> = new Map();
   /** 播放失败提示回调（页面注入 promptAction），null 时静默 */
   onPlaybackError: ((message: string) => void) | null = null;
+  /** 播放进度秒针回调（AVPlayer timeUpdate 透传）：AppStore 注册用于
+   * 桌面卡片进度节流推送；UI 不走此通道（页面经 displaySync 拉取） */
+  progressListener: ((positionMs: number) => void) | null = null;
   /** 播放状态变化订阅（切歌/启停）：真机上经 @ObservedV2/@Computed 的 UI
    * 依赖对本实例不触发（仅 Text 内容插值存活，已实测），页面靠订阅维护
    * @Local 镜像驱动渲染；reason 语义：'song'=队列/曲目变化（需重建列表），
@@ -112,6 +115,12 @@ export class PlayerController {
     for (const fn of this.stateListeners) {
       fn(reason);
     }
+  }
+
+  /** 偏好变化广播（AppStore 设置项变更时调用，如麦克风律动开关）：
+   * 走现有状态订阅管道刷新各页面的 @Local 镜像 */
+  notifyPrefs(): void {
+    this.notifyState('prefs');
   }
   /** 连续播放失败计数：任一曲 prepared 成功即清零 */
   private errorStreak: number = 0;
@@ -629,6 +638,9 @@ export class PlayerController {
         return;
       }
       this.currentTime = time;
+      if (this.progressListener !== null) {
+        this.progressListener(time);
+      }
     });
     player.on('error', (err) => {
       hilog.error(DOMAIN, TAG, 'AVPlayer error: %{public}s', JSON.stringify(err));

@@ -122,6 +122,34 @@
   `aa start --ps method toggle` 验证通过。call 到达性需真机确认，若真机同样
   不达，回退方案是按钮改 router 型（带 method 参数，副作用是拉起前台）。
 
+## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
+
+- **麦克风律动**（`common/MicSpectrum.ets` + `common/Fft.ets`）：设置页开关
+  （`appStore.setMicLive`）→ AtManager 请求 MICROPHONE（Stage 模型权限入口是
+  `abilityAccessCtrl.createAtManager().requestPermissionsFromUser`，
+  UIAbilityContext 上的同名方法是 FA 模型遗留不可用）→ AVAudioCapturer
+  16k/单声道/S16LE 采集（AudioStreamInfo 的 `encodingType` 必填
+  ENCODING_TYPE_RAW）→ 1024 点滑窗 FFT（`Fft.ets` 纯函数 LocalUnit 可测）
+  → beat 突增检测 + bass/treble EMA → 就地更新 levels 供 VisualizerView
+  帧循环拉取。采集器跟随舞台激活态启停（省电）；环境声无效（~3s 无能量）
+  或采集失败（模拟器无麦）自动回退 VisualizerCore 合成。外放才有效，
+  耳机场景收不到声是物理限制不是 bug。标定常数（GAIN/RATIO）集中在
+  MicSpectrum 顶部，真机校准在此调。
+- **2x4 桌面卡片**（`form/pages/MusicCardWide.ets`）：与 2x2 共用
+  FormAbility 与 form_state.json（含 positionMs/durationMs/progress）；
+  进度经 `PlayerController.progressListener`（timeUpdate 透传）→
+  AppStore 15s 节流推送（状态事件推送不节流）。**两个卡片页面文件的
+  顶层 LocalStorage 变量不得同名**（同 ets 编译单元冲突，已踩坑）。
+- **分享歌曲卡片图**（PlayerPage 顶栏分享按钮 → bindSheet）：预览卡
+  `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件
+  onClick 内（临时授权，免申请受限的 WRITE_IMAGEVIDEO）→
+  photoAccessHelper.createAsset + image ImagePacker.packToFile 写入相册。
+  分享图标 `sys.symbol.arrow_up_and_rectangle_on_rectangle`（id_defined.json
+  已核实；`sys.symbol.share` 不存在）。
+- @Trace 跨单例镜像仍走 stateListener 管道：AppStore 设置项变更后调
+  `player.notifyPrefs()`（public 转发私有 notifyState('prefs')），各页面
+  在既有订阅回调里刷新 @Local 镜像（如 micOn）。
+
 ## 本地命令
 
 构建/测试/lint/模拟器命令见 README.md「构建与运行」；要点：

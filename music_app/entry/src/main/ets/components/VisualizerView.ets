@@ -21,6 +21,7 @@ import {
   normalizeSpin, wrapAngleDelta, accelKickLevel,
   PRESET_COUNT, VIZ_FRAME_INTERVAL_MS
 } from '../common/VisualizerCore';
+import { appStore } from '../viewmodel/AppStore';
 import entry from 'libentry.so';
 
 /** XComponent onLoad 回调的运行时 context 形态（声明层面为 object，此处收窄） */
@@ -54,6 +55,9 @@ export struct VisualizerView {
   /** 舞台是否激活：false 时停帧不渲染（播放页封面模式——封面与可视化互斥，
    * 不再全速渲染被遮挡的画面）；XComponent/Canvas 保持挂载，恢复即续播 */
   @Param active: boolean = true;
+  /** 麦克风律动（设置页开关镜像）：true 且舞台激活时用麦克风真频谱驱动
+   * beat/bass/treble（外放场景），无效/关闭时回退合成 */
+  @Param micLive: boolean = false;
   /** 风格过渡进度 0→1（切换后 1.5s 内新场景渐入，旧画面靠反馈余晖消散） */
   private presetTrans: number = 1;
 
@@ -128,6 +132,26 @@ export struct VisualizerView {
   @Monitor('active')
   onActiveChange(): void {
     this.syncState();
+  }
+
+  /** 麦克风律动开关变化：跟随舞台激活态启停采集器 */
+  @Monitor('micLive')
+  onMicLiveChange(): void {
+    this.syncMic();
+  }
+
+  /** 采集器启停：只在舞台可见且开关打开时耗麦克风（省电） */
+  private syncMic(): void {
+    const mic = appStore.mic;
+    if (this.micLive && this.active && !this.disposed) {
+      mic.start().catch((err: Object) => {
+        hilog.warn(0x0004, 'VizView', 'mic start failed: %{public}s', JSON.stringify(err));
+      });
+    } else if (mic.active) {
+      mic.stop().catch((err: Object) => {
+        hilog.warn(0x0004, 'VizView', 'mic stop failed: %{public}s', JSON.stringify(err));
+      });
+    }
   }
 
   /** 传感器订阅启停（仅 full 变体激活时持有，省电）：
@@ -206,6 +230,7 @@ export struct VisualizerView {
   private syncState(): void {
     // 倾斜订阅跟随舞台激活态：只在 full 变体且 active 时耗传感器
     this.syncSensor();
+    this.syncMic();
     if (this.disposed) {
       return;
     }
@@ -286,12 +311,23 @@ export struct VisualizerView {
     // shader 管线上屏（XComponent 原生表面，fragment 逐像素解算——
     // 运算量与像素数相关、与效果复杂度无关，参数驱动）。帧驱动沿用
     // displaySync 节流；暂停时不渲染即冻结帧。
-    // 音乐律动参数（平台无频谱 API，为种子+时间的确定性合成）：
+    // 音乐律动参数：麦克风律动开启且环境声有效时用真频谱（外放场景可视化
+    // 随真实音乐跳动），否则按种子+时间确定性合成（平台无频谱 API）：
     // beat 节拍包络 / bass 低频段 / treble 高频段，仅驱动 shader 局部元素
-    const beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
-    const spec = synthSpectrum(this.seed, t, 8);
-    const bass = (spec[0] + spec[1]) / 2;
-    const treble = (spec[6] + spec[7]) / 2;
+    const mic = appStore.mic;
+    let beat: number;
+    let bass: number;
+    let treble: number;
+    if (this.micLive && mic.active && mic.valid) {
+      beat = mic.levels.beat;
+      bass = mic.levels.bass;
+      treble = mic.levels.treble;
+    } else {
+      beat = beatEnvelope(t, bpmFromSeed(this.seed), this.beatPhase);
+      const spec = synthSpectrum(this.seed, t, 8);
+      bass = (spec[0] + spec[1]) / 2;
+      treble = (spec[6] + spec[7]) / 2;
+    }
     if (this.presetTrans < 1) {
       this.presetTrans = Math.min(1, this.presetTrans + dt / 1500);
     }

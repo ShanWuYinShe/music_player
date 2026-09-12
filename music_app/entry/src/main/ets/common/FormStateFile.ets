@@ -15,6 +15,10 @@ export interface FormPlaybackState {
   /** 封面文件路径，空串=无封面 */
   coverPath: string;
   playing: boolean;
+  /** 播放进度（ms 与 0..1 比例）：2x4 卡片进度条；无曲目时为 0 */
+  positionMs: number;
+  durationMs: number;
+  progress: number;
 }
 
 export function formStatePath(filesDir: string): string {

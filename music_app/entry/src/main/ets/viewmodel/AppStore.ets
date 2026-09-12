@@ -1,4 +1,4 @@
-import { common } from '@kit.AbilityKit';
+import { common, abilityAccessCtrl } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -9,6 +9,7 @@ import { PlayerController } from '../player/PlayerController';
 import { OnlineSource } from '../source/MusicSource';
 import { UserData } from './UserData';
 import { writeFormState, FormPlaybackState, readFormIds } from '../common/FormStateFile';
+import { MicSpectrum } from '../common/MicSpectrum';
 
 const TAG = 'AppStore';
 const DOMAIN = 0x0004;
@@ -20,6 +21,9 @@ function toArgb(color: number): string {
 
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
+const KEY_MIC_LIVE = 'mic_live';
+/** 卡片进度节流推送间隔（播放中秒针推送的最小间隔，耗电与实时性折衷） */
+const FORM_PROGRESS_PUSH_MS = 15000;
 
 /**
  * 应用全局状态：组装音乐库、用户数据、播放内核与在线源配置。
@@ -42,6 +46,10 @@ export class AppStore {
   @Trace safeBottomVp: number = 0;
   /** 网易云源是否已登录（未登录时付费曲仅试听：试听曲不进缓存、播放页标注试听） */
   @Trace neteaseLoggedIn: boolean = false;
+  /** 麦克风律动开关（设置页控制；start 失败/权限被拒自动回退 false） */
+  @Trace micOn: boolean = false;
+  /** 麦克风频谱采集单例（VisualizerView 舞台激活时启停，见 MicSpectrum） */
+  readonly mic: MicSpectrum = new MicSpectrum();
   private pref: preferences.Preferences | null = null;
   /** 在线源地址已变更待生效（首页 onPageShow 消费后重拉在线列表） */
   private onlineConfigDirty: boolean = false;
@@ -51,6 +59,8 @@ export class AppStore {
   private static readonly PROVIDERS_TTL_MS: number = 30000;
   /** 在途 providers 请求（同刻并发去重，避免重复打上游） */
   private providersInflight: Promise<void> | null = null;
+  /** 上次卡片推送时间（进度秒针推送节流） */
+  private lastFormPushAt: number = 0;
 
   constructor() {
     // 字段按声明顺序初始化，userData 先于 player 构造
@@ -61,36 +71,98 @@ export class AppStore {
     this.abilityContext = context;
     this.pref = preferences.getPreferencesSync(context, { name: PREF_NAME });
     this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
+    this.micOn = this.pref.getSync(KEY_MIC_LIVE, false) as boolean;
     this.userData.init(this.pref);
     this.library.init(context);
     // VIP 未登录试听片段不得进整曲缓存：登录后同一 key 会返回完整音频，
     // 试听字节将污染缓存。闭包实时读取登录态，登录变化即时生效
     this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
-    // 桌面卡片状态同步：切歌/启停（含启动恢复）时落盘快照并推送已添加卡片
+    // 桌面卡片状态同步：切歌/启停（含启动恢复）时落盘快照并推送已添加卡片；
+    // 播放中秒针经 progressListener 节流推送（2x4 卡片进度条）
     this.player.addStateListener((reason: string) => this.syncFormState());
+    this.player.progressListener = () => this.syncFormState('progress');
     this.syncFormState();
   }
 
   /**
+   * 麦克风律动开关（设置页调用）：开启时请求 MICROPHONE 权限并启动采集，
+   * 权限被拒/无麦克风（模拟器）自动回退 false 返回 false；关闭时停止采集。
+   */
+  async setMicLive(on: boolean): Promise<boolean> {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return false;
+    }
+    if (on) {
+      try {
+        // Stage 模型权限请求入口是 AtManager（UIAbilityContext 上的同名方法
+        // 是 FA 模型遗留，本 SDK 不可用）
+        const atManager = abilityAccessCtrl.createAtManager();
+        const result = await atManager.requestPermissionsFromUser(ctx,
+          ['ohos.permission.MICROPHONE']);
+        if (result.authResults.length === 0 || result.authResults[0] !== 0) {
+          this.persistMicLive(false);
+          return false;
+        }
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'request mic permission failed: %{public}s', JSON.stringify(err));
+        this.persistMicLive(false);
+        return false;
+      }
+      const started = await this.mic.start();
+      if (!started) {
+        this.persistMicLive(false);
+        return false;
+      }
+      this.persistMicLive(true);
+      this.player.notifyPrefs();
+      return true;
+    }
+    await this.mic.stop();
+    this.persistMicLive(false);
+    this.player.notifyPrefs();
+    return true;
+  }
+
+  private persistMicLive(on: boolean): void {
+    this.micOn = on;
+    if (this.pref !== null) {
+      this.pref.putSync(KEY_MIC_LIVE, on);
+      this.pref.flush().catch(() => {});
+    }
+  }
+
+  /**
    * 桌面卡片状态同步（主进程 → FormExtension 进程）：
-   * ① 写 filesDir 状态快照（卡片后台进程拉起时读取）；
-   * ② formProvider 推送已添加的卡片实例实时刷新。
+   * ① 写 filesDir 状态快照（卡片后台进程拉起时读取，含进度供 2x4 卡片）；
+   * ② formProvider 推送已添加的卡片实例实时刷新；播放中秒针触发的
+   *    'progress' 推送按 FORM_PROGRESS_PUSH_MS 节流（状态事件不节流）。
    * 推送失败静默（桌面服务不可用不影响播放）。
    */
-  private syncFormState(): void {
+  private syncFormState(reason: string = 'state'): void {
     const ctx = this.abilityContext;
     if (ctx === null) {
       return;
     }
     const song = this.player.currentSong;
+    const duration = this.player.duration;
+    const position = this.player.currentTime;
     const state: FormPlaybackState = {
       title: song !== null ? song.title : '',
       artist: song !== null ? song.artist : '',
       coverPath: song !== null ? song.coverPath : '',
-      playing: this.player.isPlaying
+      playing: this.player.isPlaying,
+      positionMs: Math.floor(position),
+      durationMs: Math.floor(duration),
+      progress: duration > 0 ? Math.min(1, position / duration) : 0
     };
     writeFormState(ctx.filesDir, state);
+    const now = Date.now();
+    if (reason === 'progress' && now - this.lastFormPushAt < FORM_PROGRESS_PUSH_MS) {
+      return;
+    }
+    this.lastFormPushAt = now;
     // 卡片实例 id 由 FormAbility.onAddForm 登记（跨进程文件共享）
     const formIds = readFormIds(ctx.filesDir);
     for (const formId of formIds) {
