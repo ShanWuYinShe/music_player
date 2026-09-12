@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "音乐播放器"
+    },
+    {
+      "name": "form_MusicCard_displayName",
+      "value": "音乐播放"
+    },
+    {
+      "name": "form_MusicCard_desc",
+      "value": "桌面播放控制卡片"
     }
   ]
 }

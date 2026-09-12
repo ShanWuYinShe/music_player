@@ -9,9 +9,38 @@ const TAG: string = 'EntryAbility';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'Ability onCreate');
-    appStore.init(this.context).catch((err: Object) => {
-      hilog.error(DOMAIN, TAG, 'appStore init failed: %{public}s', JSON.stringify(err));
-    });
+    appStore.init(this.context)
+      .then(() => {
+        // 冷启动携带的卡片控制指令须等播放器就绪后执行
+        this.handleCardAction(want);
+      })
+      .catch((err: Object) => {
+        hilog.error(DOMAIN, TAG, 'appStore init failed: %{public}s', JSON.stringify(err));
+      });
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    hilog.info(DOMAIN, TAG, 'Ability onNewWant');
+    this.handleCardAction(want);
+  }
+
+  /**
+   * 桌面卡片按钮的 call 指令（postCardAction params.method）：后台执行
+   * 播放控制，不拉起前台界面。未知/缺失参数静默忽略。
+   */
+  private handleCardAction(want: Want): void {
+    const params = want.parameters;
+    if (!params) {
+      return;
+    }
+    const method = params['method'];
+    if (method === 'toggle') {
+      appStore.player.togglePlay();
+    } else if (method === 'next') {
+      appStore.player.next();
+    } else if (method === 'previous') {
+      appStore.player.previous();
+    }
   }
 
   onDestroy(): void {

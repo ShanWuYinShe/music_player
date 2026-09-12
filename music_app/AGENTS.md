@@ -101,6 +101,27 @@
   fontColor/placeholderColor（默认色随系统主题，浅色模式下会在深色输入底上形成
   深底深字不可见，已踩坑）
 
+## 桌面服务卡片（2x2 播放卡片）
+
+- 架构（`form/FormAbility.ets` + `form/pages/MusicCard.ets` + `common/FormStateFile.ets`）：
+  FormExtension 与主 UIAbility **不共享内存**，靠应用沙箱 filesDir 下两个 JSON 文件交接——
+  `form_state.json`（主进程在切歌/启停时经 `AppStore.syncFormState` 写入快照并
+  `formProvider.updateForm` 推送刷新）、`form_ids.json`（卡片实例 id 由
+  `FormAbility.onAddForm` 从 want 的 `FormParam.IDENTITY_KEY` 登记、`onRemoveForm`
+  移除；**系统不提供第三方查询本应用卡片 formId 的接口**，必须自己落盘记录）。
+- 卡片按钮用 **call 型 `postCardAction`**（后台拉起 EntryAbility 执行，不进前台），
+  `EntryAbility.handleCardAction` 在 `onCreate`（等 `appStore.init` 完成后）与
+  `onNewWant` 消费 `method` 参数（toggle/next/previous）；卡片空白区 router 进应用。
+- 卡片内**无法引用应用主题资源**（`$r('app.color.*')` 不可用），配色写死对齐
+  `dark/element/color.json` 的 viz token；控制图标用自带 SVG（`ic_card_*.svg`），
+  勿用 `sys.media.*` 图标名（无法在本机 id_defined.json 核实存在性）。
+- form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
+  window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
+- **模拟器已知限制**：卡片添加/渲染/数据注入正常，但 call 型按钮点击不会把
+  want 送达 UIAbility（无 onNewWant 日志）；等价链路已用
+  `aa start --ps method toggle` 验证通过。call 到达性需真机确认，若真机同样
+  不达，回退方案是按钮改 router 型（带 method 参数，副作用是拉起前台）。
+
 ## 本地命令
 
 构建/测试/lint/模拟器命令见 README.md「构建与运行」；要点：

@@ -1,0 +1,20 @@
+{
+  "forms": [
+    {
+      "name": "MusicCard",
+      "isDefault": true,
+      "uiSyntax": "arkts",
+      "displayName": "$string:form_MusicCard_displayName",
+      "description": "$string:form_MusicCard_desc",
+      "src": "./ets/form/pages/MusicCard.ets",
+      "window": {
+        "designWidth": 720,
+        "autoDesignWidth": false
+      },
+      "defaultDimension": "2*2",
+      "supportDimensions": ["2*2"],
+      "updateEnabled": false,
+      "transparencyEnabled": false
+    }
+  ]
+}

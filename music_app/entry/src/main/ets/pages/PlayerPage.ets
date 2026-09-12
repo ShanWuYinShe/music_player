@@ -1,4 +1,5 @@
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
+import { vibrator } from '@kit.SensorServiceKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController, CoverRef } from '../player/PlayerController';
 import { SongRecord } from '../model/Song';
@@ -757,6 +758,13 @@ export struct PlayerPage {
     const fav = appStore.userData.toggleFavorite(song.id);
     this.isFavoriteNow = fav; // @Trace 插值在真机不可靠，图标刷新显式走镜像
     promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
+    // 收藏动作触觉反馈：软震动一档（权限被拒/无马达时静默失败）
+    const effect: vibrator.VibratePreset = {
+      type: 'preset',
+      effectId: vibrator.HapticFeedback.EFFECT_SOFT,
+      count: 1
+    };
+    vibrator.startVibration(effect, { usage: 'touch' }).catch(() => {});
   }
 
   /** 音量图标：渲染读 @Local 镜像（真机上 player @Trace 不驱动属性插值） */

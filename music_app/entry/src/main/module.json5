@@ -20,6 +20,9 @@
       },
       {
         "name": "ohos.permission.ACCELEROMETER"
+      },
+      {
+        "name": "ohos.permission.VIBRATE"
       }
     ],
     "abilities": [
@@ -44,6 +47,21 @@
         ],
         "backgroundModes": [
           "audioPlayback"
+        ]
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "MusicFormAbility",
+        "srcEntry": "./ets/form/FormAbility.ets",
+        "description": "$string:form_MusicCard_desc",
+        "label": "$string:form_MusicCard_displayName",
+        "type": "form",
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:form_config"
+          }
         ]
       }
     ]

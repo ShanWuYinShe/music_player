@@ -2,11 +2,13 @@ import { common } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { formBindingData, formProvider } from '@kit.FormKit';
 import display from '@ohos.display';
 import { MusicLibrary } from '../library/MusicLibrary';
 import { PlayerController } from '../player/PlayerController';
 import { OnlineSource } from '../source/MusicSource';
 import { UserData } from './UserData';
+import { writeFormState, FormPlaybackState, readFormIds } from '../common/FormStateFile';
 
 const TAG = 'AppStore';
 const DOMAIN = 0x0004;
@@ -65,6 +67,38 @@ export class AppStore {
     // 试听字节将污染缓存。闭包实时读取登录态，登录变化即时生效
     this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
+    // 桌面卡片状态同步：切歌/启停（含启动恢复）时落盘快照并推送已添加卡片
+    this.player.addStateListener((reason: string) => this.syncFormState());
+    this.syncFormState();
+  }
+
+  /**
+   * 桌面卡片状态同步（主进程 → FormExtension 进程）：
+   * ① 写 filesDir 状态快照（卡片后台进程拉起时读取）；
+   * ② formProvider 推送已添加的卡片实例实时刷新。
+   * 推送失败静默（桌面服务不可用不影响播放）。
+   */
+  private syncFormState(): void {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return;
+    }
+    const song = this.player.currentSong;
+    const state: FormPlaybackState = {
+      title: song !== null ? song.title : '',
+      artist: song !== null ? song.artist : '',
+      coverPath: song !== null ? song.coverPath : '',
+      playing: this.player.isPlaying
+    };
+    writeFormState(ctx.filesDir, state);
+    // 卡片实例 id 由 FormAbility.onAddForm 登记（跨进程文件共享）
+    const formIds = readFormIds(ctx.filesDir);
+    for (const formId of formIds) {
+      formProvider.updateForm(formId, formBindingData.createFormBindingData(state))
+        .catch(() => {
+          // 卡片可能刚被移除，忽略单实例失败
+        });
+    }
   }
 
   /**
