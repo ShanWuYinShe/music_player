@@ -117,10 +117,13 @@
   勿用 `sys.media.*` 图标名（无法在本机 id_defined.json 核实存在性）。
 - form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
   window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
-- **模拟器已知限制**：卡片添加/渲染/数据注入正常，但 call 型按钮点击不会把
-  want 送达 UIAbility（无 onNewWant 日志）；等价链路已用
-  `aa start --ps method toggle` 验证通过。call 到达性需真机确认，若真机同样
-  不达，回退方案是按钮改 router 型（带 method 参数，副作用是拉起前台）。
+- **call 型 postCardAction 已弃用（真机+模拟器均不送达，已踩坑）**：按钮点击
+  无任何反应（不拉前台、无 onNewWant 日志），控制指令通道最终采用
+  **router 型**（点击拉起应用并携带 `method` 参数，EntryAbility
+  `handleCardAction` 在 onCreate/onNewWant 消费；等价链路用
+  `aa start --ps method toggle` 验证通过）。副作用是控制按钮会把应用
+  拉到前台——若后续要无前台的真后台控制，候选方案是 message 型 +
+  CommonEvent 进程间转发（FormAbility 发布、主进程订阅），尚未实施。
 
 ## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
 

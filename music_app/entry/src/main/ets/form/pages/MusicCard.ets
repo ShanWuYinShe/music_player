@@ -15,9 +15,11 @@ struct MusicCard {
   @LocalStorageProp('cover') cover: string = '';
   @LocalStorageProp('playing') playing: boolean = false;
 
+  /** 控制按钮：router 型拉起应用并携带指令（call 型在本机真机均不送达，
+   * 已踩坑；副作用是应用被拉到前台，可接受） */
   private callAction(method: string): void {
     postCardAction(this, {
-      action: 'call',
+      action: 'router',
       abilityName: 'EntryAbility',
       params: { method: method }
     });
