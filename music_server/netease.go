@@ -305,7 +305,8 @@ func (c *neteaseClient) discover(ctx context.Context) []Song {
 	path := fmt.Sprintf("/playlist/track/all?id=%d&limit=%d",
 		neteaseHotPlaylistID, neteaseDiscoverLimit)
 	var resp playlistTrackAllResp
-	if err := c.getJSON(ctx, path, &resp); err != nil {
+	// 脱离请求取消（同 search）：客户端断开不该让整份热歌榜进入失败冷却。
+	if err := c.getJSON(context.WithoutCancel(ctx), path, &resp); err != nil {
 		log.Printf("netease discover: %v", err)
 		c.discoverMu.Lock()
 		c.discoverFailAt = time.Now()
@@ -360,13 +361,23 @@ func (c *neteaseClient) search(ctx context.Context, query string, limit int) ([]
 	c.searchInflight[key] = call
 	c.searchMu.Unlock()
 
-	songs, err := c.searchUpstream(ctx, query, limit)
+	// 领导者用脱离请求取消的 ctx 打上游（api client 自带 8s 整体超时兜底）：
+	// 客户端中途断开（刷新/切歌）产生的 context.Canceled 不该被当成上游故障
+	// 记入失败冷却，否则该 query 对所有用户冷却 60s。
+	songs, err := c.searchUpstream(context.WithoutCancel(ctx), query, limit)
 
 	c.searchMu.Lock()
 	delete(c.searchInflight, key)
 	if err != nil {
 		if c.searchFail == nil {
 			c.searchFail = make(map[string]time.Time)
+		}
+		// 写入前顺带清扫过期条目：key 来自用户可控 query，失败条目若只增不删，
+		// 上游故障期被爬词表/刷唯一 query 会无界增长。
+		for k, t := range c.searchFail {
+			if time.Since(t) >= searchFailCooldown {
+				delete(c.searchFail, k)
+			}
 		}
 		c.searchFail[key] = time.Now()
 	} else {

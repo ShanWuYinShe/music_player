@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"mime"
 	"net/http"
@@ -132,6 +133,9 @@ func main() {
 		Addr:              config.Addr(),
 		Handler:           server.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// handler 均不读 body，30s 覆盖头部后的残余 body drain：没有它，
+		// 慢速 dribble 客户端可长期占住连接（ReadHeaderTimeout 只管到头部）。
+		ReadTimeout: 30 * time.Second,
 		// 空闲 keep-alive 连接限期回收;不设 WriteTimeout——长音频流式响应
 		// 会被整体超时掐断。
 		IdleTimeout: 120 * time.Second,
@@ -429,6 +433,11 @@ func scanLibrary(dir string, old map[string]cachedDuration) ([]Song, map[string]
 		info, err := d.Info()
 		if err != nil {
 			log.Printf("stat %s: %v", path, err)
+			return nil
+		}
+		// 跳过符号链接：曲库卷可被多方投放文件，指向库外的软链（如
+		// x.mp3 -> /data/netease/cookie）会经播放端点把库外文件当音频读走。
+		if info.Mode()&fs.ModeSymlink != 0 {
 			return nil
 		}
 		rel, err := filepath.Rel(dir, path)
