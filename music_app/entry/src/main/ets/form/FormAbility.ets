@@ -1,17 +1,21 @@
 import { FormExtensionAbility, formBindingData, formProvider } from '@kit.FormKit';
 import formInfo from '@ohos.app.form.formInfo';
 import { Want } from '@kit.AbilityKit';
+import { commonEventManager } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { readFormState, addFormId, removeFormId } from '../common/FormStateFile';
+import { readFormState, addFormId, removeFormId, CARD_ACTION_EVENT, toCardPayload, emptyFormState, CardBindingPayload } from '../common/FormStateFile';
 
 const TAG = 'MusicFormAbility';
 const DOMAIN = 0x0002;
 
-interface CardData {
-  title: string;
-  artist: string;
-  cover: string;
-  playing: boolean;
+/** postCardAction message 事件的 payload 形态（params 序列化为 JSON 串） */
+interface CardActionMessage {
+  method?: string;
+  params?: CardActionParams;
+}
+
+interface CardActionParams {
+  method?: string;
 }
 
 /**
@@ -36,6 +40,34 @@ export default class MusicFormAbility extends FormExtensionAbility {
     removeFormId(this.context.filesDir, formId);
   }
 
+  /**
+   * 卡片控制按钮（message 型）：解析指令并以公共事件转发给主进程执行
+   * （FormExtension 进程无法访问主进程播放器；本进程也没有拉起 UIAbility
+   * 的能力——主进程被杀时本次点击静默无效，点卡片空白进应用即恢复）。
+   */
+  onFormEvent(formId: string, message: string): void {
+    let method = '';
+    try {
+      const parsed = JSON.parse(message) as CardActionMessage;
+      method = parsed.method ?? parsed.params?.method ?? '';
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'card message parse failed: %{public}s', message);
+    }
+    if (method !== 'toggle' && method !== 'next' && method !== 'previous') {
+      return;
+    }
+    commonEventManager.publish(CARD_ACTION_EVENT, {
+      bundleName: 'com.lsyb.musicplayer',
+      data: method
+    }, (err) => {
+      if (err) {
+        hilog.warn(DOMAIN, TAG, 'publish card action failed: %{public}s', JSON.stringify(err));
+      } else {
+        hilog.info(DOMAIN, TAG, 'card action published: %{public}s', method);
+      }
+    });
+  }
+
   onUpdateForm(formId: string): void {
     formProvider.updateForm(formId, formBindingData.createFormBindingData(this.buildCardData()))
       .catch((err: Object) => {
@@ -43,16 +75,8 @@ export default class MusicFormAbility extends FormExtensionAbility {
       });
   }
 
-  private buildCardData(): CardData {
+  private buildCardData(): CardBindingPayload {
     const state = readFormState(this.context.filesDir);
-    if (state === null || state.title === '') {
-      return { title: '', artist: '', cover: '', playing: false };
-    }
-    return {
-      title: state.title,
-      artist: state.artist,
-      cover: state.coverPath,
-      playing: state.playing
-    };
+    return toCardPayload(state !== null ? state : emptyFormState());
   }
 }

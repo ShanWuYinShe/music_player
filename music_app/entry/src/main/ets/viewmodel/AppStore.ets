@@ -1,4 +1,5 @@
 import { common, abilityAccessCtrl } from '@kit.AbilityKit';
+import { commonEventManager } from '@kit.BasicServicesKit';
 import { window } from '@kit.ArkUI';
 import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -8,7 +9,7 @@ import { MusicLibrary } from '../library/MusicLibrary';
 import { PlayerController } from '../player/PlayerController';
 import { OnlineSource } from '../source/MusicSource';
 import { UserData } from './UserData';
-import { writeFormState, FormPlaybackState, readFormIds } from '../common/FormStateFile';
+import { writeFormState, FormPlaybackState, readFormIds, CARD_ACTION_EVENT, appendCardProbe, toCardPayload } from '../common/FormStateFile';
 import { MicSpectrum } from '../common/MicSpectrum';
 
 const TAG = 'AppStore';
@@ -22,7 +23,7 @@ function toArgb(color: number): string {
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
 const KEY_MIC_LIVE = 'mic_live';
-/** 卡片进度节流推送间隔（播放中秒针推送的最小间隔，耗电与实时性折衷） */
+/** 卡片进度推送间隔：推送节流窗口 = 播放中自驱定时器周期（耗电与实时性折衷） */
 const FORM_PROGRESS_PUSH_MS = 15000;
 
 /**
@@ -61,6 +62,13 @@ export class AppStore {
   private providersInflight: Promise<void> | null = null;
   /** 上次卡片推送时间（进度秒针推送节流） */
   private lastFormPushAt: number = 0;
+  /** 播放中卡片进度自驱定时器 id（-1 = 未启动）：真机后台 AVPlayer 的
+   * timeUpdate 可能停报，不能只靠它驱动卡片进度推送 */
+  private formTickerId: number = -1;
+  /** 最近一次进度锚点（timeUpdate 或状态事件）的墙钟时刻：插值补齐进度用 */
+  private formTickBaseAt: number = 0;
+  /** 卡片控制指令订阅者（FormAbility 转发的 message 型按钮事件） */
+  private cardSubscriber: commonEventManager.CommonEventSubscriber | null = null;
 
   constructor() {
     // 字段按声明顺序初始化，userData 先于 player 构造
@@ -79,10 +87,66 @@ export class AppStore {
     this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
     // 桌面卡片状态同步：切歌/启停（含启动恢复）时落盘快照并推送已添加卡片；
-    // 播放中秒针经 progressListener 节流推送（2x4 卡片进度条）
+    // 播放中进度由 timeUpdate 与自驱定时器双通道驱动（2x4 卡片进度条）。
+    // timeUpdate 同时刷新插值锚点：后台停报时由定时器按墙钟插值补齐进度
     this.player.addStateListener((reason: string) => this.syncFormState());
-    this.player.progressListener = () => this.syncFormState('progress');
+    this.player.progressListener = () => {
+      this.formTickBaseAt = Date.now();
+      this.syncFormState('progress');
+    };
     this.syncFormState();
+    this.subscribeCardActions();
+  }
+
+  /**
+   * 订阅卡片控制指令（FormAbility 把 message 型按钮点击以公共事件转发
+   * 过来）：主进程存活即可后台响应播放控制，不拉起前台界面。
+   */
+  private subscribeCardActions(): void {
+    const subscriber = commonEventManager.createSubscriberSync({
+      events: [CARD_ACTION_EVENT]
+    });
+    commonEventManager.subscribe(subscriber, (err, data) => {
+      if (err) {
+        hilog.warn(DOMAIN, TAG, 'card action subscribe failed: %{public}s', JSON.stringify(err));
+        return;
+      }
+      const method = data.data;
+      hilog.info(DOMAIN, TAG, 'card action received: %{public}s', method);
+      const ctx = this.abilityContext;
+      if (ctx !== null) {
+        appendCardProbe(ctx.filesDir, `received ${method}`);
+      }
+      if (method === 'toggle') {
+        this.player.togglePlay();
+      } else if (method === 'next') {
+        this.player.next();
+      } else if (method === 'previous') {
+        this.player.previous();
+      }
+    });
+    this.cardSubscriber = subscriber;
+    hilog.info(DOMAIN, TAG, 'card action subscriber registered');
+  }
+
+  /** 应用销毁时退订卡片指令事件并撤自驱定时器（EntryAbility.onDestroy 调用） */
+  disposeCardBridge(): void {
+    this.stopFormTicker();
+    if (this.cardSubscriber !== null) {
+      commonEventManager.unsubscribe(this.cardSubscriber, (err) => {
+        if (err) {
+          hilog.warn(DOMAIN, TAG, 'card unsubscribe failed: %{public}s', JSON.stringify(err));
+        }
+      });
+      this.cardSubscriber = null;
+    }
+  }
+
+  private stopFormTicker(): void {
+    if (this.formTickerId >= 0) {
+      clearInterval(this.formTickerId);
+      this.formTickerId = -1;
+    }
   }
 
   /**
@@ -135,9 +199,12 @@ export class AppStore {
 
   /**
    * 桌面卡片状态同步（主进程 → FormExtension 进程）：
-   * ① 写 filesDir 状态快照（卡片后台进程拉起时读取，含进度供 2x4 卡片）；
-   * ② formProvider 推送已添加的卡片实例实时刷新；播放中秒针触发的
-   *    'progress' 推送按 FORM_PROGRESS_PUSH_MS 节流（状态事件不节流）。
+   * ① formProvider 推送已添加的卡片实例（载荷经 toCardPayload 映射键名）；
+   * ② 落盘状态快照供卡片后台进程冷启动读取（与推送同节奏，不再秒针写盘）。
+   * 进度推送双通道：timeUpdate 秒针回调与播放中自驱定时器（真机后台
+   * timeUpdate 可能停报），同按 FORM_PROGRESS_PUSH_MS 节流去重；状态事件
+   * 不节流。位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件刷新，前台
+   * 正常回调时插值仅补 0~1s 抖动，后台失联时由定时器按 1 倍速推算推进量。
    * 推送失败静默（桌面服务不可用不影响播放）。
    */
   private syncFormState(reason: string = 'state'): void {
@@ -145,9 +212,20 @@ export class AppStore {
     if (ctx === null) {
       return;
     }
+    if (reason === 'state') {
+      // 状态事件即重锚：启停/切歌瞬间进度锚定 currentTime，防止暂停期间
+      // 累计的墙钟差被计入插值
+      this.formTickBaseAt = Date.now();
+    }
     const song = this.player.currentSong;
     const duration = this.player.duration;
-    const position = this.player.currentTime;
+    let position = this.player.currentTime;
+    if (this.player.isPlaying && this.formTickBaseAt > 0) {
+      position += Math.max(0, Date.now() - this.formTickBaseAt);
+    }
+    if (duration > 0 && position > duration) {
+      position = duration;
+    }
     const state: FormPlaybackState = {
       title: song !== null ? song.title : '',
       artist: song !== null ? song.artist : '',
@@ -157,19 +235,27 @@ export class AppStore {
       durationMs: Math.floor(duration),
       progress: duration > 0 ? Math.min(1, position / duration) : 0
     };
-    writeFormState(ctx.filesDir, state);
     const now = Date.now();
     if (reason === 'progress' && now - this.lastFormPushAt < FORM_PROGRESS_PUSH_MS) {
       return;
     }
     this.lastFormPushAt = now;
+    writeFormState(ctx.filesDir, state);
     // 卡片实例 id 由 FormAbility.onAddForm 登记（跨进程文件共享）
     const formIds = readFormIds(ctx.filesDir);
     for (const formId of formIds) {
-      formProvider.updateForm(formId, formBindingData.createFormBindingData(state))
+      formProvider.updateForm(formId, formBindingData.createFormBindingData(toCardPayload(state)))
         .catch(() => {
           // 卡片可能刚被移除，忽略单实例失败
         });
+    }
+    // 自驱定时器随播放态启停（进程有音频长时任务保活，定时器后台可用）
+    if (this.player.isPlaying) {
+      if (this.formTickerId < 0) {
+        this.formTickerId = setInterval(() => this.syncFormState('progress'), FORM_PROGRESS_PUSH_MS);
+      }
+    } else {
+      this.stopFormTicker();
     }
   }
 

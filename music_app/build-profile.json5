@@ -7,11 +7,11 @@
         "material": {
           "certpath": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B1E51C5F92EAC2584F6742931CF3400B4603BDC92C81A5B971D0360D01F6AB8F3898627F55DC007",
+          "keyPassword": "0000001B56650B4D17A89550543BBCC3B62AE58FBE5A92EF4FC63A0DE3E1E996BDEBEC77679837AD999821",
           "profile": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "/Users/liyou/.ohos/config/default_music_app_hJ3Jlp0WPhHi1g3nvc9xDPFf_MTIHF_9xzX7RfM1K-U=.p12",
-          "storePassword": "0000001BF3B7294DA25489DB2B61DD77B8FF5B2A7FBF16D87B70410FD3E54EEB62556E88FAE303B66F0361"
+          "storePassword": "0000001BD5EE96C5759B433F2304C06D0F90431B31EC3FCC377E819876C24C8048AE73890326CAE5944A0D"
         }
       }
     ],

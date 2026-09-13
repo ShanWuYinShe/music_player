@@ -5,6 +5,13 @@ const TAG = 'FormStateFile';
 const DOMAIN = 0x0002;
 
 /**
+ * 卡片控制指令的公共事件名：卡片按钮（message 型）→ FormAbility 发布 →
+ * 主进程 AppStore 订阅执行播放控制（FormExtension 进程与主进程不共享
+ * 内存，公共事件是跨进程转发指令的通道）。
+ */
+export const CARD_ACTION_EVENT = 'com.lsyb.musicplayer.card_action';
+
+/**
  * 桌面卡片共享的播放状态快照。主进程写、FormExtensionAbility 读：
  * 两个进程不共享内存，应用沙箱内 filesDir 下的 JSON 文件是唯一交接点。
  */
@@ -21,7 +28,25 @@ export interface FormPlaybackState {
   progress: number;
 }
 
-export function formStatePath(filesDir: string): string {
+/** 卡片动作诊断探针落盘路径（真机验证用：订阅回调收到指令即记一行） */
+export function cardProbePath(filesDir: string): string {
+  return `${filesDir}/card_probe.log`;
+}
+
+/** 追加一条诊断行（订阅注册/指令收到）；失败静默 */
+export function appendCardProbe(filesDir: string, line: string): void {
+  try {
+    const file = fs.openSync(cardProbePath(filesDir),
+      fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.APPEND);
+    fs.writeSync(file.fd, `${Date.now()} ${line}\n`);
+    fs.closeSync(file);
+  } catch (err) {
+    // 诊断探针失败不影响功能
+  }
+}
+
+/** 状态快照落盘路径（主进程写 / FormExtension 进程读的进程间交接文件） */
+function formStatePath(filesDir: string): string {
   return `${filesDir}/form_state.json`;
 }
 
@@ -37,6 +62,39 @@ export function writeFormState(filesDir: string, state: FormPlaybackState): void
   }
 }
 
+/**
+ * 卡片 LocalStorage 绑定载荷：键与卡片页 @LocalStorageProp 一一对应。
+ * 快照字段 coverPath 须映射为卡片键 cover——主进程直接推原始快照时
+ * 卡片收不到 cover，封面会停留在加卡时刻的曲目（已踩坑）。
+ */
+export interface CardBindingPayload {
+  title: string;
+  artist: string;
+  cover: string;
+  playing: boolean;
+  positionMs: number;
+  durationMs: number;
+  progress: number;
+}
+
+/** 快照 → 卡片绑定载荷（FormAbility 冷启动读文件与主进程推送共用同一形状） */
+export function toCardPayload(state: FormPlaybackState): CardBindingPayload {
+  return {
+    title: state.title,
+    artist: state.artist,
+    cover: state.coverPath,
+    playing: state.playing,
+    positionMs: state.positionMs,
+    durationMs: state.durationMs,
+    progress: state.progress
+  };
+}
+
+/** 无曲目占位快照（卡片冷启动且尚无状态文件时用） */
+export function emptyFormState(): FormPlaybackState {
+  return { title: '', artist: '', coverPath: '', playing: false, positionMs: 0, durationMs: 0, progress: 0 };
+}
+
 /** 读取状态快照；文件不存在或损坏返回 null（卡片自行回退占位态） */
 export function readFormState(filesDir: string): FormPlaybackState | null {
   try {
@@ -45,7 +103,16 @@ export function readFormState(filesDir: string): FormPlaybackState | null {
     if (typeof parsed.title !== 'string' || typeof parsed.playing !== 'boolean') {
       return null;
     }
-    return parsed;
+    // 逐字段归一化：旧版本快照可能缺进度字段，不能把 undefined 透传给卡片
+    return {
+      title: parsed.title,
+      artist: typeof parsed.artist === 'string' ? parsed.artist : '',
+      coverPath: typeof parsed.coverPath === 'string' ? parsed.coverPath : '',
+      playing: parsed.playing,
+      positionMs: typeof parsed.positionMs === 'number' ? parsed.positionMs : 0,
+      durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : 0,
+      progress: typeof parsed.progress === 'number' ? parsed.progress : 0
+    };
   } catch (err) {
     return null;
   }

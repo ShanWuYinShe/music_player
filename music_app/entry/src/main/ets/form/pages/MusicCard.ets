@@ -15,12 +15,12 @@ struct MusicCard {
   @LocalStorageProp('cover') cover: string = '';
   @LocalStorageProp('playing') playing: boolean = false;
 
-  /** 控制按钮：router 型拉起应用并携带指令（call 型在本机真机均不送达，
-   * 已踩坑；副作用是应用被拉到前台，可接受） */
+  /** 控制按钮：message 型发指令到 FormAbility（经公共事件转发主进程后台
+   * 执行，不拉起应用）。call 型真机不送达、router 型会拉前台，均已踩坑 */
   private callAction(method: string): void {
     postCardAction(this, {
-      action: 'router',
-      abilityName: 'EntryAbility',
+      action: 'message',
+      abilityName: 'MusicFormAbility',
       params: { method: method }
     });
   }

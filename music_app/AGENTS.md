@@ -105,25 +105,35 @@
 
 - 架构（`form/FormAbility.ets` + `form/pages/MusicCard.ets` + `common/FormStateFile.ets`）：
   FormExtension 与主 UIAbility **不共享内存**，靠应用沙箱 filesDir 下两个 JSON 文件交接——
-  `form_state.json`（主进程在切歌/启停时经 `AppStore.syncFormState` 写入快照并
-  `formProvider.updateForm` 推送刷新）、`form_ids.json`（卡片实例 id 由
-  `FormAbility.onAddForm` 从 want 的 `FormParam.IDENTITY_KEY` 登记、`onRemoveForm`
-  移除；**系统不提供第三方查询本应用卡片 formId 的接口**，必须自己落盘记录）。
-- 卡片按钮用 **call 型 `postCardAction`**（后台拉起 EntryAbility 执行，不进前台），
-  `EntryAbility.handleCardAction` 在 `onCreate`（等 `appStore.init` 完成后）与
-  `onNewWant` 消费 `method` 参数（toggle/next/previous）；卡片空白区 router 进应用。
+  `form_state.json`（主进程经 `AppStore.syncFormState` 写入快照，与推送同节奏落盘）、
+  `form_ids.json`（卡片实例 id 由 `FormAbility.onAddForm` 从 want 的
+  `FormParam.IDENTITY_KEY` 登记、`onRemoveForm` 移除；**系统不提供第三方查询本应用
+  卡片 formId 的接口**，必须自己落盘记录）。
+- **进度刷新机制（真机踩坑后确立）**：卡片无法自刷新，只能靠主进程
+  `formProvider.updateForm` 主动推送。推送依赖 AVPlayer `timeUpdate` 秒针回调——
+  但真机后台该回调可能停报（音频长时任务保活下状态事件正常、timeUpdate 失联），
+  只靠它会导致卡片进度只在播放/暂停/切歌时更新。**现行双通道**：timeUpdate 与
+  播放中自驱 `setInterval`（`FORM_PROGRESS_PUSH_MS` 15s，节流窗口=定时器周期）
+  双驱动，位置按墙钟自锚点插值（锚点由 timeUpdate/状态事件刷新，暂停/切歌即重锚，
+  位置夹在时长内）；暂停/停止即撤定时器。推送载荷必须经 `toCardPayload` 映射
+  （快照键 `coverPath` → 卡片键 `cover`，直接推原始快照卡片收不到封面，已踩坑）；
+  `FormAbility.buildCardData`（加卡/系统拉起时的快照）同用该映射并含进度字段。
+  `updateEnabled: false`（无定时刷新配额消耗），刷新完全靠主动推送。
+- 卡片按钮控制通道（踩坑史，最终方案 message + CommonEvent）：
+  ① call 型 `postCardAction` 在真机+模拟器均不送达（点击零反应、无
+  onNewWant 日志，原因未明），弃用；② router 型可用但会把应用拉到前台
+  （违背卡片免进应用的本意）；③ **最终：message 型发到 FormAbility
+  （`onFormEvent` 解析 `method`），经 `commonEventManager.publish` 转发
+  自定义公共事件 `CARD_ACTION_EVENT`，主进程 AppStore 订阅执行播放控制**
+  ——完全后台、不拉前台。主进程存活即响应（播放中/暂停都有后台长时任务
+  保活）；主进程被杀后点击静默无效（FormExtensionContext 无 startAbility
+  无法拉起，点卡片空白 router 进应用即恢复），已知限制。EntryAbility 的
+  `handleCardAction`（want.parameters.method）保留：兜底冷启动带参拉起。
 - 卡片内**无法引用应用主题资源**（`$r('app.color.*')` 不可用），配色写死对齐
   `dark/element/color.json` 的 viz token；控制图标用自带 SVG（`ic_card_*.svg`），
   勿用 `sys.media.*` 图标名（无法在本机 id_defined.json 核实存在性）。
 - form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
   window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
-- **call 型 postCardAction 已弃用（真机+模拟器均不送达，已踩坑）**：按钮点击
-  无任何反应（不拉前台、无 onNewWant 日志），控制指令通道最终采用
-  **router 型**（点击拉起应用并携带 `method` 参数，EntryAbility
-  `handleCardAction` 在 onCreate/onNewWant 消费；等价链路用
-  `aa start --ps method toggle` 验证通过）。副作用是控制按钮会把应用
-  拉到前台——若后续要无前台的真后台控制，候选方案是 message 型 +
-  CommonEvent 进程间转发（FormAbility 发布、主进程订阅），尚未实施。
 
 ## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
 
@@ -140,8 +150,8 @@
   MicSpectrum 顶部，真机校准在此调。
 - **2x4 桌面卡片**（`form/pages/MusicCardWide.ets`）：与 2x2 共用
   FormAbility 与 form_state.json（含 positionMs/durationMs/progress）；
-  进度经 `PlayerController.progressListener`（timeUpdate 透传）→
-  AppStore 15s 节流推送（状态事件推送不节流）。**两个卡片页面文件的
+  进度推送机制见「桌面服务卡片」一节（timeUpdate + 自驱定时器双通道、
+  15s 节流、墙钟插值，状态事件推送不节流）。**两个卡片页面文件的
   顶层 LocalStorage 变量不得同名**（同 ets 编译单元冲突，已踩坑）。
 - **分享歌曲卡片图**（PlayerPage 顶栏分享按钮 → bindSheet）：预览卡
   `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件

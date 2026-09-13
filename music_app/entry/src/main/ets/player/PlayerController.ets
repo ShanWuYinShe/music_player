@@ -215,6 +215,9 @@ export class PlayerController {
       return;
     }
     this.currentSongId = id;
+    // 新曲从 0 起显示：加载期（prepared 前）currentTime 若残留上一首位置，
+    // 会以新曲标题短暂显示旧进度并被卡片插值放大
+    this.currentTime = 0;
     this.notifyState('song');
     this.pendingSeekMs = 0;
     this.userData.addRecent(id);
@@ -448,7 +451,6 @@ export class PlayerController {
     this.generation++;
     this.releasePlayer();
     this.currentSongId = '';
-    this.notifyState('song');
     this.isPlaying = false;
     this.isPrepared = false;
     this.currentTime = 0;
@@ -457,6 +459,9 @@ export class PlayerController {
     this.session.updatePlaybackState(false, 0, 1.0);
     this.session.stopBackground();
     this.persistState();
+    // 状态全部落定后统一广播：中途广播会把"无曲目但 playing=true"的
+    // 中间态推给卡片，且此后再无通知，卡片残留不一致显示
+    this.notifyState('song');
   }
 
   /** 持久化当前会话（当前曲/进度/模式），供下次启动续播 */
@@ -617,6 +622,9 @@ export class PlayerController {
     this.failureGen = gen;
     this.errorStreak += 1;
     this.isPlaying = false;
+    // 停播必须广播：熔断分支不再经过切歌通知，漏推会让卡片停留
+    // "播放中"图标与冻结进度（自动跳过分支由后续切歌通知覆盖，此通知冗余无害）
+    this.notifyState('playing');
     if (this.errorStreak >= ERROR_STREAK_LIMIT) {
       this.onPlaybackError?.(`「${song.title}」${reason}，已连续 ${this.errorStreak} 首无法播放，停止尝试`);
       hilog.warn(DOMAIN, TAG, 'error streak limit reached, stop auto-skip');
@@ -748,6 +756,8 @@ export class PlayerController {
       this.session.updatePlaybackState(false, 0, 1.0);
       this.session.stopBackground();
       this.persistState();
+      // 此路径不经 stateChange/切歌通知，漏广播会让卡片停留播放中+冻结进度
+      this.notifyState('playing');
       return;
     }
     this.autoNext();
