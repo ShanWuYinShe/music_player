@@ -6,7 +6,8 @@ import { LibraryTab, SortMode, filterAndSort, splitHighlight, TextSegment } from
 import {
   ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL,
   songsUrl, providersUrl, parseOnlineSongs, parseOnlineProviders,
-  OnlineSongItem, OnlineSongsResponse
+  OnlineSongItem, OnlineSongsResponse,
+  OnlineCacheEntry, isCacheFresh, serializeOnlineCache, parseOnlineCache
 } from '../main/ets/source/OnlineApi';
 import {
   PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
@@ -34,6 +35,12 @@ function expectRgb(rgb: number[], r: number, g: number, b: number): void {
   expect(rgb[0]).assertEqual(r);
   expect(rgb[1]).assertEqual(g);
   expect(rgb[2]).assertEqual(b);
+}
+
+/** 构造在线列表缓存条目（曲目用既有 mk 助手保证字段完整） */
+function mkEntry(baseUrl: string, savedAt: number): OnlineCacheEntry {
+  const songs: SongRecord[] = [mk('online:1', '雨后琶音', '湖畔晚风', 18000)];
+  return { baseUrl: baseUrl, savedAt: savedAt, songs: songs };
 }
 
 export default function LocalUnitSuite() {
@@ -509,6 +516,50 @@ export default function LocalUnitSuite() {
       for (let i = 1; i < mag.length; i++) {
         expect(mag[i] < 1e-6).assertTrue();
       }
+    });
+  });
+
+  describe('OnlineCacheTest', () => {
+    it('isCacheFreshShouldRespectTtlAndClock', 0, () => {
+      const ttl = 10 * 60 * 1000;
+      expect(isCacheFresh(1000, 1000, ttl)).assertTrue();
+      expect(isCacheFresh(1000, 1000 + ttl - 1, ttl)).assertTrue();
+      expect(isCacheFresh(1000, 1000 + ttl, ttl)).assertFalse();
+      // 时钟回拨（now 早于采样时刻）视为不新鲜
+      expect(isCacheFresh(2000, 1000, ttl)).assertFalse();
+      expect(isCacheFresh(0, 5000, ttl)).assertFalse();
+    });
+
+    it('serializeParseShouldRoundTrip', 0, () => {
+      const base = DEFAULT_ONLINE_BASE_URL;
+      const entry = mkEntry(base, 1700000000000);
+      const text = serializeOnlineCache(entry);
+      const restored = parseOnlineCache(text, base);
+      expect(restored !== null).assertTrue();
+      if (restored !== null) {
+        expect(restored.baseUrl).assertEqual(base);
+        expect(restored.savedAt).assertEqual(entry.savedAt);
+        expect(restored.songs.length).assertEqual(1);
+        expect(restored.songs[0].id).assertEqual('online:1');
+        expect(restored.songs[0].title).assertEqual('雨后琶音');
+      }
+    });
+
+    it('parseShouldRejectCorruptMismatchedAndEmpty', 0, () => {
+      const base = DEFAULT_ONLINE_BASE_URL;
+      expect(parseOnlineCache('', base)).assertNull();
+      expect(parseOnlineCache('not-json', base)).assertNull();
+      // baseUrl 不一致（换服务端）：旧缓存失效
+      const other = serializeOnlineCache(mkEntry('https://example.com/api/music', 1700000000000));
+      expect(parseOnlineCache(other, base)).assertNull();
+      // 空列表不值得缓存
+      const emptySongs: SongRecord[] = [];
+      const emptyEntry: OnlineCacheEntry = { baseUrl: base, savedAt: 1700000000000, songs: emptySongs };
+      expect(parseOnlineCache(serializeOnlineCache(emptyEntry), base)).assertNull();
+      // 结构损坏：歌目缺 fileName
+      const brokenSong: SongRecord = { id: 'online:1', title: 'x', artist: '', album: '', duration: 0, fileName: '', coverPath: '' };
+      const brokenEntry: OnlineCacheEntry = { baseUrl: base, savedAt: 1700000000000, songs: [brokenSong] };
+      expect(parseOnlineCache(serializeOnlineCache(brokenEntry), base)).assertNull();
     });
   });
 }

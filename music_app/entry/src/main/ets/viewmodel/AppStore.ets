@@ -81,6 +81,8 @@ export class AppStore {
     this.abilityContext = context;
     this.pref = preferences.getPreferencesSync(context, { name: PREF_NAME });
     this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
+    // 在线列表缓存目录：注入即恢复持久化的默认视图（杀进程重开秒开在线页）
+    this.onlineSource.setCacheDir(context.filesDir);
     this.micOn = this.pref.getSync(KEY_MIC_LIVE, false) as boolean;
     this.userData.init(this.pref);
     this.library.init(context);

@@ -55,6 +55,74 @@ export interface OnlineSongsResponse {
   total?: number;
 }
 
+/** 在线列表持久化缓存条目（默认视图，空查询）：baseUrl 用于换服失效 */
+export interface OnlineCacheEntry {
+  baseUrl: string;
+  /** 采样时刻（墙钟 ms），TTL 判定与卡片锚点同思路 */
+  savedAt: number;
+  songs: SongRecord[];
+}
+
+/** 缓存文件结构版本：字段/语义变化时递增使旧文件失效 */
+const ONLINE_CACHE_VERSION = 1;
+
+/** 缓存文件持久化结构（条目 + 版本号；version 缺失即旧文件，拒绝） */
+interface OnlineCacheFile extends OnlineCacheEntry {
+  version?: number;
+}
+
+/** TTL 判定（纯函数）：clock 回拨（now < savedAt）视为不新鲜 */
+export function isCacheFresh(savedAt: number, now: number, ttlMs: number): boolean {
+  return savedAt > 0 && now >= savedAt && now - savedAt < ttlMs;
+}
+
+/** 缓存条目 → 持久化 JSON 串（纯函数） */
+export function serializeOnlineCache(entry: OnlineCacheEntry): string {
+  return JSON.stringify({
+    version: ONLINE_CACHE_VERSION,
+    baseUrl: entry.baseUrl,
+    savedAt: entry.savedAt,
+    songs: entry.songs
+  });
+}
+
+/**
+ * 持久化 JSON 串 → 缓存条目（纯函数）。损坏 / 版本不符 / baseUrl 与当前
+ * 生效地址不一致 / 结构非法（含空列表——空库不值得缓存，展示占位本就不
+ * 需要数据）返回 null，调用方按无缓存处理。
+ */
+export function parseOnlineCache(body: string, baseUrl: string): OnlineCacheEntry | null {
+  if (body.trim() === '') {
+    return null;
+  }
+  let parsed: OnlineCacheFile | null;
+  try {
+    parsed = JSON.parse(body) as OnlineCacheFile;
+  } catch (err) {
+    return null;
+  }
+  if (!parsed || parsed.version !== ONLINE_CACHE_VERSION || parsed.baseUrl !== baseUrl) {
+    return null;
+  }
+  if (typeof parsed.savedAt !== 'number' || !(parsed.savedAt > 0) || !Array.isArray(parsed.songs)) {
+    return null;
+  }
+  if (parsed.songs.length === 0) {
+    return null;
+  }
+  const songs: SongRecord[] = [];
+  for (const song of parsed.songs) {
+    if (song && typeof song.id === 'string' && typeof song.title === 'string' &&
+      typeof song.fileName === 'string' && song.fileName !== '') {
+      songs.push(song);
+    }
+  }
+  if (songs.length === 0) {
+    return null;
+  }
+  return { baseUrl: parsed.baseUrl, savedAt: parsed.savedAt, songs: songs };
+}
+
 /** 规范化 Base URL：去首尾空白与尾部斜杠；空串原样返回 */
 export function normalizeBaseUrl(url: string): string {
   const trimmed = url.trim();

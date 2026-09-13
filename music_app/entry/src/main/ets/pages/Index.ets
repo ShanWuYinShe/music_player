@@ -366,7 +366,7 @@ struct Index {
                 this.SongList(this.onlineScroller)
               }
               .onRefreshing(() => {
-                this.enterOnline(this.searchText.trim()).finally(() => {
+                this.enterOnline(this.searchText.trim(), true).finally(() => {
                   this.isRefreshing = false;
                 });
               })
@@ -596,7 +596,7 @@ struct Index {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.ink'))
-          .onClick(() => this.enterOnline(this.searchText.trim()))
+          .onClick(() => this.enterOnline(this.searchText.trim(), true))
       }
       .width('100%')
       .layoutWeight(1)
@@ -622,7 +622,7 @@ struct Index {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.ink'))
-          .onClick(() => this.enterOnline(this.searchText.trim()))
+          .onClick(() => this.enterOnline(this.searchText.trim(), true))
       }
       .width('100%')
       .layoutWeight(1)
@@ -832,16 +832,19 @@ struct Index {
    * 从播放页等页面返回不再盲目重拉，避免打断现有队列与列表状态 */
   onPageShow(): void {
     if (this.sourceTab === SourceTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
-      this.enterOnline(this.searchText.trim());
+      this.enterOnline(this.searchText.trim(), true);
     }
   }
 
-  /** 切换曲目来源：本地回读曲库，在线重新拉取（重复点击在线等同刷新）；
-   * 搜索词保留——切源不丢查询，切在线时直接按词搜 */
+  /** 切换曲目来源：本地回读曲库，在线优先展示缓存（TTL 内不联网）；
+   * 重复点击已选中的「在线」等同强制刷新。搜索词保留——切源不丢查询，
+   * 切在线时直接按词取缓存或搜索 */
   private switchSource(tab: SourceTab): void {
     if (this.sourceTab === tab && tab === SourceTab.LOCAL) {
       return;
     }
+    // 重复点在线=强制刷新（缓存旁路，保留原「重复点击在线等同刷新」语义）
+    const forceOnline = this.sourceTab === tab && tab === SourceTab.ONLINE;
     this.sourceTab = tab;
     this.showBackTop = false;
     this.cancelPendingSearch();
@@ -849,7 +852,7 @@ struct Index {
     this.cancelLocalFilter();
     this.debouncedQuery = this.searchText;
     if (tab === SourceTab.ONLINE) {
-      this.enterOnline(this.searchText.trim());
+      this.enterOnline(this.searchText.trim(), forceOnline);
     } else {
       appStore.player.refreshSongs();
     }
@@ -924,12 +927,34 @@ struct Index {
 
   /** 进入在线源：按关键词拉取曲目（空=曲库全量），成功后更新展示列表
    * (onlineSongs) 并替换播放队列；失败时保留旧列表并提示。
+   * 缓存秒开：命中列表缓存立即展示（TTL 内不发网络；过期则旧列表保持
+   * 可见 + 静默刷新，不置 loading），来回切源/杀进程重开不再整页重拉；
+   * force=true（重复点在线标签/重试/改服务地址）绕过缓存强制拉取。
    * latest-wins：在途请求期间的新查询立即发出，旧响应按代际号作废丢弃；
    * 在途旧查询由 OnlineSource abort，不占连接 */
-  private async enterOnline(query: string): Promise<void> {
+  private async enterOnline(query: string, force: boolean = false): Promise<void> {
     const reqId = ++this.onlineRequestId;
-    this.onlineLoading = true;
+    this.onlineLoading = false;
     this.onlineError = '';
+    const cached = force ? null : appStore.onlineSource.peekCache(query);
+    if (cached !== null) {
+      this.onlineSongs = cached.songs;
+      this.loggedIn = appStore.neteaseLoggedIn;
+      appStore.player.setOnlineQueue(cached.songs);
+      if (cached.fresh) {
+        // 登录态不阻塞展示（下一首真正起播由 isOnlineCacheable 实时读取
+        // appStore.neteaseLoggedIn）：fire-and-forget，回来仅更新提示
+        appStore.refreshOnlineProviders().then(() => {
+          if (reqId === this.onlineRequestId) {
+            this.loggedIn = appStore.neteaseLoggedIn;
+          }
+        }).catch(() => {
+        });
+        return;
+      }
+    } else {
+      this.onlineLoading = true;
+    }
     // 先等登录态（本地 /providers 一次短 RTT）：VIP 完整曲的 prefetch 判定
     // 依赖它；fire-and-forget 会让首批曲目在登录态晚到时误判试听跳过缓存
     try {
