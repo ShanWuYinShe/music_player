@@ -349,7 +349,9 @@ export class PlayerController {
     this.notifyState('prefs');
   }
 
-  /** 进度拖拽（毫秒）；拖完即持久化断点，拖动后直接杀进程也不丢进度 */
+  /** 进度拖拽（毫秒）；拖完即持久化断点，拖动后直接杀进程也不丢进度。
+   * seek 是进度不连续跳变，必须即时广播：卡片/锁屏都靠锚点外推，
+   * 不推会从旧锚点继续推算出错误进度（仅在点击与拖动结束时触发） */
   seek(positionMs: number): void {
     if (this.player && this.isPrepared) {
       try {
@@ -358,6 +360,8 @@ export class PlayerController {
         hilog.warn(DOMAIN, TAG, 'seek failed: %{public}s', JSON.stringify(err));
       }
       this.currentTime = positionMs;
+      this.session.updatePlaybackState(this.isPlaying, positionMs, 1.0);
+      this.notifyState('seek');
       this.persistState();
     }
   }

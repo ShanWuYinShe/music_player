@@ -23,9 +23,6 @@ function toArgb(color: number): string {
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
 const KEY_MIC_LIVE = 'mic_live';
-/** 卡片进度推送间隔：推送节流窗口 = 播放中自驱定时器周期。1s 推送节奏
- * （用户决策 2026-09：单次推送为轻量 IPC+卡片局部重绘，接受其常驻成本） */
-const FORM_PROGRESS_PUSH_MS = 1000;
 
 /**
  * 应用全局状态：组装音乐库、用户数据、播放内核与在线源配置。
@@ -61,12 +58,8 @@ export class AppStore {
   private static readonly PROVIDERS_TTL_MS: number = 30000;
   /** 在途 providers 请求（同刻并发去重，避免重复打上游） */
   private providersInflight: Promise<void> | null = null;
-  /** 上次卡片推送时间（进度秒针推送节流） */
-  private lastFormPushAt: number = 0;
-  /** 播放中卡片进度自驱定时器 id（-1 = 未启动）：真机后台 AVPlayer 的
-   * timeUpdate 可能停报，不能只靠它驱动卡片进度推送 */
-  private formTickerId: number = -1;
-  /** 最近一次进度锚点（timeUpdate 或状态事件）的墙钟时刻：插值补齐进度用 */
+  /** 最近一次进度锚点（timeUpdate 或状态事件）的墙钟时刻：后台 timeUpdate
+   * 停报时按墙钟插值补齐快照位置用，不产生任何周期性工作 */
   private formTickBaseAt: number = 0;
   /** 卡片控制指令订阅者（FormAbility 转发的 message 型按钮事件） */
   private cardSubscriber: commonEventManager.CommonEventSubscriber | null = null;
@@ -87,13 +80,13 @@ export class AppStore {
     // 试听字节将污染缓存。闭包实时读取登录态，登录变化即时生效
     this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
-    // 桌面卡片状态同步：切歌/启停（含启动恢复）时落盘快照并推送已添加卡片；
-    // 播放中进度由 timeUpdate 与自驱定时器双通道驱动（2x4 卡片进度条）。
-    // timeUpdate 同时刷新插值锚点：后台停报时由定时器按墙钟插值补齐进度
+    // 桌面卡片状态同步（能耗模型，与锁屏 AVSession 外推同构）：只在播控/
+    // 切歌/seek 等状态变化时落盘快照并推送一次（含 anchorAt 墙钟锚点），
+    // 走秒由卡片端 TextTimer 本地完成，主进程播放期间零周期性工作。
+    // timeUpdate 仅刷新插值锚点：后台停报时状态快照的位置仍准确
     this.player.addStateListener((reason: string) => this.syncFormState());
     this.player.progressListener = () => {
       this.formTickBaseAt = Date.now();
-      this.syncFormState('progress');
     };
     this.syncFormState();
     this.subscribeCardActions();
@@ -130,9 +123,8 @@ export class AppStore {
     hilog.info(DOMAIN, TAG, 'card action subscriber registered');
   }
 
-  /** 应用销毁时退订卡片指令事件并撤自驱定时器（EntryAbility.onDestroy 调用） */
+  /** 应用销毁时退订卡片指令事件（EntryAbility.onDestroy 调用） */
   disposeCardBridge(): void {
-    this.stopFormTicker();
     if (this.cardSubscriber !== null) {
       commonEventManager.unsubscribe(this.cardSubscriber, (err) => {
         if (err) {
@@ -140,13 +132,6 @@ export class AppStore {
         }
       });
       this.cardSubscriber = null;
-    }
-  }
-
-  private stopFormTicker(): void {
-    if (this.formTickerId >= 0) {
-      clearInterval(this.formTickerId);
-      this.formTickerId = -1;
     }
   }
 
@@ -199,25 +184,22 @@ export class AppStore {
   }
 
   /**
-   * 桌面卡片状态同步（主进程 → FormExtension 进程）：
-   * ① formProvider 推送已添加的卡片实例（载荷经 toCardPayload 映射键名）；
-   * ② 落盘状态快照供卡片后台进程冷启动读取（与推送同节奏落盘）。
-   * 进度推送双通道：timeUpdate 秒针回调与播放中自驱定时器（真机后台
-   * timeUpdate 可能停报），同按 FORM_PROGRESS_PUSH_MS（1s）节流去重；
-   * 状态事件不节流。位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件
-   * 刷新，正常回调时插值仅补亚秒抖动，后台失联时由定时器按 1 倍速推算
-   * 推进量。推送失败静默（桌面服务不可用不影响播放）。
+   * 桌面卡片状态同步（主进程 → FormExtension 进程）。只在状态变化
+   * （播控/切歌/seek/失败停止等）时执行一次：落盘快照 + 推送已添加卡片，
+   * 走秒由卡片端 TextTimer 本地完成，主进程播放期间零周期性工作
+   * （能耗模型与锁屏 AVSession 的 position+updateTime 外推同构）。
+   * 快照位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件刷新，真机后台
+   * timeUpdate 停报时插值仍能给出准确位置；暂停/切歌即重锚，位置夹在
+   * 时长内。推送失败静默（桌面服务不可用不影响播放）。
    */
   private syncFormState(reason: string = 'state'): void {
     const ctx = this.abilityContext;
     if (ctx === null) {
       return;
     }
-    if (reason === 'state') {
-      // 状态事件即重锚：启停/切歌瞬间进度锚定 currentTime，防止暂停期间
-      // 累计的墙钟差被计入插值
-      this.formTickBaseAt = Date.now();
-    }
+    // 状态事件即重锚：启停/切歌瞬间进度锚定 currentTime，防止暂停期间
+    // 累计的墙钟差被计入插值
+    this.formTickBaseAt = Date.now();
     const song = this.player.currentSong;
     const duration = this.player.duration;
     let position = this.player.currentTime;
@@ -234,13 +216,9 @@ export class AppStore {
       playing: this.player.isPlaying,
       positionMs: Math.floor(position),
       durationMs: Math.floor(duration),
-      progress: duration > 0 ? Math.min(1, position / duration) : 0
+      progress: duration > 0 ? Math.min(1, position / duration) : 0,
+      anchorAt: Date.now()
     };
-    const now = Date.now();
-    if (reason === 'progress' && now - this.lastFormPushAt < FORM_PROGRESS_PUSH_MS) {
-      return;
-    }
-    this.lastFormPushAt = now;
     writeFormState(ctx.filesDir, state);
     // 卡片实例 id 由 FormAbility.onAddForm 登记（跨进程文件共享）
     const formIds = readFormIds(ctx.filesDir);
@@ -249,14 +227,6 @@ export class AppStore {
         .catch(() => {
           // 卡片可能刚被移除，忽略单实例失败
         });
-    }
-    // 自驱定时器随播放态启停（进程有音频长时任务保活，定时器后台可用）
-    if (this.player.isPlaying) {
-      if (this.formTickerId < 0) {
-        this.formTickerId = setInterval(() => this.syncFormState('progress'), FORM_PROGRESS_PUSH_MS);
-      }
-    } else {
-      this.stopFormTicker();
     }
   }
 

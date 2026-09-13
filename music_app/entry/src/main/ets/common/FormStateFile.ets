@@ -26,6 +26,10 @@ export interface FormPlaybackState {
   positionMs: number;
   durationMs: number;
   progress: number;
+  /** 锚点时刻（墙钟 ms）：positionMs 的采样时刻。卡片据此本地外推
+   * 走秒（playing 时显示位置 = positionMs + now - anchorAt），主进程
+   * 因此无需周期推送——与锁屏 AVSession 的外推模型同构 */
+  anchorAt: number;
 }
 
 /** 卡片动作诊断探针落盘路径（真机验证用：订阅回调收到指令即记一行） */
@@ -75,6 +79,7 @@ export interface CardBindingPayload {
   positionMs: number;
   durationMs: number;
   progress: number;
+  anchorAt: number;
 }
 
 /** 快照 → 卡片绑定载荷（FormAbility 冷启动读文件与主进程推送共用同一形状） */
@@ -86,13 +91,14 @@ export function toCardPayload(state: FormPlaybackState): CardBindingPayload {
     playing: state.playing,
     positionMs: state.positionMs,
     durationMs: state.durationMs,
-    progress: state.progress
+    progress: state.progress,
+    anchorAt: state.anchorAt
   };
 }
 
 /** 无曲目占位快照（卡片冷启动且尚无状态文件时用） */
 export function emptyFormState(): FormPlaybackState {
-  return { title: '', artist: '', coverPath: '', playing: false, positionMs: 0, durationMs: 0, progress: 0 };
+  return { title: '', artist: '', coverPath: '', playing: false, positionMs: 0, durationMs: 0, progress: 0, anchorAt: 0 };
 }
 
 /** 读取状态快照；文件不存在或损坏返回 null（卡片自行回退占位态） */
@@ -111,7 +117,8 @@ export function readFormState(filesDir: string): FormPlaybackState | null {
       playing: parsed.playing,
       positionMs: typeof parsed.positionMs === 'number' ? parsed.positionMs : 0,
       durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : 0,
-      progress: typeof parsed.progress === 'number' ? parsed.progress : 0
+      progress: typeof parsed.progress === 'number' ? parsed.progress : 0,
+      anchorAt: typeof parsed.anchorAt === 'number' ? parsed.anchorAt : 0
     };
   } catch (err) {
     return null;
