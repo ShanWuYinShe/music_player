@@ -113,7 +113,8 @@
   `formProvider.updateForm` 主动推送。推送依赖 AVPlayer `timeUpdate` 秒针回调——
   但真机后台该回调可能停报（音频长时任务保活下状态事件正常、timeUpdate 失联），
   只靠它会导致卡片进度只在播放/暂停/切歌时更新。**现行双通道**：timeUpdate 与
-  播放中自驱 `setInterval`（`FORM_PROGRESS_PUSH_MS` 15s，节流窗口=定时器周期）
+  播放中自驱 `setInterval`（`FORM_PROGRESS_PUSH_MS` 1s，节流窗口=定时器周期；
+  1s 推送节奏为用户决策 2026-09，接受每秒一次轻量 IPC/卡片局部重绘的常驻成本）
   双驱动，位置按墙钟自锚点插值（锚点由 timeUpdate/状态事件刷新，暂停/切歌即重锚，
   位置夹在时长内）；暂停/停止即撤定时器。推送载荷必须经 `toCardPayload` 映射
   （快照键 `coverPath` → 卡片键 `cover`，直接推原始快照卡片收不到封面，已踩坑）；
@@ -151,7 +152,7 @@
 - **2x4 桌面卡片**（`form/pages/MusicCardWide.ets`）：与 2x2 共用
   FormAbility 与 form_state.json（含 positionMs/durationMs/progress）；
   进度推送机制见「桌面服务卡片」一节（timeUpdate + 自驱定时器双通道、
-  15s 节流、墙钟插值，状态事件推送不节流）。**两个卡片页面文件的
+  1s 推送节奏、墙钟插值，状态事件推送不节流）。**两个卡片页面文件的
   顶层 LocalStorage 变量不得同名**（同 ets 编译单元冲突，已踩坑）。
 - **分享歌曲卡片图**（PlayerPage 顶栏分享按钮 → bindSheet）：预览卡
   `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件

@@ -2,8 +2,8 @@ let cardStorageWide = new LocalStorage();
 
 /**
  * 2x4 桌面播放卡片（宽规格，与 2x2 的 MusicCard 共用 FormAbility 与数据）：
- * 左封面 + 中部歌名/歌手/进度条 + 右侧控制按钮列。进度由主进程秒针
- * 节流推送（FORM_PROGRESS_PUSH_MS，卡片上是快照进度而非实时）。
+ * 左封面 + 中部歌名/歌手/进度条 + 右侧控制按钮列。进度由主进程每秒
+ * 推送（FORM_PROGRESS_PUSH_MS，接近实时，暂停/切歌事件即时推送）。
  */
 @Entry(cardStorageWide)
 @Component
@@ -71,7 +71,7 @@ struct MusicCardWide {
           .margin({ top: 3 })
           .width('100%')
 
-        // 进度条：发丝底轨 + 金色进度线（快照精度，主进程 15s 节流推送）
+        // 进度条：发丝底轨 + 金色进度线（主进程 1s 节奏推送，接近实时）
         Stack({ alignContent: Alignment.Start }) {
           Row()
             .width('100%')

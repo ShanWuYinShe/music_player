@@ -23,8 +23,9 @@ function toArgb(color: number): string {
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
 const KEY_MIC_LIVE = 'mic_live';
-/** 卡片进度推送间隔：推送节流窗口 = 播放中自驱定时器周期（耗电与实时性折衷） */
-const FORM_PROGRESS_PUSH_MS = 15000;
+/** 卡片进度推送间隔：推送节流窗口 = 播放中自驱定时器周期。1s 推送节奏
+ * （用户决策 2026-09：单次推送为轻量 IPC+卡片局部重绘，接受其常驻成本） */
+const FORM_PROGRESS_PUSH_MS = 1000;
 
 /**
  * 应用全局状态：组装音乐库、用户数据、播放内核与在线源配置。
@@ -200,12 +201,12 @@ export class AppStore {
   /**
    * 桌面卡片状态同步（主进程 → FormExtension 进程）：
    * ① formProvider 推送已添加的卡片实例（载荷经 toCardPayload 映射键名）；
-   * ② 落盘状态快照供卡片后台进程冷启动读取（与推送同节奏，不再秒针写盘）。
+   * ② 落盘状态快照供卡片后台进程冷启动读取（与推送同节奏落盘）。
    * 进度推送双通道：timeUpdate 秒针回调与播放中自驱定时器（真机后台
-   * timeUpdate 可能停报），同按 FORM_PROGRESS_PUSH_MS 节流去重；状态事件
-   * 不节流。位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件刷新，前台
-   * 正常回调时插值仅补 0~1s 抖动，后台失联时由定时器按 1 倍速推算推进量。
-   * 推送失败静默（桌面服务不可用不影响播放）。
+   * timeUpdate 可能停报），同按 FORM_PROGRESS_PUSH_MS（1s）节流去重；
+   * 状态事件不节流。位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件
+   * 刷新，正常回调时插值仅补亚秒抖动，后台失联时由定时器按 1 倍速推算
+   * 推进量。推送失败静默（桌面服务不可用不影响播放）。
    */
   private syncFormState(reason: string = 'state'): void {
     const ctx = this.abilityContext;
