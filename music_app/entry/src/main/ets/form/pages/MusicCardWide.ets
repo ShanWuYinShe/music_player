@@ -2,13 +2,11 @@ let cardStorageWide = new LocalStorage();
 
 /**
  * 2x4 桌面播放卡片（宽规格，与 2x2 的 MusicCard 共用 FormAbility 与数据）：
- * 左封面 + 中部歌名/歌手/进度条 + 右侧控制按钮列。
- * 能耗模型（与锁屏 AVSession 外推同构）：主进程只在播控/切歌/seek 时推送
- * 一次「位置锚点 positionMs + 采样时刻 anchorAt」，走秒由本卡片本地完成——
- * 隐藏 TextTimer（API 10 起支持卡片）当每秒重绘泵，时间/进度数值由
- * 「锚点 + 墙钟增量」推算（TextTimer 正计时不能设偏移起点，count 仅倒计时
- * 生效）。卡片不可见时 TextTimer 自动停走（系统功耗行为），恢复可见后
- * 按锚点一跳到位，天然自愈；主进程播放期间零周期性工作。
+ * 左封面 + 中部歌名/歌手/进度条 + 右侧控制按钮列。进度由主进程推送驱动
+ * 重绘：状态变化（播控/切歌/seek）即时推送 + 播放中每秒推送一次；卡片按
+ * 「锚点 positionMs + 墙钟增量（now - anchorAt）」推算显示位置，推送到达
+ * 延迟或丢一拍时显示仍准（下一拍自愈）。真机踩坑：TextTimer 在卡片上
+ * onTimer 不触发、卡片无法本地走秒，只能靠推送驱动重绘。
  */
 @Entry(cardStorageWide)
 @Component
@@ -21,13 +19,6 @@ struct MusicCardWide {
   @LocalStorageProp('durationMs') durationMs: number = 0;
   @LocalStorageProp('progress') progress: number = 0;
   @LocalStorageProp('anchorAt') anchorAt: number = 0;
-  /** 每秒重绘泵（TextTimer onTimer 自增）：数值本身不承载时间 */
-  @State private tick: number = 0;
-  private timerCtrl: TextTimerController = new TextTimerController();
-
-  aboutToAppear(): void {
-    this.timerCtrl.start();
-  }
 
   /** 控制按钮：message 型发指令到 FormAbility（经公共事件转发主进程后台
    * 执行，不拉起应用）。call 型真机不送达、router 型会拉前台，均已踩坑 */
@@ -47,10 +38,9 @@ struct MusicCardWide {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
-  /** 本地外推的显示位置（ms）：锚点 + 墙钟增量，夹在时长内。入参 pump
-   * 是 tick 的读取点——build 执行期间读取才会建立渲染依赖，TextTimer
-   * 每秒自增 tick 触发重算；推送字段变化（新锚点）同样即时重算 */
-  private dispMs(pump: number): number {
+  /** 显示位置（ms）：锚点 + 墙钟增量，夹在时长内。每次推送更新
+   * LocalStorageProp 后 build 重算，推送间隙的到达延迟由增量补齐 */
+  private dispMs(): number {
     if (!this.playing || this.anchorAt <= 0) {
       return this.positionMs;
     }
@@ -95,7 +85,7 @@ struct MusicCardWide {
           .margin({ top: 3 })
           .width('100%')
 
-        // 进度条：发丝底轨 + 金色进度线（本地外推进度，每秒自走）
+        // 进度条：发丝底轨 + 金色进度线（主进程每秒推送驱动重绘）
         Stack({ alignContent: Alignment.Start }) {
           Row()
             .width('100%')
@@ -103,7 +93,7 @@ struct MusicCardWide {
             .borderRadius(1.5)
             .backgroundColor('#464135')
           Row()
-            .width(`${Math.max(0, Math.min(1, this.dispMs(this.tick) / (this.durationMs > 0 ? this.durationMs : 1))) * 100}%`)
+            .width(`${Math.max(0, Math.min(1, this.dispMs() / (this.durationMs > 0 ? this.durationMs : 1))) * 100}%`)
             .height(3)
             .borderRadius(1.5)
             .backgroundColor('#DBA84E')
@@ -112,7 +102,7 @@ struct MusicCardWide {
         .margin({ top: 12 })
 
         Row() {
-          Text(this.fmt(this.dispMs(this.tick)))
+          Text(this.fmt(this.dispMs()))
             .fontSize(10)
             .fontColor('#8E8878')
           Blank()
@@ -126,19 +116,6 @@ struct MusicCardWide {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       .margin({ left: 14, right: 10 })
-
-      // 隐藏的秒针泵：TextTimer 在卡片渲染进程内本地走秒（API 10 起支持
-      // 卡片），onTimer 自增 tick 驱动上方时间/进度每秒重算。透明 1x1 保
-      // 持区域可见（可见性判定基于 onVisibleAreaChange 阈值，与透明度无
-      // 关）；组件不可见时系统自动停走，恢复后按锚点一跳到位
-      TextTimer({ isCountDown: false, controller: this.timerCtrl })
-        .format('mm:ss')
-        .onTimer((_utc: number, _elapsed: number) => {
-          this.tick += 1;
-        })
-        .opacity(0)
-        .width(1)
-        .height(1)
 
       Column({ space: 10 }) {
         Image(this.playing ? $r('app.media.ic_card_pause') : $r('app.media.ic_card_play'))

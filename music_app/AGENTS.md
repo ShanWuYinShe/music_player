@@ -109,25 +109,24 @@
   `form_ids.json`（卡片实例 id 由 `FormAbility.onAddForm` 从 want 的
   `FormParam.IDENTITY_KEY` 登记、`onRemoveForm` 移除；**系统不提供第三方查询本应用
   卡片 formId 的接口**，必须自己落盘记录）。
-- **进度刷新机制（能耗模型，与锁屏 AVSession 外推同构）**：主进程
-  **只在状态变化时推送一次**（播控/切歌/seek/加载失败等，`syncFormState`
-  落盘快照 + `formProvider.updateForm`），推送载荷带 `anchorAt`（墙钟
-  锚点=positionMs 的采样时刻）；走秒由**卡片端本地完成**——MusicCardWide
-  用隐藏 TextTimer（API 10 起支持卡片、渲染进程驱动）当每秒重绘泵，
-  时间/进度数值按「锚点+墙钟增量」本地推算（TextTimer 正计时不能设
-  偏移起点、count 仅倒计时生效，故只当泵用）。**主进程播放期间零周期性
-  工作**（不逐秒推送/写盘——按推送频率节流不是能耗控制的正确维度，
-  2026-09 用户纠偏）。平台级功耗行为天然配套：卡片不可见时 TextTimer
-  自动停走（可见性基于 onVisibleAreaChange 阈值，透明度无关），恢复后
-  按锚点一跳到位自愈。真机后台 AVPlayer `timeUpdate` 可能停报——只影响
-  主进程内存态 currentTime，状态快照位置经 `formTickBaseAt` 墙钟插值
-  仍准确（timeUpdate/状态事件刷新锚点、启停切歌重锚、夹在时长内）。
-  seek 是不连续跳变，`PlayerController.seek` 必须即时 `notifyState`
-  广播新锚点并同步 AVSession 播放态，否则卡片/锁屏从旧锚点外推出错。
+- **进度刷新机制**：卡片无法本地走秒、只能靠主进程推送驱动重绘
+  （**真机踩坑**：TextTimer 虽官方标注 API 10 起支持卡片，但真机卡片上
+  `onTimer` 不触发，"卡片本地走秒"路线已验证不成立；`setInterval` 在
+  卡片页面同样不可用）。**现行双驱动**（`AppStore.syncFormState`）：
+  ① 状态变化（播控/切歌/seek/失败停止等）即时推送；② 播放中自驱
+  `setInterval`（`FORM_PROGRESS_PUSH_MS` 1s，节流窗口=定时器周期；用户
+  决策接受每秒推送/写盘的常驻成本）每秒推送——音频长时任务保活下后台
+  定时器可靠，不依赖真机后台会停报的 AVPlayer `timeUpdate`（timeUpdate
+  仅刷新插值锚点 `formTickBaseAt`，保证停报时快照位置仍准；启停/切歌
+  即重锚、位置夹在时长内）。推送载荷带 `anchorAt`（墙钟采样时刻），卡片
+  按「锚点+墙钟增量」推算显示位置，推送到达延迟/丢拍时显示仍准。
+  seek 是不连续跳变，`PlayerController.seek` 即时 `notifyState` 广播新
+  锚点并同步 AVSession 播放态，否则卡片/锁屏从旧锚点外推出错。
   推送载荷必须经 `toCardPayload` 映射（快照键 `coverPath` → 卡片键
   `cover`，直接推原始快照卡片收不到封面，已踩坑）；`FormAbility.buildCardData`
   （加卡/系统拉起时的快照）同用该映射并含进度字段与锚点。
-  `updateEnabled: false`（无定时刷新配额消耗），刷新完全靠主动推送。
+  `updateEnabled: false`（无定时刷新配额消耗），刷新完全靠主动推送；
+  秒推节奏可用 `hilog | grep formPush` 核验。
 - 卡片按钮控制通道（踩坑史，最终方案 message + CommonEvent）：
   ① call 型 `postCardAction` 在真机+模拟器均不送达（点击零反应、无
   onNewWant 日志，原因未明），弃用；② router 型可用但会把应用拉到前台
@@ -159,8 +158,8 @@
   MicSpectrum 顶部，真机校准在此调。
 - **2x4 桌面卡片**（`form/pages/MusicCardWide.ets`）：与 2x2 共用
   FormAbility 与 form_state.json（含 positionMs/durationMs/progress/anchorAt）；
-  进度刷新机制见「桌面服务卡片」一节（状态变化单次推送 + 卡片内 TextTimer
-  本地走秒 + 墙钟锚点外推）。**两个卡片页面文件的
+  进度刷新机制见「桌面服务卡片」一节（状态变化即时推送 + 播放中每秒
+  自驱推送、墙钟锚点外推）。**两个卡片页面文件的
   顶层 LocalStorage 变量不得同名**（同 ets 编译单元冲突，已踩坑）。
 - **分享歌曲卡片图**（PlayerPage 顶栏分享按钮 → bindSheet）：预览卡
   `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件

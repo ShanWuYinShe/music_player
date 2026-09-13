@@ -23,6 +23,10 @@ function toArgb(color: number): string {
 const PREF_NAME = 'music_player_settings';
 const KEY_ONLINE_BASE_URL = 'online_base_url';
 const KEY_MIC_LIVE = 'mic_live';
+/** 卡片进度推送间隔：推送节流窗口 = 播放中自驱定时器周期（1s，用户决策：
+ * 真机验证 TextTimer 卡片本地走秒不生效，回到主进程每秒推送驱动重绘；
+ * 音频长时任务保活下后台 setInterval 可靠） */
+const FORM_PROGRESS_PUSH_MS = 1000;
 
 /**
  * 应用全局状态：组装音乐库、用户数据、播放内核与在线源配置。
@@ -61,6 +65,10 @@ export class AppStore {
   /** 最近一次进度锚点（timeUpdate 或状态事件）的墙钟时刻：后台 timeUpdate
    * 停报时按墙钟插值补齐快照位置用，不产生任何周期性工作 */
   private formTickBaseAt: number = 0;
+  /** 上次卡片推送时间（播放中秒推节流窗口） */
+  private lastFormPushAt: number = 0;
+  /** 播放中卡片进度自驱定时器 id（-1 = 未启动） */
+  private formTickerId: number = -1;
   /** 卡片控制指令订阅者（FormAbility 转发的 message 型按钮事件） */
   private cardSubscriber: commonEventManager.CommonEventSubscriber | null = null;
 
@@ -80,10 +88,11 @@ export class AppStore {
     // 试听字节将污染缓存。闭包实时读取登录态，登录变化即时生效
     this.player.isOnlineCacheable = (song) => !(song.vip === true && !this.neteaseLoggedIn);
     await this.player.init(context, this.pref);
-    // 桌面卡片状态同步（能耗模型，与锁屏 AVSession 外推同构）：只在播控/
-    // 切歌/seek 等状态变化时落盘快照并推送一次（含 anchorAt 墙钟锚点），
-    // 走秒由卡片端 TextTimer 本地完成，主进程播放期间零周期性工作。
-    // timeUpdate 仅刷新插值锚点：后台停报时状态快照的位置仍准确
+    // 桌面卡片状态同步：状态变化（播控/切歌/seek）即时推送 + 播放中每秒
+    // 自驱推送一次（含 anchorAt 墙钟锚点，推送到达延迟时卡片显示仍准）。
+    // 真机踩坑：TextTimer 在卡片上不会走秒（onTimer 不触发），卡片无法
+    // 自驱重绘，只能靠主进程推送驱动；timeUpdate 后台停报，秒推由
+    // 自驱定时器承担（音频长时任务保活），timeUpdate 仅刷新插值锚点
     this.player.addStateListener((reason: string) => this.syncFormState());
     this.player.progressListener = () => {
       this.formTickBaseAt = Date.now();
@@ -123,8 +132,9 @@ export class AppStore {
     hilog.info(DOMAIN, TAG, 'card action subscriber registered');
   }
 
-  /** 应用销毁时退订卡片指令事件（EntryAbility.onDestroy 调用） */
+  /** 应用销毁时退订卡片指令事件并撤秒推定时器（EntryAbility.onDestroy 调用） */
   disposeCardBridge(): void {
+    this.stopFormTicker();
     if (this.cardSubscriber !== null) {
       commonEventManager.unsubscribe(this.cardSubscriber, (err) => {
         if (err) {
@@ -132,6 +142,13 @@ export class AppStore {
         }
       });
       this.cardSubscriber = null;
+    }
+  }
+
+  private stopFormTicker(): void {
+    if (this.formTickerId >= 0) {
+      clearInterval(this.formTickerId);
+      this.formTickerId = -1;
     }
   }
 
@@ -184,13 +201,14 @@ export class AppStore {
   }
 
   /**
-   * 桌面卡片状态同步（主进程 → FormExtension 进程）。只在状态变化
-   * （播控/切歌/seek/失败停止等）时执行一次：落盘快照 + 推送已添加卡片，
-   * 走秒由卡片端 TextTimer 本地完成，主进程播放期间零周期性工作
-   * （能耗模型与锁屏 AVSession 的 position+updateTime 外推同构）。
-   * 快照位置按墙钟自锚点插值——锚点由 timeUpdate/状态事件刷新，真机后台
-   * timeUpdate 停报时插值仍能给出准确位置；暂停/切歌即重锚，位置夹在
-   * 时长内。推送失败静默（桌面服务不可用不影响播放）。
+   * 桌面卡片状态同步（主进程 → FormExtension 进程）。推送由两类事件驱动：
+   * 状态变化（播控/切歌/seek/失败停止等）即时推送；播放中自驱定时器每秒
+   * 触发 'progress' 推送并按 FORM_PROGRESS_PUSH_MS 节流（真机验证 TextTimer
+   * 在卡片上不走秒，卡片重绘只能靠推送驱动；音频长时任务保活下后台
+   * setInterval 可靠）。快照位置按墙钟自锚点插值——锚点由 timeUpdate/
+   * 状态事件刷新，真机后台 timeUpdate 停报时插值仍能给出准确位置；暂停/
+   * 切歌即重锚，位置夹在时长内。payload 带 anchorAt（采样时刻），推送
+   * 到达有延迟时卡片显示仍准。推送失败静默（桌面服务不可用不影响播放）。
    */
   private syncFormState(reason: string = 'state'): void {
     const ctx = this.abilityContext;
@@ -219,6 +237,11 @@ export class AppStore {
       progress: duration > 0 ? Math.min(1, position / duration) : 0,
       anchorAt: Date.now()
     };
+    const now = Date.now();
+    if (reason === 'progress' && now - this.lastFormPushAt < FORM_PROGRESS_PUSH_MS) {
+      return;
+    }
+    this.lastFormPushAt = now;
     writeFormState(ctx.filesDir, state);
     // 卡片实例 id 由 FormAbility.onAddForm 登记（跨进程文件共享）
     const formIds = readFormIds(ctx.filesDir);
@@ -227,6 +250,17 @@ export class AppStore {
         .catch(() => {
           // 卡片可能刚被移除，忽略单实例失败
         });
+    }
+    // 秒推节奏探针：真机核验推送是否按秒到达（hilog | grep formPush）
+    hilog.info(DOMAIN, TAG, 'formPush pos=%{public}d playing=%{public}s reason=%{public}s',
+      Math.floor(position), String(this.player.isPlaying), reason);
+    // 定时器随播放态启停：暂停/停止即撤
+    if (this.player.isPlaying) {
+      if (this.formTickerId < 0) {
+        this.formTickerId = setInterval(() => this.syncFormState('progress'), FORM_PROGRESS_PUSH_MS);
+      }
+    } else {
+      this.stopFormTicker();
     }
   }
 
