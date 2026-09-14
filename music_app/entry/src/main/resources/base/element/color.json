@@ -2,47 +2,47 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#F7F4EE"
+      "value": "#F5F1E6"
     },
     {
       "name": "page_bg",
-      "value": "#F7F4EE"
+      "value": "#F5F1E6"
     },
     {
       "name": "surface",
-      "value": "#FFFFFF"
+      "value": "#FCFAF3"
     },
     {
       "name": "surface_alt",
-      "value": "#EDE8DC"
+      "value": "#EAE4D3"
     },
     {
       "name": "ink",
-      "value": "#201B12"
+      "value": "#24211A"
     },
     {
       "name": "ink_soft",
-      "value": "#6E675B"
+      "value": "#6B665C"
     },
     {
       "name": "ink_faint",
-      "value": "#A69E8E"
+      "value": "#9E988A"
     },
     {
       "name": "paper",
-      "value": "#F7F4EE"
+      "value": "#F5F1E6"
     },
     {
       "name": "accent",
-      "value": "#A8791F"
+      "value": "#B23A28"
     },
     {
       "name": "on_accent",
-      "value": "#241A06"
+      "value": "#FCF6EA"
     },
     {
       "name": "accent_soft",
-      "value": "#F3E6C8"
+      "value": "#F2E0D6"
     },
     {
       "name": "card_shadow",
@@ -50,31 +50,31 @@
     },
     {
       "name": "accent_shadow",
-      "value": "#40A8791F"
+      "value": "#40B23A28"
     },
     {
       "name": "danger",
-      "value": "#C4552E"
+      "value": "#7E1A24"
     },
     {
       "name": "line",
-      "value": "#E2DCCE"
+      "value": "#E0D9C7"
     },
     {
       "name": "editorial_title",
-      "value": "#141008"
+      "value": "#171410"
     },
     {
       "name": "editorial_body",
-      "value": "#3A3226"
+      "value": "#36322B"
     },
     {
       "name": "editorial_meta",
-      "value": "#8D8574"
+      "value": "#877F6E"
     },
     {
       "name": "editorial_rule",
-      "value": "#D8D0BE"
+      "value": "#DAD2C0"
     },
     {
       "name": "viz_fg",

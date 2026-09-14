@@ -349,12 +349,12 @@ export class AppStore {
       return;
     }
     window.getLastWindow(ctx).then((win) => {
-      win.setWindowBackgroundColor('#0C0A09');
+      win.setWindowBackgroundColor('#0C0B0A');
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         navigationBarColor: '#00000000',
-        statusBarContentColor: '#F2EFE9',
-        navigationBarContentColor: '#F2EFE9'
+        statusBarContentColor: '#EFEBDE',
+        navigationBarContentColor: '#EFEBDE'
       });
     }).catch((err: Object) => {
       hilog.warn(DOMAIN, TAG, 'apply stage chrome failed: %{public}s', JSON.stringify(err));

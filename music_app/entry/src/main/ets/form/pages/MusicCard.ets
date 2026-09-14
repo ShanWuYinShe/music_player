@@ -97,7 +97,7 @@ struct MusicCard {
     }
     .justifyContent(FlexAlign.Center)
     .padding(14)
-    .backgroundColor('#1D1C1A')
+    .backgroundColor('#1E1C19')
     .backgroundImageSize(ImageSize.Cover)
     .onClick(() => {
       // 卡片空白处点击进应用（控制按钮自身的 onClick 会拦截，不冒泡到这里）

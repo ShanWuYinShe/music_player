@@ -85,7 +85,7 @@ struct MusicCardWide {
           .margin({ top: 3 })
           .width('100%')
 
-        // 进度条：发丝底轨 + 金色进度线（主进程每秒推送驱动重绘）
+        // 进度条：发丝底轨 + 朱砂进度线（主进程每秒推送驱动重绘）
         Stack({ alignContent: Alignment.Start }) {
           Row()
             .width('100%')
@@ -96,7 +96,7 @@ struct MusicCardWide {
             .width(`${Math.max(0, Math.min(1, this.dispMs() / (this.durationMs > 0 ? this.durationMs : 1))) * 100}%`)
             .height(3)
             .borderRadius(1.5)
-            .backgroundColor('#DBA84E')
+            .backgroundColor('#D96C45')
         }
         .width('100%')
         .margin({ top: 12 })
@@ -141,7 +141,7 @@ struct MusicCardWide {
     }
     .justifyContent(FlexAlign.Center)
     .padding(14)
-    .backgroundColor('#1D1C1A')
+    .backgroundColor('#1E1C19')
     .onClick(() => {
       postCardAction(this, {
         action: 'router',

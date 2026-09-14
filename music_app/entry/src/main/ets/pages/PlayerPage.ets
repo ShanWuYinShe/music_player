@@ -13,6 +13,7 @@ import { VisualizerView } from '../components/VisualizerView';
 import { WaveformSeekbar } from '../components/WaveformSeekbar';
 import { CoverSwipe, COVER_SWIPE_THRESHOLD } from '../components/CoverSwipe';
 import { EqIndicator } from '../components/EqIndicator';
+import { SealMark } from '../components/SealMark';
 import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
 /** 队列表项 */
@@ -194,7 +195,7 @@ export struct PlayerPage {
 
       // 封面舞台氛围背景（仅封面模式渲染）：模糊放大的封面做环境光，
       // 叠深色遮罩保证前景可读——封面即舞台光源，无可视化渲染；无封面
-      // 时回落暖黑渐变。静态光栅，仅切歌时重绘一次
+      // 时回落墨色渐变。静态光栅，仅切歌时重绘一次
       if (this.coverMode) {
         Stack() {
           if (this.song !== null && this.song.coverPath !== '') {
@@ -210,13 +211,13 @@ export struct PlayerPage {
               .height('100%')
               .linearGradient({
                 angle: 135,
-                colors: [['#231C11', 0], ['#0C0A09', 0.55], ['#060504', 1]]
+                colors: [['#1D1B18', 0], ['#0C0B0A', 0.55], ['#060606', 1]]
               })
           }
           Column()
             .width('100%')
             .height('100%')
-            .backgroundColor('rgba(8,6,4,0.52)')
+            .backgroundColor('rgba(10,10,9,0.52)')
         }
         .width('100%')
         .height('100%')
@@ -813,16 +814,20 @@ export struct PlayerPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
-        Text('音乐播放器')
-          .fontSize(11)
-          .fontColor('#8E8878')
-          .letterSpacing(2)
-          .margin({ top: 2 })
-          .width('100%')
+        // 落款：朱砂小印 + 应用名（印章是水墨版式的签名语言）
+        Row({ space: 6 }) {
+          SealMark({ text: '乐', side: 16, radius: 3 })
+          Text('音乐播放器')
+            .fontSize(11)
+            .fontColor('#8E8878')
+            .letterSpacing(2)
+        }
+        .margin({ top: 2 })
+        .width('100%')
       }
       .padding(18)
       .borderRadius(24)
-      .backgroundColor('#1D1C1A')
+      .backgroundColor('#1E1C19')
       .id('share_card')
 
       SaveButton({ text: SaveDescription.SAVE_IMAGE, buttonType: ButtonType.Capsule })

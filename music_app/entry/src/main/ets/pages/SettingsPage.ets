@@ -22,12 +22,21 @@ export struct SettingsPage {
 
   build() {
     Stack() {
-      // 全屏背景层：延伸至状态栏与导航条下方
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor($r('app.color.page_bg'))
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+      // 全屏背景层：延伸至状态栏与导航条下方，底部远山淡影同首页
+      Column() {
+        Blank()
+        Image($r('app.media.ink_mountains'))
+          .width('100%')
+          .height(170)
+          .objectFit(ImageFit.Cover)
+          .fillColor($r('app.color.ink'))
+          .opacity(0.06)
+          .hitTestBehavior(HitTestMode.None)
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor($r('app.color.page_bg'))
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       Column({ space: 16 }) {
       // 页头：返回 + 标题（与首页风格统一，替代系统标题栏）
@@ -54,17 +63,17 @@ export struct SettingsPage {
       .width('100%')
       .padding({ top: 4, bottom: 2 })
 
-      // 曲库统计
+      // 曲库统计（图标盒降为素色：页面只留「关于」一处朱砂印）
       Row({ space: 14 }) {
         Column() {
           SymbolGlyph($r('sys.symbol.music_note_list'))
             .fontSize(24)
-            .fontColor([$r('app.color.on_accent')])
+            .fontColor([$r('app.color.ink_soft')])
         }
         .width(44)
         .height(44)
         .borderRadius(12)
-        .backgroundColor($r('app.color.accent'))
+        .backgroundColor($r('app.color.surface_alt'))
         .justifyContent(FlexAlign.Center)
 
         Column({ space: 3 }) {
@@ -175,11 +184,13 @@ export struct SettingsPage {
       .alignItems(VerticalAlign.Top)
 
       // 关于
+      // 关于：朱砂方印「乐」作落款（水墨版式的签名语言）
       Row({ space: 14 }) {
         Column() {
-          SymbolGlyph($r('sys.symbol.music_note_list'))
-            .fontSize(26)
-            .fontColor([$r('app.color.on_accent')])
+          Text('乐')
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.on_accent'))
         }
         .width(52)
         .height(52)

@@ -219,12 +219,22 @@ struct Index {
       // alignContent=Bottom：悬停收起 pill 叠在底部中央（满幅子层不受影响）
       Stack({ alignContent: Alignment.Bottom }) {
         // 全屏背景层：延伸至状态栏与导航条下方，消除顶部/底部割裂；
-        // 播放中叠当前曲封面的模糊氛围层（低透明度，压暗不抢内容）
+        // 底部远山淡影（ink 单色 svg 经 fillColor 随深浅板自适配，纸缘水墨
+        // 留白，不拦截触摸）；播放中叠当前曲封面的模糊氛围层（低透明度）
         Stack() {
-          Column()
-            .width('100%')
-            .height('100%')
-            .backgroundColor($r('app.color.page_bg'))
+          Column() {
+            Blank()
+            Image($r('app.media.ink_mountains'))
+              .width('100%')
+              .height(170)
+              .objectFit(ImageFit.Cover)
+              .fillColor($r('app.color.ink'))
+              .opacity(0.06)
+              .hitTestBehavior(HitTestMode.None)
+          }
+          .width('100%')
+          .height('100%')
+          .backgroundColor($r('app.color.page_bg'))
           if (this.mini !== null && this.mini.coverPath !== '') {
             Image(this.mini.coverPath)
               .width('120%')
@@ -729,9 +739,11 @@ struct Index {
   LibraryEmptyView() {
     Column({ space: 20 }) {
       Column() {
-        SymbolGlyph($r('sys.symbol.music_note_list'))
+        // 曲库空态主视觉：「乐」大字（水墨版式以字入画，不用系统音符图标）
+        Text('乐')
           .fontSize(44)
-          .fontColor([$r('app.color.ink_faint')])
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.ink_faint'))
       }
       .width(96)
       .height(96)
