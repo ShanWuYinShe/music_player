@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// maxLimiterEntries 是限流表条目上限。走 Cloudflare 时 clientIP 是真实客户端
+// IPv6,攻击者可用海量源地址制造新 key;惰性清理只删过期条目,新鲜攻击 IP
+// 会让 entries 无界增长。超限后新 key 直接按限流拒绝(已有条目判定不受影响),
+// 与 media_server 同款守卫(两仓实现按约定同步改)。
+const maxLimiterEntries = 100000
+
 // ipWindowLimiter 是固定窗口 per-IP 限流器(实现与 media_server 保持一致,
 // 该子模块无法被 import,故按同构实现复制;改动两处时需同步)。
 type ipWindowLimiter struct {
@@ -32,15 +38,19 @@ func (l *ipWindowLimiter) allow(key string) bool {
 	now := time.Now()
 	w, ok := l.entries[key]
 	if !ok || now.Sub(w.start) >= l.window {
-		l.entries[key] = &ipWindow{start: now, count: 1}
-		// 惰性清理过期条目,防止长期运行下 map 无限增长。
-		if len(l.entries) > 1024 {
+		// 容量守卫:表满时先清理过期条目,仍满则拒绝新 key(不影响已有
+		// 条目的判定),消除 IPv6 源地址旋转下的无界内存增长。
+		if len(l.entries) >= maxLimiterEntries {
 			for k, e := range l.entries {
 				if now.Sub(e.start) >= l.window {
 					delete(l.entries, k)
 				}
 			}
+			if len(l.entries) >= maxLimiterEntries {
+				return false
+			}
 		}
+		l.entries[key] = &ipWindow{start: now, count: 1}
 		return true
 	}
 	w.count++
