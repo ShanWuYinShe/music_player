@@ -4,7 +4,10 @@
  * 内部 100% 填充；圆角与字号按场景传入。
  * 占位底色恒定（浅色 surface_alt / 深舞台恒暗 viz token），不做哈希渐变——
  * 用户决策 2026-09：默认封面放歌名，不要哈希派生颜色。
+ * 占位首字用文楷 Medium：无封面时以书法字撑起画面（水墨版式以字入画）。
  */
+import { INK_FONT_MEDIUM } from '../common/InkStyle';
+
 @ComponentV2
 export struct CoverArt {
   @Param @Require coverPath: string;
@@ -45,7 +48,7 @@ export struct CoverArt {
       Column() {
         Text(this.initialChar)
           .fontSize(this.glyphSize)
-          .fontWeight(FontWeight.Bold)
+          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.viz_fg_soft'))
           .maxLines(1)
       }
@@ -58,7 +61,7 @@ export struct CoverArt {
       Column() {
         Text(this.initialChar)
           .fontSize(this.glyphSize)
-          .fontWeight(FontWeight.Bold)
+          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.ink_soft'))
           .maxLines(1)
       }
