@@ -30,6 +30,10 @@ import (
 	"time"
 )
 
+// version 由构建期注入(-ldflags -X main.version,值为仓库 git describe),
+// 经 /health 与启动日志暴露,未注入时为 "dev"。
+var version = "dev"
+
 // 曲库扫描缓存时长:目录变化最迟一个 TTL 生效,避免每次请求都遍历磁盘。
 const scanTTL = 60 * time.Second
 
@@ -145,7 +149,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("music_server listening on %s, library=%s", config.Addr(), config.LibraryDir)
+		log.Printf("music_server %s listening on %s, library=%s", version, config.Addr(), config.LibraryDir)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -173,9 +177,11 @@ func (s *musicServer) routes() *http.ServeMux {
 
 // handleHealth 供编排层 healthcheck 探测,不做限流。
 func (s *musicServer) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// JSON 输出携带版本号:与 media_server 的 /health 形态对齐,排障时
+	// 一条 curl 即可确认线上运行的构建。
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
+	_, _ = fmt.Fprintf(w, `{"status":"ok","version":%q}`+"\n", version)
 }
 
 // requireRateLimit 对业务端点统一施加 per-IP 限流。
