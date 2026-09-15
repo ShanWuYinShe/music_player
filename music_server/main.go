@@ -169,6 +169,10 @@ func main() {
 func (s *musicServer) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	// /api/health 别名:nginx 以 /api/music/ 前缀反代并重写为 /api/health,
+	// 与 media_server(/health 与 /api/health 双注册)对齐,公网排障可直接
+	// curl https://<域名>/api/music/health 拿到版本号。
+	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/providers", s.requireRateLimit(s.handleProviders))
 	mux.HandleFunc("GET /api/songs", s.requireRateLimit(s.handleSongs))
 	mux.HandleFunc("GET /api/stream/{id}", s.requireRateLimit(s.handleStream))
