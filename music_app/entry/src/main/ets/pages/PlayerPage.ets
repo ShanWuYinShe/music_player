@@ -391,12 +391,22 @@ export struct PlayerPage {
         // 缩放（封面大小随曲目变化的根因）
         Column() {
           Column({ space: 6 }) {
-            Text(this.song ? this.song.title : '未在播放')
+            Row({ space: 10 }) {
+              // 钤印式喜欢：已收藏的曲子在歌名旁落一枚朱印（出现即盖印）
+              if (this.isFavoriteNow) {
+                SealMark({ text: '喜', side: 30, radius: 7 })
+                  .rotate({ angle: 8 })
+                  .transition(TransitionEffect.OPACITY
+                    .combine(TransitionEffect.scale({ x: 1.7, y: 1.7 }))
+                    .animation({ duration: 300, curve: Curve.EaseOut }))
+              }
+              Text(this.song ? this.song.title : '未在播放')
               .fontSize(22)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .constraintSize({ minHeight: 30 })
+            }
             Text(this.song ? this.song.artist : '')
               .fontSize(14)
               .fontColor($r('app.color.viz_fg_soft'))

@@ -1,3 +1,4 @@
+import displaySync from '@ohos.graphics.displaySync';
 import { picker } from '@kit.CoreFileKit';
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
@@ -111,6 +112,14 @@ struct Index {
   private onlineScroller: Scroller = new Scroller();
   /** 远离顶部时在拇指区露出回顶按钮（onScrollIndex 驱动） */
   @Local showBackTop: boolean = false;
+  /** 卷首双层漂移位（vp，displaySync 帧驱动正弦往复）：远层 96s/近层 64s
+   * 周期、相位错开成视差。属性动画 .animation() 对该结构实测不生效
+   * （连拍零位移），改用迷你条进度线同款帧驱动，12Hz 足够顺滑 */
+  @Local driftFar: number = 0;
+  @Local driftNear: number = 0;
+  private driftSync: displaySync.DisplaySync | null = null;
+  private driftFrameCb: () => void = () => this.tickDrift();
+  private driftT0 = 0;
 
   /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
@@ -121,6 +130,11 @@ struct Index {
 
   aboutToAppear(): void {
     this.songSource.reload(this.filteredSongs);
+    // 卷首漂移帧循环（随页面可见性启停，见底部 onVisibleAreaChange 绑定）
+    this.driftSync = displaySync.create();
+    this.driftSync.setExpectedFrameRateRange({ min: 0, max: 12, expected: 12 });
+    this.driftSync.on('frame', this.driftFrameCb);
+    this.driftSync.start();
 
     // 播放失败（在线无版权/网络中断等）统一 toast 反馈，由 PlayerController 回调
     appStore.player.onPlaybackError = (message: string): void => {
@@ -159,7 +173,12 @@ struct Index {
 
   aboutToDisappear(): void {
     // 根页面常驻导航栈底，状态订阅不摘（摘了若不再触发 aboutToAppear 会断
-    // mini 更新）；只清短时防抖定时器
+    // mini 更新）；只清短时防抖定时器与漂移帧循环
+    if (this.driftSync !== null) {
+      this.driftSync.off('frame', this.driftFrameCb);
+      this.driftSync.stop();
+      this.driftSync = null;
+    }
     this.cancelPendingSearch();
     this.cancelClearSearch();
     this.cancelLocalFilter();
@@ -232,10 +251,21 @@ struct Index {
             .height('100%')
             .objectFit(ImageFit.Cover)
             .hitTestBehavior(HitTestMode.None)
-          Image($r('app.media.ink_scroll'))
-            .width('100%')
+          // 卷首双层山水：远/近两层以不同周期极慢往复漂移（渲染管线
+          // 属性动画，UI 线程零每帧工作），云雾流动的手卷感。图幅加大
+          // 并负偏移，为往复平移留余量不露边
+          Image($r('app.media.scroll_far'))
+            .width('114%')
+            .height(122)
+            .objectFit(ImageFit.Cover)
+            .position({ x: '-7%', y: 0 })
+            .translate({ x: this.driftFar })
+          Image($r('app.media.scroll_near'))
+            .width('114%')
             .height(115)
             .objectFit(ImageFit.Cover)
+            .position({ x: '-7%', y: 0 })
+            .translate({ x: this.driftNear })
             .hitTestBehavior(HitTestMode.None)
           if (this.mini !== null && this.mini.coverPath !== '') {
             Image(this.mini.coverPath)
@@ -250,6 +280,8 @@ struct Index {
         .height('100%')
         .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
         .clip(true)
+        .onVisibleAreaChange([0.0, 1.0],
+          (_isExpanding: boolean, ratio: number): void => this.applyDriftVisible(ratio))
 
         Column() {
         // 源切换（主模式）+ 页面级操作：点选走 switchSource 改受控 index，
@@ -942,6 +974,30 @@ struct Index {
     if (this.localTimerId >= 0) {
       clearTimeout(this.localTimerId);
       this.localTimerId = -1;
+    }
+  }
+
+  /** 每帧：双层正弦漂移（远 96s / 近 64s 一个来回，相位差 1/3 周期成视差） */
+  private tickDrift(): void {
+    if (this.driftT0 === 0) {
+      this.driftT0 = Date.now();
+    }
+    const t = (Date.now() - this.driftT0) / 1000;
+    this.driftFar = Math.sin(t * 2 * Math.PI / 96) * 9;
+    this.driftNear = Math.sin(t * 2 * Math.PI / 64 + Math.PI / 3) * 9;
+  }
+
+  /** 漂移帧循环随页面可见性启停（被播放页盖住时不推进）；方法名避开
+   * 组件内置 onVisibleAreaChange（重名与基类签名冲突会编译报错，已踩坑） */
+  private applyDriftVisible(ratio: number): void {
+    if (this.driftSync === null) {
+      return;
+    }
+    if (ratio > 0) {
+      this.driftT0 = 0;
+      this.driftSync.start();
+    } else {
+      this.driftSync.stop();
     }
   }
 
