@@ -149,6 +149,35 @@ export function providersUrl(baseUrl: string): string {
   return `${normalizeBaseUrl(baseUrl)}/providers`;
 }
 
+/** 健康端点完整地址：${base}/health（服务端 /api/health 别名，携带版本号） */
+export function healthUrl(baseUrl: string): string {
+  return `${normalizeBaseUrl(baseUrl)}/health`;
+}
+
+export interface OnlineHealthInfo {
+  version: string;
+}
+
+/**
+ * 解析健康响应为版本信息。非法响应（空串/非 JSON/缺 version）返回 null，
+ * 调用方按「无法获取」展示。
+ */
+export function parseOnlineHealth(body: string): OnlineHealthInfo | null {
+  if (body.trim() === '') {
+    return null;
+  }
+  let parsed: OnlineHealthInfo;
+  try {
+    parsed = JSON.parse(body) as OnlineHealthInfo;
+  } catch (err) {
+    return null;
+  }
+  if (!parsed || typeof parsed.version !== 'string' || parsed.version === '') {
+    return null;
+  }
+  return { version: parsed.version };
+}
+
 /**
  * 解析源列表响应为源能力摘要：取 netease 源的 loggedIn（缺省视为
  * false）。非法响应（空串/非 JSON/缺 providers）返回 null，调用方按

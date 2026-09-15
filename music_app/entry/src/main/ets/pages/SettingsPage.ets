@@ -1,3 +1,4 @@
+import { bundleManager } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { formatTotalDuration } from '../common/TimeUtils';
@@ -6,6 +7,14 @@ import { DEFAULT_ONLINE_BASE_URL } from '../source/OnlineApi';
 /**
  * 设置页：曲库统计 / 在线音乐源配置 / 危险操作 / 应用信息
  */
+interface BundleVersionNameInfo {
+  versionName: string;
+}
+
+interface BundleVersionInfo {
+  versionInfo: BundleVersionNameInfo;
+}
+
 @ComponentV2
 export struct SettingsPage {
   @Param navPathStack: NavPathStack = new NavPathStack();
@@ -14,6 +23,29 @@ export struct SettingsPage {
   /** 麦克风律动开关 @Local 镜像：切换经 appStore.setMicLive（权限+采集启动
    * 可能失败回退），以返回值校正 UI */
   @Local micOn: boolean = appStore.micOn;
+  /** App 自身版本(bundleManager 读取)与服务端版本(/health 公开端点):
+   * 排障时用户可直接报出两端构建版本 */
+  @Local appVersion: string = '…';
+  @Local serverVersion: string = '获取中…';
+
+  aboutToAppear(): void {
+    try {
+      // versionInfo 需 WITH_APPLICATION 标志才会填充(DEFAULT 下该字段缺失);
+      // 当前 SDK 类型定义未收录 versionInfo,按结构断言读取(运行时存在)。
+      const info = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION) as object as BundleVersionInfo;
+      this.appVersion = info.versionInfo.versionName;
+    } catch (err) {
+      this.appVersion = '未知';
+    }
+    appStore.onlineSource.fetchHealth()
+      .then((info) => {
+        this.serverVersion = info.version;
+      })
+      .catch(() => {
+        this.serverVersion = '无法获取';
+      });
+  }
 
   aboutToDisappear(): void {
     // 系统返回键不触发输入框失焦，离开页面兜底保存一次（值未变则内部早退）
@@ -193,7 +225,10 @@ export struct SettingsPage {
           Text('音乐播放器')
             .fontSize(16)
             .fontColor($r('app.color.ink'))
-          Text('v1.1.0 · 收藏 · 最近播放 · 定时关闭 · 锁屏控制')
+          Text(`v${this.appVersion} · 收藏 · 最近播放 · 定时关闭 · 锁屏控制`)
+            .fontSize(12)
+            .fontColor($r('app.color.ink_soft'))
+          Text(`服务端 ${this.serverVersion}`)
             .fontSize(12)
             .fontColor($r('app.color.ink_soft'))
         }

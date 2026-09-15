@@ -2,9 +2,10 @@ import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { SongRecord } from '../model/Song';
 import {
-  OnlineCacheEntry, OnlineProviderState, effectiveBaseUrl, isCacheFresh,
-  parseOnlineCache, parseOnlineProviders, parseOnlineSongs, providersUrl,
-  serializeOnlineCache, songsUrl
+  OnlineCacheEntry, OnlineHealthInfo, OnlineProviderState, effectiveBaseUrl,
+  healthUrl, isCacheFresh, parseOnlineCache, parseOnlineHealth,
+  parseOnlineProviders, parseOnlineSongs, providersUrl, serializeOnlineCache,
+  songsUrl
 } from './OnlineApi';
 
 /** 在线请求连接与读取超时（毫秒） */
@@ -156,6 +157,29 @@ export class OnlineSource {
    * 拉取源能力摘要（网易云源是否启用/已登录）：用于在线页「未登录仅试听」
    * 提示。网络/HTTP 失败抛 Error，调用方静默忽略（提示非关键路径）。
    */
+  async fetchHealth(): Promise<OnlineHealthInfo> {
+    const request = http.createHttp();
+    try {
+      const response = await request.request(healthUrl(this.baseUrl), {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.STRING,
+        connectTimeout: REQUEST_TIMEOUT_MS,
+        readTimeout: REQUEST_TIMEOUT_MS,
+        usingCache: false
+      });
+      if (response.responseCode !== 200) {
+        throw new Error(`服务异常 ${response.responseCode}`);
+      }
+      const info = parseOnlineHealth(`${response.result}`);
+      if (info === null) {
+        throw new Error('health 响应解析失败');
+      }
+      return info;
+    } finally {
+      request.destroy();
+    }
+  }
+
   async fetchProviders(): Promise<OnlineProviderState> {
     const request = http.createHttp();
     try {
