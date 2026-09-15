@@ -2,7 +2,6 @@ import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { formatTotalDuration } from '../common/TimeUtils';
 import { DEFAULT_ONLINE_BASE_URL } from '../source/OnlineApi';
-import { INK_FONT_MEDIUM, INK_FONT_REGULAR } from '../common/InkStyle';
 
 /**
  * 设置页：曲库统计 / 在线音乐源配置 / 危险操作 / 应用信息
@@ -56,7 +55,6 @@ export struct SettingsPage {
 
         Text('设置')
           .fontSize(30)
-          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.ink'))
         Blank()
       }
@@ -79,11 +77,9 @@ export struct SettingsPage {
         Column({ space: 3 }) {
           Text('曲库')
             .fontSize(16)
-            .fontFamily(INK_FONT_MEDIUM)
             .fontColor($r('app.color.ink'))
           Text(this.librarySummary())
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.ink_soft'))
         }
         .alignItems(HorizontalAlign.Start)
@@ -98,16 +94,13 @@ export struct SettingsPage {
       Column({ space: 10 }) {
         Text('在线音乐源')
           .fontSize(16)
-          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.ink'))
         Text('music_server 服务地址（含 /api 前缀），留空使用默认服务。')
           .fontSize(12)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_soft'))
         TextInput({ text: this.urlInput, placeholder: DEFAULT_ONLINE_BASE_URL })
           .width('100%')
           .fontSize(14)
-          .fontFamily(INK_FONT_REGULAR)
           .backgroundColor($r('app.color.surface_alt'))
           // 文字/占位/光标显式用自适应资源：默认文字色随系统主题走，
           // 浅色模式下会在深色 surface_alt 底上形成深底深字（不可见）
@@ -123,7 +116,6 @@ export struct SettingsPage {
           })
         Text('地址会保存在本机，可随时修改。')
           .fontSize(11)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_faint'))
       }
       .width('100%')
@@ -137,11 +129,9 @@ export struct SettingsPage {
         Column({ space: 3 }) {
           Text('麦克风律动')
             .fontSize(15)
-            .fontFamily(INK_FONT_MEDIUM)
             .fontColor($r('app.color.ink'))
           Text('开启动后，可视化舞台将跟随外放的真实音乐跳动（需播放外放出声）。')
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.ink_soft'))
         }
         .alignItems(HorizontalAlign.Start)
@@ -162,11 +152,9 @@ export struct SettingsPage {
         Column({ space: 3 }) {
           Text('清空曲库')
             .fontSize(15)
-            .fontFamily(INK_FONT_MEDIUM)
             .fontColor($r('app.color.danger'))
           Text(`删除全部 ${appStore.library.getAllSongs().length} 首歌曲的文件与记录，同时清空喜欢和播放记录，不可恢复。`)
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.ink_soft'))
         }
         .alignItems(HorizontalAlign.Start)
@@ -176,7 +164,6 @@ export struct SettingsPage {
           // constraintSize 替代固定高度：热区达标（≥40vp），大字体不截断
           .constraintSize({ minHeight: 40 })
           .fontSize(13)
-          .fontFamily(INK_FONT_REGULAR)
           .borderRadius(20)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
@@ -195,7 +182,6 @@ export struct SettingsPage {
         Column() {
           Text('乐')
             .fontSize(28)
-            .fontFamily(INK_FONT_MEDIUM)
             .fontColor($r('app.color.on_accent'))
         }
         .width(52)
@@ -206,11 +192,9 @@ export struct SettingsPage {
         Column({ space: 4 }) {
           Text('音乐播放器')
             .fontSize(16)
-            .fontFamily(INK_FONT_MEDIUM)
             .fontColor($r('app.color.ink'))
           Text('v1.1.0 · 收藏 · 最近播放 · 定时关闭 · 锁屏控制')
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.ink_soft'))
         }
         .alignItems(HorizontalAlign.Start)
@@ -229,7 +213,6 @@ export struct SettingsPage {
           .width('100%')
           .constraintSize({ minHeight: 46 })
           .fontSize(15)
-          .fontFamily(INK_FONT_MEDIUM)
           .borderRadius(23)
           .backgroundColor($r('app.color.accent'))
           .fontColor($r('app.color.on_accent'))

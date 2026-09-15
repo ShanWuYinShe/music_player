@@ -1,7 +1,6 @@
 import { SongRecord } from '../model/Song';
 import { formatTime } from '../common/TimeUtils';
 import { TextSegment, splitHighlight } from '../common/LibraryFilter';
-import { INK_FONT_MEDIUM, INK_FONT_REGULAR } from '../common/InkStyle';
 import { EqIndicator } from './EqIndicator';
 import { CoverArt } from './CoverArt';
 
@@ -37,16 +36,15 @@ export struct SongItem {
     return splitHighlight(this.song.artist, this.keyword);
   }
 
-  /** 分段渲染：命中片段以 accent 着色，其余继承 Text 颜色。
-   * 文楷排印：正文常规字重，命中片段以 Medium 承担"加粗" */
+  /** 分段渲染：命中片段以 accent 着色并加粗，其余继承 Text 颜色 */
   @Builder
   HighlightText(segments: TextSegment[], baseColor: ResourceColor, fontSize: number,
-    medium: boolean) {
+    fontWeight: FontWeight) {
     Text() {
       ForEach(segments, (seg: TextSegment, idx: number) => {
         Span(seg.text)
-          .fontFamily(seg.hit || medium ? INK_FONT_MEDIUM : INK_FONT_REGULAR)
           .fontColor(seg.hit ? CURRENT_COLOR : baseColor)
+          .fontWeight(seg.hit ? FontWeight.Bold : fontWeight)
           .fontSize(fontSize)
       }, (seg: TextSegment, idx: number) => `${idx}_${seg.text}`)
     }
@@ -73,20 +71,20 @@ export struct SongItem {
       Column({ space: 3 }) {
         Row({ space: 6 }) {
           this.HighlightText(this.titleSegments,
-            this.isCurrent ? CURRENT_COLOR : $r('app.color.editorial_title'), 17, true)
+            this.isCurrent ? CURRENT_COLOR : $r('app.color.editorial_title'), 17, FontWeight.Bold)
           // 网易云付费曲目徽标：轻量小字（未登录时播放页追加「VIP 试听」标注）；
           // 已登录播完整版，徽标淡化只做身份说明
           if (this.song.vip === true) {
             Text('VIP')
               .fontSize(9)
-              .fontFamily(INK_FONT_MEDIUM)
+              .fontWeight(FontWeight.Medium)
               .fontColor(CURRENT_COLOR)
               .opacity(this.loggedIn ? 0.45 : 1)
               .letterSpacing(1)
           }
         }
         .alignItems(VerticalAlign.Center)
-        this.HighlightText(this.artistSegments, $r('app.color.editorial_meta'), 12, false)
+        this.HighlightText(this.artistSegments, $r('app.color.editorial_meta'), 12, FontWeight.Normal)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -100,7 +98,6 @@ export struct SongItem {
       // 时长：目录页码的用法——等宽感小字右对齐
       Text(this.song.duration > 0 ? formatTime(this.song.duration) : '--:--')
         .fontSize(12)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.editorial_meta'))
     }
     .width('100%')

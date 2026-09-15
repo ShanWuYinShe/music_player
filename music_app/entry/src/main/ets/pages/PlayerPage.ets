@@ -14,7 +14,6 @@ import { WaveformSeekbar } from '../components/WaveformSeekbar';
 import { CoverSwipe, COVER_SWIPE_THRESHOLD } from '../components/CoverSwipe';
 import { EqIndicator } from '../components/EqIndicator';
 import { SealMark } from '../components/SealMark';
-import { INK_FONT_MEDIUM, INK_FONT_REGULAR } from '../common/InkStyle';
 import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 
 /** 队列表项 */
@@ -394,14 +393,12 @@ export struct PlayerPage {
           Column({ space: 6 }) {
             Text(this.song ? this.song.title : '未在播放')
               .fontSize(22)
-              .fontFamily(INK_FONT_MEDIUM)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .constraintSize({ minHeight: 30 })
             Text(this.song ? this.song.artist : '')
               .fontSize(14)
-              .fontFamily(INK_FONT_REGULAR)
               .fontColor($r('app.color.viz_fg_soft'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -416,7 +413,6 @@ export struct PlayerPage {
               }
             }
             .fontSize(11)
-            .fontFamily(INK_FONT_REGULAR)
             .letterSpacing(0.8)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -431,12 +427,10 @@ export struct PlayerPage {
             Row() {
               Text(formatTime(this.player.currentTime))
                 .fontSize(12)
-                .fontFamily(INK_FONT_REGULAR)
                 .fontColor($r('app.color.viz_fg_faint'))
               Blank()
               Text(formatTime(this.player.duration))
                 .fontSize(12)
-                .fontFamily(INK_FONT_REGULAR)
                 .fontColor($r('app.color.viz_fg_faint'))
             }
             .width('100%')
@@ -454,7 +448,6 @@ export struct PlayerPage {
               .fontColor([$r('app.color.viz_fg_soft')])
             Text('播放队列')
               .fontSize(13)
-              .fontFamily(INK_FONT_REGULAR)
               .fontColor($r('app.color.viz_fg_soft'))
             Blank()
             SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -570,7 +563,6 @@ export struct PlayerPage {
             if (this.sleepRemainSec >= 0) {
               Text(formatTime(this.sleepRemainSec * 1000))
                 .fontSize(11)
-                .fontFamily(INK_FONT_REGULAR)
                 .fontColor($r('app.color.accent'))
             }
           }
@@ -650,16 +642,13 @@ export struct PlayerPage {
       Row({ space: 8 }) {
         Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.playMode)}`)
           .fontSize(12)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_faint'))
         if (this.player.playNextCount > 0) {
           Text(`插播 ${this.player.playNextCount} 首`)
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.accent'))
           Text('清空')
             .fontSize(12)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor($r('app.color.ink_soft'))
             // padding 补足 40vp 热区（原光秃文字几乎点不中）
             .padding({ left: 12, right: 12, top: 10, bottom: 10 })
@@ -685,7 +674,6 @@ export struct PlayerPage {
               } else {
                 Text(`${index + 1}`)
                   .fontSize(13)
-                  .fontFamily(INK_FONT_REGULAR)
                   .fontColor($r('app.color.ink_faint'))
                   .width(22)
                   .textAlign(TextAlign.Center)
@@ -695,7 +683,6 @@ export struct PlayerPage {
                 Row({ space: 6 }) {
                   Text(entry.song.title)
                     .fontSize(15)
-                    .fontFamily(INK_FONT_MEDIUM)
                     .fontColor(entry.song.id === (this.song?.id ?? '') ?
                       $r('app.color.accent') : $r('app.color.ink'))
                     .maxLines(1)
@@ -703,7 +690,6 @@ export struct PlayerPage {
                   if (entry.inserted) {
                     Text('插播')
                       .fontSize(9)
-                      .fontFamily(INK_FONT_REGULAR)
                       .fontColor($r('app.color.accent'))
                       .padding({ left: 5, right: 5, top: 1, bottom: 1 })
                       .borderRadius(4)
@@ -713,7 +699,6 @@ export struct PlayerPage {
                 .alignItems(VerticalAlign.Center)
                 Text(entry.song.artist)
                   .fontSize(12)
-                  .fontFamily(INK_FONT_REGULAR)
                   .fontColor($r('app.color.ink_soft'))
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -723,7 +708,6 @@ export struct PlayerPage {
 
               Text(entry.song.duration > 0 ? formatTime(entry.song.duration) : '--:--')
                 .fontSize(12)
-                .fontFamily(INK_FONT_REGULAR)
                 .fontColor($r('app.color.ink_faint'))
             }
             .width('100%')
@@ -807,7 +791,6 @@ export struct PlayerPage {
           Stack() {
             Text(this.song !== null ? this.song.title.substring(0, 1) : '♪')
               .fontSize(72)
-              .fontFamily(INK_FONT_MEDIUM)
               .fontColor('#8E8878')
           }
           .width('100%')
@@ -817,14 +800,12 @@ export struct PlayerPage {
         }
         Text(this.song !== null ? this.song.title : '未在播放')
           .fontSize(22)
-          .fontFamily(INK_FONT_MEDIUM)
           .fontColor('#F3EFE4')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
         Text(this.song !== null ? this.song.artist : '')
           .fontSize(14)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor('#C6C0B0')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -834,7 +815,6 @@ export struct PlayerPage {
           SealMark({ text: '乐', side: 16, radius: 3 })
           Text('音乐播放器')
             .fontSize(11)
-            .fontFamily(INK_FONT_REGULAR)
             .fontColor('#8E8878')
             .letterSpacing(2)
         }

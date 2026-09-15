@@ -3,7 +3,6 @@ import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
-import { ensureInkFonts, INK_FONT_MEDIUM, INK_FONT_REGULAR } from '../common/InkStyle';
 import { SongItem } from '../components/SongItem';
 import { MiniPlayerBar, MiniInfo, MINI_BAR_HEIGHT } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
@@ -121,8 +120,6 @@ struct Index {
   };
 
   aboutToAppear(): void {
-    // 文楷字体注册（全局生效，根页面常驻只注册一次）；失败回退系统字体
-    ensureInkFonts(this.getUIContext());
     this.songSource.reload(this.filteredSongs);
 
     // 播放失败（在线无版权/网络中断等）统一 toast 反馈，由 PlayerController 回调
@@ -496,8 +493,8 @@ struct Index {
   TabChip(tab: LibraryTab, label: string) {
     Text(this.chipCount(tab) > 0 ? `${label} ${this.chipCount(tab)}` : label)
       .fontSize(14)
-      .fontFamily(this.tab === tab ? INK_FONT_MEDIUM : INK_FONT_REGULAR)
       .fontColor(this.tab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
+      .fontWeight(this.tab === tab ? FontWeight.Bold : FontWeight.Normal)
       .letterSpacing(this.tab === tab ? 0.5 : 0)
       // 文字标签风（章节索引）：无底无框，热区由 padding 保 40vp
       .padding({ left: 12, right: 12, top: 12, bottom: 12 })
@@ -521,8 +518,8 @@ struct Index {
           .fontColor([this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta')])
         Text(label)
           .fontSize(15)
-          .fontFamily(this.sourceTab === tab ? INK_FONT_MEDIUM : INK_FONT_REGULAR)
           .fontColor(this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
+          .fontWeight(this.sourceTab === tab ? FontWeight.Bold : FontWeight.Normal)
       }
       // 选中项下方短金线（书脊标记）
       Row()
@@ -566,7 +563,6 @@ struct Index {
     Row({ space: 3 }) {
       Text(sortLabel(this.sortMode))
         .fontSize(13)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.editorial_meta'))
       SymbolGlyph($r('sys.symbol.chevron_down'))
         .fontSize(12)
@@ -596,7 +592,6 @@ struct Index {
           .color($r('app.color.ink_faint'))
         Text(this.searchText.trim() !== '' ? `正在搜索 "${this.searchText.trim()}"…` : '正在拉取在线曲库…')
           .fontSize(14)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_soft'))
       }
       .width('100%')
@@ -609,17 +604,14 @@ struct Index {
           .fontColor([$r('app.color.ink_faint')])
         Text('在线曲库拉取失败')
           .fontSize(15)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_soft'))
         Text(this.onlineError)
           .fontSize(12)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_faint'))
         Button('重试')
           // constraintSize 替代固定高度：热区达标，大字体不截断
           .constraintSize({ minHeight: 40 })
           .fontSize(14)
-          .fontFamily(INK_FONT_REGULAR)
           .borderRadius(19)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
@@ -638,17 +630,14 @@ struct Index {
           .fontColor([$r('app.color.ink_faint')])
         Text('在线曲库还没有内容')
           .fontSize(15)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_soft'))
         Text('稍后再来看看，也可以下拉重试')
           .fontSize(12)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_faint'))
         Button('重试')
           // constraintSize 替代固定高度：热区达标，大字体不截断
           .constraintSize({ minHeight: 40 })
           .fontSize(14)
-          .fontFamily(INK_FONT_REGULAR)
           .borderRadius(19)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
@@ -763,7 +752,6 @@ struct Index {
         // 曲库空态主视觉：「乐」大字（水墨版式以字入画，不用系统音符图标）
         Text('乐')
           .fontSize(44)
-          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.ink_faint'))
       }
       .width(96)
@@ -775,11 +763,9 @@ struct Index {
       Column({ space: 6 }) {
         Text('曲库还是空的')
           .fontSize(17)
-          .fontFamily(INK_FONT_MEDIUM)
           .fontColor($r('app.color.ink'))
         Text('导入设备音频，或先听听内置演示曲目')
           .fontSize(13)
-          .fontFamily(INK_FONT_REGULAR)
           .fontColor($r('app.color.ink_faint'))
       }
 
@@ -787,7 +773,6 @@ struct Index {
         Button('导入音乐')
           .constraintSize({ minHeight: 42 })
           .fontSize(15)
-          .fontFamily(INK_FONT_REGULAR)
           .borderRadius(21)
           .backgroundColor($r('app.color.accent'))
           .fontColor($r('app.color.on_accent'))
@@ -795,7 +780,6 @@ struct Index {
         Button('载入演示曲目')
           .constraintSize({ minHeight: 42 })
           .fontSize(15)
-          .fontFamily(INK_FONT_REGULAR)
           .borderRadius(21)
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
@@ -818,11 +802,9 @@ struct Index {
         .fontColor([$r('app.color.ink_faint')])
       Text(`未找到 "${this.searchText.trim()}" 相关歌曲`)
         .fontSize(15)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.ink_soft'))
       Text('换个关键词试试，支持歌名与歌手')
         .fontSize(12)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.ink_faint'))
     }
     .width('100%')
@@ -839,11 +821,9 @@ struct Index {
         .fontColor([$r('app.color.ink_faint')])
       Text(title)
         .fontSize(15)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.ink_soft'))
       Text(subtitle)
         .fontSize(12)
-        .fontFamily(INK_FONT_REGULAR)
         .fontColor($r('app.color.ink_faint'))
         .textAlign(TextAlign.Center)
     }

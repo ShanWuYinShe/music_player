@@ -1,6 +1,5 @@
 import { PlayerController } from '../player/PlayerController';
 import displaySync from '@ohos.graphics.displaySync';
-import { INK_FONT_MEDIUM, INK_FONT_REGULAR } from '../common/InkStyle';
 import { CoverArt } from './CoverArt';
 
 const BAR_HEIGHT = 62;
@@ -196,13 +195,12 @@ export struct MiniPlayerBar {
             Column() {
               Text(this.info !== null ? this.info.title : '未在播放')
                 .fontSize(15)
-                .fontFamily(this.info !== null ? INK_FONT_MEDIUM : INK_FONT_REGULAR)
+                .fontWeight(FontWeight.Bold)
                 .fontColor(this.info !== null ? $r('app.color.editorial_title') : $r('app.color.editorial_meta'))
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
               Text(this.info !== null ? this.info.artist : '选一首歌开始')
                 .fontSize(12)
-                .fontFamily(INK_FONT_REGULAR)
                 .fontColor($r('app.color.editorial_meta'))
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })

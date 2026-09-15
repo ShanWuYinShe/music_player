@@ -1,9 +1,8 @@
 /**
  * 朱砂印章：圆角方印 + 印文单字（朱底宣白字），水墨版式的签名/落款语言。
- * 印文用文楷 Medium（书法印文）；颜色走 accent/on_accent token（深浅板自适配）。
+ * 颜色走 accent/on_accent token（深浅板自适配）。
  * 注意：边长参数名不可用 size（与组件基类 size() 通用属性方法冲突，编译报错）。
  */
-import { INK_FONT_MEDIUM } from '../common/InkStyle';
 
 @ComponentV2
 export struct SealMark {
@@ -17,7 +16,7 @@ export struct SealMark {
   build() {
     Text(this.text)
       .fontSize(Math.round(this.side * 0.62))
-      .fontFamily(INK_FONT_MEDIUM)
+      .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.on_accent'))
       .width(this.side)
       .height(this.side)
