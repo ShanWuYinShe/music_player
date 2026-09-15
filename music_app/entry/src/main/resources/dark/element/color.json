@@ -2,31 +2,31 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#131211"
+      "value": "#141312"
     },
     {
       "name": "page_bg",
-      "value": "#131211"
+      "value": "#141312"
     },
     {
       "name": "surface",
-      "value": "#1E1C19"
+      "value": "#201E1B"
     },
     {
       "name": "surface_alt",
-      "value": "#2B2823"
+      "value": "#2D2A25"
     },
     {
       "name": "ink",
-      "value": "#EFEBDE"
+      "value": "#F0ECDF"
     },
     {
       "name": "ink_soft",
-      "value": "#A8A295"
+      "value": "#B8B2A2"
     },
     {
       "name": "ink_faint",
-      "value": "#6F6A5F"
+      "value": "#8F8A7C"
     },
     {
       "name": "paper",
@@ -62,19 +62,19 @@
     },
     {
       "name": "editorial_title",
-      "value": "#F3EFE2"
+      "value": "#F4F0E3"
     },
     {
       "name": "editorial_body",
-      "value": "#D5CFC0"
+      "value": "#D9D3C5"
     },
     {
       "name": "editorial_meta",
-      "value": "#7A7466"
+      "value": "#9A958A"
     },
     {
       "name": "editorial_rule",
-      "value": "#262420"
+      "value": "#2A2823"
     },
     {
       "name": "viz_fg",

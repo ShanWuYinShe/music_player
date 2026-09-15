@@ -222,10 +222,10 @@ struct Index {
       // alignContent=Bottom：悬停收起 pill 叠在底部中央（满幅子层不受影响）
       Stack({ alignContent: Alignment.Bottom }) {
         // 全屏背景层：延伸至状态栏与导航条下方，消除顶部/底部割裂。
-        // 纸面三层：宣纸底色 + 宣纸纹理（深浅板各一张，objectRepeat 平铺）+
-        // 顶部水墨长卷（卷首山水，底部远山淡影呼应），均不拦截触摸；播放中
-        // 再叠当前曲封面的模糊氛围层（低透明度）
-        Stack() {
+        // 墨晕宣纸全屏底（晕染洇痕+旧纸晕角，深浅板各一张）+ 卷首水墨长卷
+        // （低伏远山，上部雾区留白承载状态栏与源切换行），均不拦截触摸；
+        // 播放中再叠当前曲封面的模糊氛围层（低透明度）
+        Stack({ alignContent: Alignment.Top }) {
           Column()
             .width('100%')
             .height('100%')
@@ -233,25 +233,13 @@ struct Index {
           Image($r('app.media.paper_tex'))
             .width('100%')
             .height('100%')
-            .objectRepeat(ImageRepeat.XY)
+            .objectFit(ImageFit.Cover)
             .hitTestBehavior(HitTestMode.None)
-          Column() {
-            Image($r('app.media.ink_scroll'))
-              .width('100%')
-              .height(150)
-              .objectFit(ImageFit.Cover)
-              .hitTestBehavior(HitTestMode.None)
-            Blank()
-            Image($r('app.media.ink_mountains'))
-              .width('100%')
-              .height(170)
-              .objectFit(ImageFit.Cover)
-              .fillColor($r('app.color.ink'))
-              .opacity(0.06)
-              .hitTestBehavior(HitTestMode.None)
-          }
-          .width('100%')
-          .height('100%')
+          Image($r('app.media.ink_scroll'))
+            .width('100%')
+            .height(115)
+            .objectFit(ImageFit.Cover)
+            .hitTestBehavior(HitTestMode.None)
           if (this.mini !== null && this.mini.coverPath !== '') {
             Image(this.mini.coverPath)
               .width('120%')

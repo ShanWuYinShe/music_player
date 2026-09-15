@@ -23,22 +23,14 @@ export struct SettingsPage {
 
   build() {
     Stack() {
-      // 全屏背景层：延伸至状态栏与导航条下方。宣纸底 + 纹理平铺，
-      // 底部远山淡影同首页（不拦截触摸）
+      // 全屏背景层：延伸至状态栏与导航条下方。墨晕宣纸全屏底同首页
+      // （不拦截触摸）
       Column() {
         Image($r('app.media.paper_tex'))
           .width('100%')
           .height('100%')
-          .objectRepeat(ImageRepeat.XY)
-          .position({ x: 0, y: 0 })
-          .hitTestBehavior(HitTestMode.None)
-        Blank()
-        Image($r('app.media.ink_mountains'))
-          .width('100%')
-          .height(170)
           .objectFit(ImageFit.Cover)
-          .fillColor($r('app.color.ink'))
-          .opacity(0.06)
+          .position({ x: 0, y: 0 })
           .hitTestBehavior(HitTestMode.None)
       }
       .width('100%')
