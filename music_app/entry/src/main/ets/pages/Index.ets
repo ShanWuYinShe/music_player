@@ -453,6 +453,7 @@ struct Index {
         MiniPlayerBar({
           player: appStore.player,
           info: this.mini,
+          bottomInset: appStore.safeBottomVp,
           onTapOpen: () => this.pathStack.pushPathByName('player', null),
           onSwipeTab: (direction: number) => this.cycleTab(direction),
           onSwipeSource: (direction: number) => this.cycleSource(direction)
@@ -460,9 +461,9 @@ struct Index {
         }
         .width('100%')
         .height('100%')
-        // 顶部避让已并入源切换行 padding（safeTopVp+8）；底部除系统栏避让
-        // 外再留出迷你条高度（常驻），避免列表最后一行被压住
-        .padding({ bottom: appStore.safeBottomVp })
+        // 顶部避让已并入源切换行 padding（safeTopVp+8）；底部不留白——
+        // 迷你条自带 bottomInset 高度直贴屏幕物理底（磨砂延伸进安全区），
+        // 列表自身的底部留白已含迷你条与安全区高度
       }
       .width('100%')
       .height('100%')
@@ -517,7 +518,7 @@ struct Index {
     .height('100%')
     // 底部留白含常驻迷你条高度：列表最后一行不被压住（迷你条不再随曲目
     // 显隐，留白也要常驻）
-    .padding({ left: 16, right: 16, bottom: 12 + MINI_BAR_HEIGHT })
+    .padding({ left: 16, right: 16, bottom: 12 + MINI_BAR_HEIGHT + appStore.safeBottomVp })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
       // 滚过约一屏半才在拇指区露出回顶按钮（阈值太小稍滚即出，抢底部拇指区），

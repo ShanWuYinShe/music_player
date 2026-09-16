@@ -38,6 +38,8 @@ export struct MiniPlayerBar {
   /** 弧线画 < / > = 顶层源切换（< 上一个 / > 下一个，循环） */
   @Event onSwipeSource: (direction: number) => void = (_direction: number) => {
   };
+  /** 底部安全区高度（vp）：磨砂底延伸进安全区，与系统导航条同色不割裂 */
+  @Param bottomInset: number = 0;
 
   private progressPercent(): number {
     if (this.info === null || this.player.duration <= 0) {
@@ -176,7 +178,8 @@ export struct MiniPlayerBar {
   }
 
   build() {
-    // clip 使进度细线跟随卡片圆角
+    // clip 使进度细线跟随卡片圆角。整条高度含底部安全区：磨砂底一铺到
+    // 屏幕物理底，内容行仍锁定 BAR_HEIGHT（安全区只是同色延伸）
     Column() {
         Stack({ alignContent: Alignment.TopStart }) {
           Row({ space: 12 }) {
@@ -249,8 +252,10 @@ export struct MiniPlayerBar {
             .opacity(this.info?.isPlaying ? 0.5 : 0.3)
         }
         .width('100%')
+        .height(BAR_HEIGHT)
       }
     .width('100%')
+    .height(BAR_HEIGHT + this.bottomInset)
     .clip(true)
     // 进度线帧循环随可见性启停（被下级页面盖住时不必推进）
     .onVisibleAreaChange([0.0, 1.0], (_isExpanding: boolean, ratio: number) => {
