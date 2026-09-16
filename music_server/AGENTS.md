@@ -78,6 +78,6 @@ go run -C music_server . -library-review
 
 部署编排(nginx、netease_api、compose 等)在 workwork 仓库,本仓库
 music_server 作为其 submodule 被构建。本地曲库音频经管理面板「音乐曲库」
-页上传(写宿主机 `service/.wework/music-library/`,compose 挂载),或手动
+页上传(写宿主机 workwork 仓库根 `.wework/music-library/`,compose 挂载),或手动
 投放;`docker compose build music_server && docker compose up -d --no-deps
 music_server`。新增音频无需重启服务,等待扫描 TTL 即可。
