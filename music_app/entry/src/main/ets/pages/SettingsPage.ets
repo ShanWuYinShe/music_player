@@ -3,6 +3,7 @@ import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { formatTotalDuration } from '../common/TimeUtils';
 import { DEFAULT_ONLINE_BASE_URL } from '../source/OnlineApi';
+import { dayPhaseOverlay } from '../common/InkMood';
 
 /**
  * 设置页：曲库统计 / 在线音乐源配置 / 危险操作 / 应用信息
@@ -54,13 +55,19 @@ export struct SettingsPage {
 
   build() {
     Stack() {
-      // 全屏背景层：延伸至状态栏与导航条下方。墨晕宣纸全屏底同首页
-      // （不拦截触摸）
+      // 全屏背景层：延伸至状态栏与导航条下方。墨晕宣纸全屏底 + 时辰
+      // 晨昏罩色同首页（不拦截触摸）
       Column() {
         Image($r('app.media.paper_tex'))
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Cover)
+          .position({ x: 0, y: 0 })
+          .hitTestBehavior(HitTestMode.None)
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(dayPhaseOverlay())
           .position({ x: 0, y: 0 })
           .hitTestBehavior(HitTestMode.None)
       }

@@ -1,4 +1,5 @@
 import displaySync from '@ohos.graphics.displaySync';
+import { dayPhaseOverlay } from '../common/InkMood';
 import { picker } from '@kit.CoreFileKit';
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
@@ -120,6 +121,9 @@ struct Index {
   private driftSync: displaySync.DisplaySync | null = null;
   private driftFrameCb: () => void = () => this.tickDrift();
   private driftT0 = 0;
+  /** 卷首视差：列表下滚时卷首以慢速跟随上移（展卷感），帧循环里读滚动偏移 */
+  @Local parallaxFar: number = 0;
+  @Local parallaxNear: number = 0;
 
   /** 播放镜像：真机上 player(@ObservedV2) 的 @Trace/@Computed 对 if 分支与
    * 属性插值均不触发 UI 更新（仅 Text 内容插值存活，已实测），改由
@@ -265,7 +269,13 @@ struct Index {
             .height(115)
             .objectFit(ImageFit.Cover)
             .position({ x: '-7%', y: 0 })
-            .translate({ x: this.driftNear })
+            .translate({ x: this.driftNear, y: this.parallaxNear })
+            .hitTestBehavior(HitTestMode.None)
+          // 时辰晨昏罩色：晨青/昼无/昏赭/夜黛，约一成浓度染纸（见 InkMood）
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(dayPhaseOverlay())
             .hitTestBehavior(HitTestMode.None)
           if (this.mini !== null && this.mini.coverPath !== '') {
             Image(this.mini.coverPath)
@@ -977,7 +987,8 @@ struct Index {
     }
   }
 
-  /** 每帧：双层正弦漂移（远 96s / 近 64s 一个来回，相位差 1/3 周期成视差） */
+  /** 每帧：双层正弦漂移（远 96s / 近 64s 一个来回，相位差 1/3 周期成视差）
+   * + 卷首随列表滚动的慢速跟随（远层 22% / 近层 36% 速，约一屏后到顶） */
   private tickDrift(): void {
     if (this.driftT0 === 0) {
       this.driftT0 = Date.now();
@@ -985,6 +996,12 @@ struct Index {
     const t = (Date.now() - this.driftT0) / 1000;
     this.driftFar = Math.sin(t * 2 * Math.PI / 96) * 9;
     this.driftNear = Math.sin(t * 2 * Math.PI / 64 + Math.PI / 3) * 9;
+    // scroller 未挂载（首帧前）时 currentOffset 返回 undefined，判空兜底
+    const offsetResult = this.activeScroller().currentOffset();
+    const y = offsetResult === undefined ? 0 : offsetResult.yOffset;
+    const off = Math.min(Math.max(y, 0), 380);
+    this.parallaxFar = -off * 0.22;
+    this.parallaxNear = -off * 0.36;
   }
 
   /** 漂移帧循环随页面可见性启停（被播放页盖住时不推进）；方法名避开

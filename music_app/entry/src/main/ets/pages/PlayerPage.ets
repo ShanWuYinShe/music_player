@@ -22,6 +22,26 @@ interface QueueEntry {
   inserted: boolean;
 }
 
+/** 分享卡题款词句：按歌名哈希稳定选取——同一首歌恒定一句，分享图内容稳定 */
+const INK_VERSES: string[] = [
+  '曲终人不见 江上数峰青',
+  '此时无声胜有声',
+  '乐者 天地之和也',
+  '余音绕梁 三日不绝',
+  '高山流水 知音相逢',
+  '清风明月本无价',
+  '近水遥山皆有情',
+  '大音希声 大象无形'
+];
+
+function verseFor(title: string): string {
+  let sum = 0;
+  for (let i = 0; i < title.length; i++) {
+    sum += title.codePointAt(i) ?? 0;
+  }
+  return INK_VERSES[sum % INK_VERSES.length];
+}
+
 /**
  * 播放页：舞台双态互斥设计——同一时刻只有一种视觉主体。
  * 封面舞台（默认）：模糊放大的封面做氛围背景 + Poweramp 式大封面，
@@ -817,6 +837,15 @@ export struct PlayerPage {
         Text(this.song !== null ? this.song.artist : '')
           .fontSize(14)
           .fontColor('#C6C0B0')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+        // 题款：按歌名稳定选取的山水词句（隐约居中，不与落款抢）
+        Text(this.song !== null ? verseFor(this.song.title) : '')
+          .fontSize(11)
+          .fontColor('#8E8878')
+          .letterSpacing(3)
+          .textAlign(TextAlign.Center)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
