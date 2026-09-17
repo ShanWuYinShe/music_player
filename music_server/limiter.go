@@ -58,21 +58,47 @@ func (l *ipWindowLimiter) allow(key string) bool {
 }
 
 // clientIPFromRequest 依次取 X-Real-IP、X-Forwarded-For 首段,
-// 最后回退 RemoteAddr。生产流量经 nginx(覆写 X-Real-IP),与 media_server
-// 的取值顺序完全一致;仅用于限流统计,不做任何鉴权判断。
+// 最后回退 RemoteAddr。转发头只在直连方是内网/回环地址(即 nginx 所在的
+// Docker bridge)时才采信:若服务被直接暴露到公网,任意外部客户端伪造
+// X-Real-IP 即可旋转限流键绕过 per-IP 限流——服务无鉴权时该绕过约等于
+// 绕过全部防线。取值顺序与 media_server 保持一致。
 func clientIPFromRequest(r *http.Request) string {
-	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+	remote := remoteIP(r.RemoteAddr)
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" && isTrustedProxyIP(remote) {
 		return ip
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" && isTrustedProxyIP(remote) {
 		if idx := strings.IndexByte(xff, ','); idx >= 0 {
 			return strings.TrimSpace(xff[:idx])
 		}
 		return strings.TrimSpace(xff)
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return remote
+}
+
+// remoteIP 从 RemoteAddr 取主机部分,解析失败原样返回。
+func remoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		return remoteAddr
 	}
 	return host
+}
+
+// isTrustedProxyIP 判断直连方是否位于内网(Docker bridge 网段属于 RFC1918
+// 私有区间)。公网直连时转发头一律不采信。
+func isTrustedProxyIP(ipStr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	// IPv6 ULA fc00::/7(IsPrivate 已覆盖)之外,链路本地 fe80::/10 也是
+	// 容器间直连的常见形态。
+	if ip.IsLinkLocalUnicast() {
+		return true
+	}
+	return false
 }

@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -173,9 +174,9 @@ func (s *musicServer) routes() *http.ServeMux {
 	// 与 media_server(/health 与 /api/health 双注册)对齐,公网排障可直接
 	// curl https://<域名>/api/music/health 拿到版本号。
 	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /api/providers", s.requireRateLimit(s.handleProviders))
-	mux.HandleFunc("GET /api/songs", s.requireRateLimit(s.handleSongs))
-	mux.HandleFunc("GET /api/stream/{id}", s.requireRateLimit(s.handleStream))
+	mux.HandleFunc("GET /api/providers", s.requireAppToken(s.requireRateLimit(s.handleProviders)))
+	mux.HandleFunc("GET /api/songs", s.requireAppToken(s.requireRateLimit(s.handleSongs)))
+	mux.HandleFunc("GET /api/stream/{id}", s.requireAppToken(s.requireRateLimit(s.handleStream)))
 	return mux
 }
 
@@ -186,6 +187,25 @@ func (s *musicServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `{"status":"ok","version":%q}`+"\n", version)
+}
+
+// requireAppToken 可选的应用层鉴权:配置 MUSIC_SERVER_APP_API_TOKEN 后,
+// 业务端点必须携带匹配的 X-App-Token 头(与 media_server 的凭证端点同构)。
+// 鉴权先于限流——无效请求不消耗限流配额,不污染限流表。token 为空(默认)
+// 时不启用,保持既有行为:该服务历史上完全依赖边缘 CF mTLS,此中间件是
+// 边缘误配或内网横向移动时的兜底,而不是替代。
+func (s *musicServer) requireAppToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.config.AppToken == "" {
+			next(w, r)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-App-Token")), []byte(s.config.AppToken)) != 1 {
+			writeError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // requireRateLimit 对业务端点统一施加 per-IP 限流。

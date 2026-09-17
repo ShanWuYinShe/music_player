@@ -32,4 +32,12 @@ GET /api/music/songs?q=&limit=    # 列表/搜索(q 非空时聚合网络源结�
 GET /api/music/stream/<id>        # 音频流(支持 Range;网络源为服务端代理)
 ```
 
+## 鉴权（可选）
+
+默认不鉴权（依赖边缘 Cloudflare mTLS）。设置 `MUSIC_SERVER_APP_API_TOKEN`
+后，全部业务端点要求 `X-App-Token` 头（常量时间比较；`/health` 不需要），
+作为边缘误配或内网横向移动时的应用层兜底。限流的客户端 IP 解析自带受信
+代理校验：`X-Real-IP`/`X-Forwarded-For` 只在直连方为内网/回环地址时采信，
+公网直连伪造头无法绕过 per-IP 限流。
+
 完整字段与运维说明见 [AGENTS.md](AGENTS.md)。

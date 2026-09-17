@@ -22,6 +22,10 @@ type AppConfig struct {
 	// NeteaseCookieFile 可选:cookie 文件路径(管理面板扫码登录写入),
 	// 热加载,优先于 NeteaseCookie。
 	NeteaseCookieFile string
+	// AppToken 可选:配置后全部业务端点要求 X-App-Token 头(常量时间比较),
+	// 与 media_server 的 MEDIA_SERVER_APP_API_TOKEN 同构。空 = 不鉴权,
+	// 保持既有行为(依赖边缘 CF mTLS);设置后作为边缘误配/内网横向的兜底。
+	AppToken string
 }
 
 // Addr 返回监听地址。
@@ -39,6 +43,7 @@ func loadAppConfig() (AppConfig, error) {
 		NeteaseAPIBase:     strings.TrimRight(getEnv("NETEASE_API_BASE", ""), "/"),
 		NeteaseCookie:      getEnv("NETEASE_MUSIC_COOKIE", ""),
 		NeteaseCookieFile:  getEnv("NETEASE_COOKIE_FILE", ""),
+		AppToken:           strings.TrimSpace(getEnv("MUSIC_SERVER_APP_API_TOKEN", "")),
 	}
 	if config.Port == "" {
 		return AppConfig{}, errors.New("PORT is required")
