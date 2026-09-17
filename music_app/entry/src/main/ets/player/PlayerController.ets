@@ -366,6 +366,15 @@ export class PlayerController {
     }
   }
 
+  /** 相对跳转（秒）：耳机长按快进/快退入口；秒数缺省或非法兜底 15 秒，
+   * 终点夹取在 [0, duration] 内（seek 自身对未 prepared 无操作） */
+  seekBy(offsetSec?: number): void {
+    const offset = offsetSec !== undefined && offsetSec > 0 ? offsetSec : 15;
+    const limit = this.duration > 0 ? this.duration : 0;
+    const target = Math.min(Math.max(this.currentTime + offset * 1000, 0), limit);
+    this.seek(Math.floor(target));
+  }
+
   /** 设置音量（0~1），对后续曲目同样生效（播放页依赖此 notify 刷新音量条） */
   setVolume(value: number): void {
     const clamped = Math.min(1, Math.max(0, value));
@@ -626,6 +635,9 @@ export class PlayerController {
     this.failureGen = gen;
     this.errorStreak += 1;
     this.isPlaying = false;
+    // 会话侧同步暂停态：失败可能发生在 playing 之后（如播放中网络中断），
+    // 漏推会让实况窗/锁屏停留"播放中"却无声
+    this.session.updatePlaybackState(false, this.currentTime, 1.0);
     // 停播必须广播：熔断分支不再经过切歌通知，漏推会让卡片停留
     // "播放中"图标与冻结进度（自动跳过分支由后续切歌通知覆盖，此通知冗余无害）
     this.notifyState('playing');
@@ -853,5 +865,13 @@ class PlayerCommandHandlers implements SessionHandlers {
 
   onSeek(positionMs: number): void {
     this.controller.seek(positionMs);
+  }
+
+  onFastForward(time?: number): void {
+    this.controller.seekBy(time);
+  }
+
+  onRewind(time?: number): void {
+    this.controller.seekBy(time === undefined ? undefined : -time);
   }
 }

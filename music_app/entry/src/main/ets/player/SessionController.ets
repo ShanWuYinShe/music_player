@@ -30,6 +30,10 @@ export class SessionController {
       this.session.on('playNext', () => handlers.onNext());
       this.session.on('playPrevious', () => handlers.onPrevious());
       this.session.on('seek', (time: number) => handlers.onSeek(time));
+      // 耳机长按快进/快退手势（无线耳机的 AVRCP 长按映射为此命令），
+      // 不注册则按键被系统丢弃
+      this.session.on('fastForward', (time?: number) => handlers.onFastForward(time));
+      this.session.on('rewind', (time?: number) => handlers.onRewind(time));
       await this.session.activate();
       hilog.info(DOMAIN, TAG, 'AVSession activated');
     } catch (err) {
@@ -38,7 +42,10 @@ export class SessionController {
   }
 
   /** 通知媒体中心当前曲目元数据；本地曲目带封面（mediaImage 支持
-   * 本地路径，锁屏/通知栏展示专辑封面），在线曲目无封面文件则省略 */
+   * 本地路径，锁屏/通知栏展示专辑封面），在线曲目无封面文件则省略。
+   * 可选字段必须整键省略：系统参数解析按「键存在即校验类型」处理，
+   * 键存在但值为 undefined 时整条元数据被拒（真机 API 24 返回 401，
+   * 元数据丢失会导致实况窗不显示、耳机按键路由到其他应用） */
   async updateMetadata(song: SongRecord): Promise<void> {
     if (!this.session) {
       return;
@@ -47,11 +54,17 @@ export class SessionController {
       const metadata: avSession.AVMetadata = {
         assetId: song.id,
         title: song.title,
-        artist: song.artist,
-        album: song.album !== '' ? song.album : undefined,
-        duration: song.duration > 0 ? song.duration : undefined,
-        mediaImage: song.coverPath !== '' ? song.coverPath : undefined
+        artist: song.artist
       };
+      if (song.album !== '') {
+        metadata.album = song.album;
+      }
+      if (song.duration > 0) {
+        metadata.duration = song.duration;
+      }
+      if (song.coverPath !== '') {
+        metadata.mediaImage = song.coverPath;
+      }
       await this.session.setAVMetadata(metadata);
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'setAVMetadata failed: %{public}s', JSON.stringify(err));
@@ -80,9 +93,11 @@ export class SessionController {
     }
   }
 
-  /** 开始播放时申请音频后台长驻任务 */
+  /** 开始播放时申请音频后台长驻任务。系统在焦点打断等场景会自行取消
+   * 长驻任务（官方要求重启播放时重新申请），内存标志可能与实际不符，
+   * 因此每次播放都实际申请：申请成功置标志，失败清标志以便下次重试 */
   async startBackground(): Promise<void> {
-    if (this.runningInBackground || !this.context) {
+    if (!this.context) {
       return;
     }
     try {
@@ -102,18 +117,20 @@ export class SessionController {
       this.runningInBackground = true;
       hilog.info(DOMAIN, TAG, 'background audio task started');
     } catch (err) {
+      this.runningInBackground = false;
       hilog.error(DOMAIN, TAG, 'startBackgroundRunning failed: %{public}s', JSON.stringify(err));
     }
   }
 
-  /** 停止播放时结束长驻任务 */
+  /** 停止播放时结束长驻任务；无论成功与否标志都归位，避免陈旧标志
+   * 挡住后续申请 */
   async stopBackground(): Promise<void> {
     if (!this.runningInBackground || !this.context) {
       return;
     }
+    this.runningInBackground = false;
     try {
       await backgroundTaskManager.stopBackgroundRunning(this.context);
-      this.runningInBackground = false;
       hilog.info(DOMAIN, TAG, 'background audio task stopped');
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'stopBackgroundRunning failed: %{public}s', JSON.stringify(err));
@@ -144,4 +161,8 @@ export interface SessionHandlers {
   onNext(): void;
   onPrevious(): void;
   onSeek(positionMs: number): void;
+  /** 耳机/播控快进；time 为控制器给定的秒数，缺省或非法时由实现方兜底 */
+  onFastForward(time?: number): void;
+  /** 耳机/播控快退；time 语义同上 */
+  onRewind(time?: number): void;
 }
