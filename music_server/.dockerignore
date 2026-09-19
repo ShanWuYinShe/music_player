@@ -1,0 +1,5 @@
+# 构建只需要 go.mod 与非测试 .go 源文件
+*_test.go
+*.md
+.dockerignore
+Dockerfile

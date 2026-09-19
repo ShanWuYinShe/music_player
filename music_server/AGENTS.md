@@ -73,6 +73,7 @@ go run -C music_server . -library-review
 | `NETEASE_API_BASE` | (空=禁用) | netease_api 上游地址(compose 内 `http://netease_api:3000`) |
 | `NETEASE_MUSIC_COOKIE` | (空) | 可选:网易账号 cookie 初值(文件不存在时生效) |
 | `NETEASE_COOKIE_FILE` | (空) | 可选:cookie 文件路径(扫码登录写入,热加载优先) |
+| `MUSIC_SERVER_APP_API_TOKEN` | (空=不鉴权) | 可选:配置后全部业务端点要求 `X-App-Token` 头(与 media_server 的 `MEDIA_SERVER_APP_API_TOKEN` 同构),作为边缘误配/内网横向的兜底 |
 
 ## 部署
 

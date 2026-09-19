@@ -87,6 +87,7 @@ $HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
 **一键签名构建+安装**（推荐，签名有效期内无需打开 IDE）：
 
 ```bash
+# 以下命令均须在仓库根（music_player/）执行，脚本按自身位置解析仓库根
 tools/auto_sign.sh          # 校验签名材料并构建 signed HAP
 tools/auto_sign.sh install  # 校验 + 构建 + 安装 + 启动到已连接设备
 ```
@@ -107,5 +108,5 @@ HarmonyOS（API 24）已移除 `READ_MEDIA_AUDIO` 权限，应用无法静默扫
 
 ## 后续计划
 
-- 在线源升级：服务端关键词搜索（`/songs?q=`）、在线歌单、喜欢/最近跨源聚合
+- 在线源升级：在线歌单、喜欢/最近跨源聚合（服务端关键词搜索 `/songs?q=` 已实现）
 - 歌词显示、桌面卡片、自建歌单
