@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -189,6 +190,71 @@ func TestRateLimit(t *testing.T) {
 	handler(rec, httptest.NewRequest("GET", "/api/providers", nil))
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("expect 429, got %d", rec.Code)
+	}
+}
+
+// health 端点走完整 mux:/health 与 /api/health 双注册均返回 200、JSON
+// Content-Type 与 {"status":"ok","version":...} 结构;version 是构建期注入
+// 的包级变量,测试内临时改写以锁定结构,退出时还原(包内测试串行执行,无竞争)。
+func TestHandleHealthRoutes(t *testing.T) {
+	server := newTestServer(t, mkLibrary(t))
+
+	old := version
+	version = "v0.0.0-test"
+	defer func() { version = old }()
+
+	for _, path := range []string{"/health", "/api/health"} {
+		rec := httptest.NewRecorder()
+		server.routes().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status %d", path, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
+			t.Fatalf("%s content-type %q", path, ct)
+		}
+		var resp struct {
+			Status  string `json:"status"`
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s body %q: %v", path, rec.Body.String(), err)
+		}
+		if resp.Status != "ok" || resp.Version != "v0.0.0-test" {
+			t.Fatalf("%s body mismatch: %+v", path, resp)
+		}
+	}
+}
+
+// 并发快照冒烟:多协程同时 snapshot 命中已扫描缓存路径(RLock 读索引),
+// 交给 -race 检测锁正确性。
+func TestSnapshotConcurrent(t *testing.T) {
+	server := newTestServer(t, mkLibrary(t))
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := server.snapshot(); len(got) != 4 {
+				t.Errorf("expect 4 songs, got %d", len(got))
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// 曲库目录缺失:首次访问同步扫描失败,snapshot 返回空且推进 scannedAt
+// (冷却一个 TTL 再试),避免失败风暴。
+func TestSnapshotMissingLibraryCooldown(t *testing.T) {
+	server := &musicServer{
+		config:  AppConfig{LibraryDir: filepath.Join(t.TempDir(), "missing")},
+		limiter: newIPWindowLimiter(1000, time.Minute),
+	}
+	if got := server.snapshot(); len(got) != 0 {
+		t.Fatalf("expect empty library on failed scan, got %+v", got)
+	}
+	// 此时无后台协程(过期分支未进入),直读字段无竞争。
+	if server.scannedAt.IsZero() {
+		t.Fatal("expect scannedAt advanced after failed scan (cooldown)")
 	}
 }
 
