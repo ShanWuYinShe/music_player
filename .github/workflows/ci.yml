@@ -37,7 +37,9 @@ jobs:
         run: go build -o /dev/null .
         working-directory: music_server
       - name: go test
-        run: go test -count=1 ./...
+        # -race 检测数据竞争(限流表/曲库索引均有并发读写,见 snapshot 与
+        # ipWindowLimiter);race 检测器在 runner 上开箱可用,无需额外依赖。
+        run: go test -race -count=1 ./...
         working-directory: music_server
 
   shader-playground:
