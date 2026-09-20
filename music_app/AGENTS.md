@@ -7,7 +7,7 @@
 ## 架构事实
 
 - 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力
-- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 6.1.1（API 24），模拟器镜像同为 API 24；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）
+- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 26.0.0（API 26）；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）
 - **`module.json5` 必须含 `"pages": "$profile:main_pages"`**：缺失时构建不报错，但编译产物 module.json 无路由表，运行时 `loadContent` 返回 401 白屏（已踩坑）
 - 播放内核 `AVPlayer`（每次切歌重建实例，靠代际号 `generation` 废弃旧实例回调）：
   - **状态迁移是异步事件**——`url` 赋值后须在 `on('stateChange')` 收到 `initialized` 才能调 `prepare()`，收到 `prepared` 才能调 `play()`；同步连调会 5400102
@@ -107,7 +107,7 @@
 ### 源码书写与构建
 
 - **shader 源码在 `entry/src/main/cpp/shaders/`**（按 GLSL ES 1.00 书写：`varying` / `gl_FragColor` / `texture2D`，uniform 每行一个声明）。
-- CMake 构建期经 `tools/gen_shader_header.py` 转成 GLES3 头文件 `shader_src.h`（生成到构建目录、不进源码树；注入头 15/4/5 行，编译报错行号减去它即源文件行号）。
+- CMake 构建期经 `entry/src/main/cpp/tools/gen_shader_header.py` 转成 GLES3 头文件 `shader_src.h`（生成到构建目录、不进源码树；注入头 15/4/5 行，编译报错行号减去它即源文件行号）。
 
 ### 场景注册（三处同步）
 
@@ -116,7 +116,7 @@
 
 ### 调试器同源
 
-- 本地调试器 `shader_playground/`（Vite+TS，`bun run dev` → 8791）读同一份磁盘 GLSL，用 `src/glslPatch.ts` 做等价转换跑 WebGL2，**预览与端侧永远同源**。
+- 本地调试器 `shader_playground/`（仓库根下，Vite+TS，pnpm-lock.yaml 唯一权威，`pnpm dev` → 8791）读同一份磁盘 GLSL，用 `src/glslPatch.ts` 做等价转换跑 WebGL2，**预览与端侧永远同源**。
 
 ### 防闪烁规范（沿用至今）
 
@@ -225,11 +225,11 @@
 构建/测试/lint/模拟器命令见 README.md「构建与运行」；要点：
 
 - hvigor/ohpm/node 均用 DevEco 内置：`/Applications/DevEco-Studio.app/Contents/tools/...`
-- hvigorw 打包需 `JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home`（仅 hvigor 命令需要）且 `DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk`（本机 6.1.1）
+- hvigorw 打包需 `JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home`（仅 hvigor 命令需要）且 `DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk`（本机 26.0.0）
 - 模拟器 CLI：`/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator -list|-start <name>|-stop <name>`
 - hdc：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`
 - 模拟器可安装未签名 HAP，但运行时页面白屏；已配置 DevEco 自动签名（build-profile.json5 的 signingConfigs，密码为本机加密串，仅本机可用），命令行构建自动产出 `entry-default-signed.hap`
-- **一键签名构建安装**：`tools/auto_sign.sh`（仓库根下）——校验签名材料存在/有效期/设备绑定后，命令行构建 signed HAP，`install` 参数再安装+启动到已连接设备；签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名生成、有效期一年，材料有效期内全程无需打开 IDE；材料缺失/过期/新设备未绑定时脚本会打印指引，只需去 IDE 点一次「Automatically generate signature」重新生成
+- **一键签名构建安装**：`tools/auto_sign.sh`（仓库根下）——校验签名材料存在/有效期/设备绑定后，命令行构建 signed HAP，`install` 参数再安装+启动到已连接设备；签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名生成、有效期一年，材料有效期内全程无需打开 IDE；材料缺失/过期/新设备未绑定时脚本会打印指引，只需去 IDE 点一次「Automatically generate signature」重新生成（2026-09 核实：本机这套材料已缺失，signingConfigs 引用的三个文件均不存在，首次签名构建前需按指引重新生成一次）
 - UI 自动化验证：`hdc shell uitest dumpLayout` 取 UI 树（应用 root 在 children[0]，检查 children 是否为空判断页面是否渲染）、`hdc shell uinput -T -c <x> <y>` 模拟点击、`snapshot_display` 截图
 
 ## 约束
