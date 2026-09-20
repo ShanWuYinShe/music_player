@@ -1,5 +1,7 @@
 # music_player（在线音乐：客户端 + 服务端）
 
+通用约束（Git 规范、Commit 格式、验证流程、工具链偏好等）以全局 `~/AGENTS.md` 为准，本文件只做项目特有补充，不得放宽或违背全局约束。
+
 本仓库同时包含 HarmonyOS 客户端 `music_app/` 与 Go 服务端 `music_server/`，
 组织方式与 media_center 一致；部署基础设施在 workwork 仓库（本仓库作为其
 submodule，music_server 由 workwork 的 docker-compose 构建）。
