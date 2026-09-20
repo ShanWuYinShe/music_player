@@ -14,6 +14,7 @@
 #   tools/auto_sign.sh            # 默认：校验+构建（不安装）
 #   tools/auto_sign.sh install    # 校验+构建+安装到已连接设备
 #   tools/auto_sign.sh -h         # 帮助
+# 工具链路径支持同名环境变量覆盖：DEVECO_SDK_HOME / HDC / JAVA_HOME / NODE_BIN / HVIGOR_BIN
 
 set -euo pipefail
 
@@ -21,11 +22,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$ROOT/music_app"
 BP="$APP_DIR/build-profile.json5"
 CONFIG_DIR="$HOME/.ohos/config"
-HDC="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc"
-DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
-JAVA_HOME="/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home"
-NODE_BIN="/Applications/DevEco-Studio.app/Contents/tools/node/bin"
-HVIGOR_BIN="/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin"
+# 工具链路径默认取本机 DevEco Studio 安装位置,均可被同名环境变量覆盖;
+# hdc 位于 SDK 目录下,DEVECO_SDK_HOME 覆盖后自动跟随(亦可单独用 HDC 覆盖)。
+DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
+HDC="${HDC:-$DEVECO_SDK_HOME/default/openharmony/toolchains/hdc}"
+JAVA_HOME="${JAVA_HOME:-/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home}"
+NODE_BIN="${NODE_BIN:-/Applications/DevEco-Studio.app/Contents/tools/node/bin}"
+HVIGOR_BIN="${HVIGOR_BIN:-/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin}"
 SIGNED_HAP="$APP_DIR/entry/build/default/outputs/default/entry-default-signed.hap"
 
 DO_INSTALL=0

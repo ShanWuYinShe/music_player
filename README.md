@@ -5,7 +5,7 @@
 - `music_app`：HarmonyOS 音乐播放器客户端（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖。支持本地曲库导入（系统音频选择器 + ID3v2 解析）、完整播放控制、后台播放与系统媒体中心接入；支持「本地 / 在线」源切换，默认对接线上服务，在线搜索与流式播放 `music_server` 曲库。
 - `music_server`：Go 实现的在线音乐服务，聚合本地曲库目录（扫描、搜索、Range 流式播放）与网易云网络源（经私有部署的 NeteaseCloudMusicApi Enhanced 上游聚合搜索、服务端代理播放）。纯标准库实现、零第三方 Go 依赖；本地曲库音频经管理面板上传或手动投放，网络源上游失败自动降级为仅本地。
 
-客户端默认使用线上服务 `https://yinghuoren.com/api/music`（设置页可改，留空即用默认），外部统一经 nginx 以 `/api/music/` 前缀访问（去前缀转发）。代理 / 部署基础设施（nginx、xray、admin 面板等）在 [workwork](https://github.com/ShanWuYinShe/workwork) 仓库，并通过 git submodule 引用本仓库来构建 `music_server`。
+客户端默认使用线上服务 `https://yinghuoren.com/api/music`（设置页可改，留空即用默认），外部统一经 nginx 以 `/api/music/` 前缀访问（去前缀转发）。代理 / 部署基础设施（nginx、xray、admin 面板等）在 [workwork](https://github.com/ShanWuYinShe/workwork) 仓库，并通过 git submodule 引用本仓库来构建 `music_server`。服务端发布前须在仓库打 git tag（SemVer，如 v1.0.0）：镜像版本 GIT_VERSION 取 `git describe`，无 tag 时版本号退化为 commit/dev。
 
 ## 目录结构
 

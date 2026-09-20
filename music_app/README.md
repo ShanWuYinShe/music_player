@@ -100,6 +100,8 @@ signature"，需登录华为账号），debug profile 有效期一年。有效�
 > 签名材料含私钥且绑定设备 UDID，**不入库**（build-profile.json5 的 material 为
 > 本机绝对路径，DevEco 每次重新生成会自动改写该段）。
 
+> 当前签名 HAP 仅本地安装（`hdc install` 到已连接的模拟器/真机），未建立应用内更新通道。
+
 ## 音乐导入说明
 
 HarmonyOS（API 24）已移除 `READ_MEDIA_AUDIO` 权限，应用无法静默扫描公共媒体库。

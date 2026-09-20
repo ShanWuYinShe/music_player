@@ -85,4 +85,7 @@ music_server 作为其 submodule 被构建。本地曲库音频经管理面板�
 页上传(写宿主机 workwork 仓库根 `.wework/music-library/`,compose 挂载),或手动
 投放;发布构建在 workwork 仓库执行 `make build music_server && make up
 music_server`(直接 `docker compose build` 不经 make 时镜像版本烙为 "dev",
-仅限本地验证,不得用于发布)。新增音频无需重启服务,等待扫描 TTL 即可。
+仅限本地验证,不得用于发布)。发布前必须打 git tag(SemVer,如 v1.0.0):
+Dockerfile 的 GIT_VERSION 由编排层 `git describe` 取得并烙进二进制(/health
+与启动日志可见),无 tag 时版本号退化为 commit/dev。新增音频无需重启服务,
+等待扫描 TTL 即可。
