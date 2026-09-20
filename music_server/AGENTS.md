@@ -50,6 +50,7 @@ go run -C music_server . -library-review
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | healthcheck,无限流 |
+| `GET /api/health` | `/health` 的别名,公网经 `/api/music/health` 排障可直接拿版本号,无限流 |
 | `GET /api/providers` | 源列表(library + 启用的 netease);netease 源带 `loggedIn`(是否已配置账号 cookie) |
 | `GET /api/songs?q=&limit=` | q 空:本地曲库全量 + 网易「新歌速递」推荐追加(在线页开箱即有内容);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
 | `GET /api/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
@@ -60,7 +61,9 @@ go run -C music_server . -library-review
 - 本地曲库 id 不暴露磁盘路径,无路径穿越面;网络源直链域名仅允许 http(s)
 - 曲库索引 60s TTL 懒刷新,文件增删最迟一个 TTL 生效
 - per-IP 限流(默认 120 req/min,env `RATE_LIMIT_PER_MINUTE`),取 IP 顺序与
-  media_server 一致(X-Real-IP → X-Forwarded-For 首段 → RemoteAddr 兜底)
+  media_server 一致(X-Real-IP → X-Forwarded-For 首段 → RemoteAddr 兜底);
+  转发头仅当直连方为内网/回环(即 nginx 所在 Docker bridge)时才采信,
+  防止公网直连时伪造 `X-Real-IP` 旋转限流键
 
 ## 环境变量
 
@@ -80,5 +83,6 @@ go run -C music_server . -library-review
 部署编排(nginx、netease_api、compose 等)在 workwork 仓库,本仓库
 music_server 作为其 submodule 被构建。本地曲库音频经管理面板「音乐曲库」
 页上传(写宿主机 workwork 仓库根 `.wework/music-library/`,compose 挂载),或手动
-投放;`docker compose build music_server && docker compose up -d --no-deps
-music_server`。新增音频无需重启服务,等待扫描 TTL 即可。
+投放;发布构建在 workwork 仓库执行 `make build music_server && make up
+music_server`(直接 `docker compose build` 不经 make 时镜像版本烙为 "dev",
+仅限本地验证,不得用于发布)。新增音频无需重启服务,等待扫描 TTL 即可。
