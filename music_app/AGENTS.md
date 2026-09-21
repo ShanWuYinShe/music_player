@@ -2,223 +2,22 @@
 
 本目录是 HarmonyOS 应用工程（ArkTS + ArkUI，Stage 模型），仓库级结构与服务端
 说明见上级 [AGENTS.md](../AGENTS.md)。以下命令均在本目录（music_app/）内执行。
-额外约定如下。
 
-## 架构事实
+本工程约定按主题拆分为 skill（见文末索引），**改对应模块前先加载对应 skill**；
+本文件只保留每次都需要的要点与红线，避免撑爆工作区指令预算（超预算会导致整份文件被丢弃）。
 
-- 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力
-- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 26.0.0（API 26）；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）
-- **`module.json5` 必须含 `"pages": "$profile:main_pages"`**：缺失时构建不报错，但编译产物 module.json 无路由表，运行时 `loadContent` 返回 401 白屏（已踩坑）
-- 播放内核 `AVPlayer`（每次切歌重建实例，靠代际号 `generation` 废弃旧实例回调）：
-  - **状态迁移是异步事件**——`url` 赋值后须在 `on('stateChange')` 收到 `initialized` 才能调 `prepare()`，收到 `prepared` 才能调 `play()`；同步连调会 5400102
-  - 本地文件用 `player.url = 'fd://<fd>'`（`fs.openSync` 的 fd，播放期间保持打开，release 时关闭）；`file://` 路径不支持；**在线曲目 `player.url` 直接赋 http(s) 流地址**（`fileName` 以 http 开头即网络分支，`module.json5` 需声明 `ohos.permission.INTERNET`，网络请求用 `@ohos.net.http`）
-- 媒体会话 `@ohos.multimedia.avsession`：**命令监听必须逐个注册**（`on('play')`/`on('pause')`…，无统一 `'command'` 事件）；`PlaybackPosition` 字段为 `elapsedTime`+`updateTime`；**AVMetadata 可选字段必须整键省略**（真机 API 24 实测：键存在但值为 `undefined` 时系统 NAPI 按「键存在即校验类型」拒绝整条元数据，`setAVMetadata` 返回 401——元数据缺失则进不了系统有效会话列表，实况窗不显示、耳机按键路由到其他应用，`SessionController.updateMetadata` 已按此构造）；播放失败路径须回写会话暂停态，长驻任务在系统焦点打断后会被自行取消、每次 `playing` 都要实际重新申请（不能信内存标志）
-- API 24 已移除 `READ_MEDIA_AUDIO` 权限、`AVMetadataHelper`、`fileAccess`：本地音乐只能走 `AudioViewPicker` 导入（选项字段为 `maxSelectNumber`，非 maxNumber）；mp3 元数据由 `library/Id3Parser.ets` 自解析（ID3v2.3/2.4）；时长由 AVPlayer prepared 后回填；**导入 URI 两坑**（已在 MusicLibrary 防御）：① AudioViewPicker 对 Download 等目录返回 percent-encoded URI（`file://docs/.../%E5%91%A8...mp3`），`fs.statSync` 可读而 `fs.copyFile` 按字面解析报 13900002——须 decodeURIComponent 双形态尝试；② `fs.copyFile` 对 `file://docs/` 来源整体不支持（stat 可过、copy 恒 ENOENT），回退 `openSync`+分块 read/write 拷贝；导入 toast 按 added/dup/failed 分类提示，added=0 不再误报"已在曲库"
-- 音乐可视化：平台无音频频谱 API（已查证 API 24），频段能量由 `common/VisualizerCore.ets` 纯函数合成（种子=曲目 id FNV-1a、多频正弦+beat 包络，LocalUnit 可测）。播放页为 **shader 管线**：XComponent(SURFACE, libraryname=entry) + `entry/src/main/cpp`（libentry.so, EGL/GLES3, 零第三方依赖）——vertex 仅画全屏三角形，fragment shader 逐像素解算全部视觉（运算量只与像素数相关、与形态复杂度无关）。源码规范、场景注册、性能架构、帧驱动与真机踩坑见下方「音乐可视化 shader 管线」专节。
-- UI 状态管理统一 V2 体系：`@ObservedV2`/`@Trace`（PlayerController）+ `@ComponentV2`/`@Param`/`@Local`；modelVersion 6.0.2 起 V2 组件**普通成员禁止父组件初始化**（回调用 `@Event`、入参用 `@Param`）；对象字面量必须对应 interface/class，回调集合用具名类实现；`@Trace` 数组元素字段变化不触发 UI，需整体替换数组引用
-- **真机 V2 渲染依赖大坑（Mate 60 Pro/API24 实测）**：全局单例 `appStore.player`（@ObservedV2）的 @Trace/@Computed 对 **if 分支条件与属性插值（fontColor/visibility 等）均不触发 UI 更新**，仅 Text 内容插值存活——表现为切歌后 mini bar 不出现、当前行高亮/EQ 不刷新、播放页歌名不跟随。**对策（现行架构）**：PlayerController 提供 `addStateListener/removeStateListener` 多播订阅（切歌/启停时 `notifyState()`），页面在 aboutToAppear 订阅并维护 **@Local 镜像**（Index 的 `mini: MiniInfo`、PlayerPage 的 `song`/`isPlaying`）驱动渲染；列表当前行高亮靠回调里 `songSource.reload` 强制重建 LazyForEach 项。**不要**在渲染层直接依赖 player 的响应式状态（进度时间等 Text 插值除外）
-- **UI 规范（HarmonyOS Design 对齐，2026-09 审查后确立）**：①触控热区 ≥40vp
-  （官方底线，推荐 46）——图标按钮用 padding 补足，固定高度 pill 用
-  `constraintSize({ minHeight })`；②纯图标可点元素必须 `accessibilityText`
-  （读屏），动态状态（播放/暂停、喜欢/取消）文案随状态变化；③固定高度容器
-  （搜索框/菜单行/pill）改 `constraintSize({ minHeight })`，系统大字体时随内容
-  撑高不截断；④重 IO（曲库索引全量落盘）走 taskpool `@Concurrent` 顶层函数，
-  主线程只做序列化，taskpool 失败回退同步写；⑤prepared 时长回填仅在
-  「原时长为 0（首次）」时才整体替换 songs 数组并广播刷新——时长已知曲目
-  整刷会让大曲库每次切歌全量重建列表；⑥`deviceTypes` 收敛为 phone（布局
-  未做 sm/md/lg 断点适配，声明 tablet/2in1 会构成审核风险，做一多适配前
-  勿加回）；⑦AVSession `mediaImage` 直接支持本地封面路径字符串（锁屏封面，
-  无需手动转 PixelMap）；⑧迷你条进度线经 `@Local` 镜像 + displaySync(4Hz)
-  帧驱动（**不能**直读 `player.currentTime` 做 `width()` 插值——真机上
-  `@Trace` 不驱动属性插值，线是死的），随 `onVisibleAreaChange` 与播放态
-  启停；**注意回调方法名不得叫 `onVisibleAreaChange`**（与组件内置属性重名
-  会与基类签名冲突、编译报错，与 `onDragStart` 同类坑），且该回调签名为
-  `(isExpanding: boolean, ratio: number)`（单值非数组）；
-  ⑨避让区高度入口是 `AppStore.readSafeArea()`，配置变更（旋转/折叠展开，
-  `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点；
-  ⑪首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」与「全部 N」
-  chip 冗余已裁撤，2026-09 用户决策）：首屏直接是源切换胶囊行（导入/设置
-  图标居行尾，顶部避让并入该行 padding `safeTopVp+8`）→ 系统 Search →
-  筛选行 → 列表；封面占位统一走 `components/CoverArt.ets`（无内嵌封面时
-  以**歌名首字**做大字排版占位：列表/迷你条浅色 token 板 `surface_alt`，
-  播放页纸带 `onStage` 变体恒暗 viz token 板；不做哈希派生渐变——
-  2026-09 用户决策「默认封面放歌名，不要哈希当颜色」——勿再手写
-  「灰块+音符」占位）；
-  ⑫本地/在线切换走 `Tabs`（`index` 单向受控 + `onChange` 进 `switchSource`，
-  点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证；
-  切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色；
-  TabContent 不挂 tabBar（`barHeight(0)` + `barOverlap` 压掉系统预留空栏，
-  否则顶部留 91vp 空隙，已实测）；⑬搜索框用系统 `Search`（受控 `value` + `onChange`/
-  `onSubmit`，清除键/键盘搜索键系统托管）；⑭迷你条为底部通栏（与页面同宽、
-  上缘发丝线分隔）+ `backgroundBlurStyle(COMPONENT_THICK)` 磨砂；
-  `BlurStyle` 无 `BehindWindow`，窗内列表透出用 COMPONENT 系列）；
-  **迷你条常驻不随曲目显隐**（2026-09 用户决策）：无播放曲目时显示占位
-  态（保留封面位与条高、标题「未在播放」、播放/下一首禁用），列表底部
-  常留 `MINI_BAR_HEIGHT`（62vp）避免最后一行被压住；
-  ⑮列表项为杂志目录行（无盒子无阴影：17vp 粗歌名直接排版 + 时长右对齐
-  如页码 + 行间发丝线；当前行 = 行首金色竖线 + 歌名变金 + EQ 跳动；
-  按压反馈用系统默认——`stateStyles` 对象字面量在 V2 组件触发
-  `TypeError: undefined is not callable` 闪退，真机日志定位，已踩坑，勿用）；
-  ⑯手势约定（2026-09 用户决策，每操作一条自然路径）：歌曲操作唯一入口
-  是长按菜单（左滑 `swipeAction` 已整链路移除；「喜欢」只在播放页 ♥）；
-  迷你条挂单一全向 PanGesture + 轨迹采样路径分类器（不拆互斥组——弧线
-  起始段是横向的会被横滑抢先认领）：折返**不等抬手**，笔画中早认（一次
-  触摸只触发一次，触发后锁定到抬手；直线横滑故意不等抬手——它是折返的
-  前半段，早认必误杀）：折返早认 = x 顶点（向一侧走出 45vp 后折回 25vp，
-  右顶点 `>` = 下一个源、左顶点 `<` = 上一个源，不要求标准形，纵向漂移
-  <50vp）；抬手兜底（折返跨度 ≥70vp + 折回量 ≥30vp + 纵向 ≥15vp；平直
-  横滑纵净移 <40vp、横净移 ≥40vp = 分类标签循环仅本地源；其余忽略）。
-  **已整链路移除（2026-09 用户决策）**：手势切源/切分类的 toast 提示
-  （结果由高亮直接可见）、迷你条纵拉「下拉悬停」（Reachability 整页
-  下沉 + 收起 pill + 首次教学 toast + 偏好键）——现有手势已覆盖单手
-  操作，不要恢复。
-- 播放页舞台双态**互斥**：封面模式（默认）以模糊放大的封面做氛围背景、`VisualizerView` 的 `active=false` 停帧 + visibility 隐藏（XComponent 不卸载，避免 EGL 重建黑屏坑），可视化模式才全屏渲染——不要恢复"封面浮于全速可视化之上"的旧设计；播放页手势对齐 Poweramp 官方 Player UI：封面与可视化区**左右滑动切歌**（封面是三格纸带 [上一首|当前|下一首]：邻居格常驻挂载（解码预热，拖动零首帧卡顿）、格间 24vp 空隙、窗口 clip 裁剪、整条只有 stripX 一次平移——成熟播放器 pager 模型；成歌松手**一次性完成"三格内容旋转一格（目标曲进中格）+ 位移反向补偿一格"**（同一帧互抵，屏幕像素一动不动），此后中格恒为目标曲——**落定不再有任何换内容动作**（旧版落定把中格从旧曲换成目标曲，正是"滑动完成瞬间文字闪一下"的根因）；吸附动画由 **onFinish** 驱动收敛，严禁按固定时长掐断弹簧（剩余路程瞬移肉眼可见）；未达阈值/曲目未变弹簧回中；空侧 rubber-band 阻尼封顶拖不动（表达"这边没有了"）；成歌判定在子组件——超 60vp 或 120ms 窗口甩速 ≥1vp/ms（≥20vp 快 flick），父组件只按方向切歌不再按阈值拦（甩动位移可不足阈值）；上一首格含 5 秒回曲首规则——超 5 秒右滑空侧）、舞台点击对称切换——**点按大封面切入可视化舞台、可视化舞台点画面回封面**（返回曲库只走左上箭头/系统侧滑——内容区点击不做导航，曾用 tap-on-cover 跳库，因轻扫切歌未达阈值被判成点击会误退回首页而废弃，用户决策 2026-09）；**XComponent(SURFACE) 原生表面区域收不到点击也不收手势**（挂在 XComponent、其父容器、透明点击层、TapGesture 全都无效，真机实测），可视化舞台的**点击回封面与左右滑动切歌都必须绑在前景内容层的舞台交互层上**（旧"点画面循环切风格"与"滑动切歌"在真机无响应的根因即此；交互层用 `layoutWeight(1)` 透明 Column 而非 Blank——Blank 对 PanGesture 命中不如实体容器可靠）；滑动与点击同层时必须自己区分：PanGesture 记录本次是否达阈值滑过（`vizSwipeMoved`），滑过则吞掉同一笔触尾随的 onClick，否则一滑就误判成点击跳回封面（用户报障现象）；切可视化风格走顶栏魔法棒菜单；
-- **在线源（`OnlineSource`）**：首页「本地/在线」源切换，`OnlineSource.fetchSongs(q)` 拉取 `/songs`（解析纯函数在 `source/OnlineApi.ets`，可 LocalUnit 单测）；在线搜索由 Index 防抖 600ms 触发，列表即服务端返回不做本地二次过滤；本地曲库时长由服务端解析容器元数据返回（durationMs），客户端 prepared 后仍会校准。**在线列表缓存（SWR）**：成功结果进 OnlineSource 内存缓存（按查询词键控，容量 8，来回切源秒开），默认视图（空查询）同时持久化 `filesDir/online_list_cache.json`（杀进程重开秒开）；进在线页先展示缓存（不再整页 loading），TTL 10 分钟内不发网络、过期静默刷新，下拉刷新/重复点在线标签/重试/改服务地址强制绕过缓存，换 baseUrl 缓存整体失效（纯函数 `isCacheFresh`/`serializeOnlineCache`/`parseOnlineCache` 在 OnlineApi.ets）；在线页同时拉 `/providers`（`fetchProviders`）获取网易云登录态（仅用于试听曲不进缓存与播放页「VIP 试听」标注的判定；服务端源状态不进客户端 UI），曲目 `vip` 字段驱动 VIP 徽标与播放页「VIP 试听」标注；播放失败（无版权/网络错误）由 `PlayerController.handlePlaybackFailure` 统一 toast + 自动跳下一首，连续 3 首失败熔断；服务地址设置页持久化，留空回落默认地址（契约见上级 AGENTS.md）。
-- 自适应深浅双主题（暖纸浅色 + Poweramp 深色）：`base/element/color.json`=浅色板
-  （page_bg #F7F4EE / surface #FFFFFF / accent #A8791F 深金），`dark/element/color.json`=
-  深色板（page_bg #121212 / surface #1D1C1A / accent #DBA84E 亮金），全部 UI 颜色经
-  `$r('app.color.*')` 引用由资源限定符自动切换，代码不得写死色值；卡片体系另有
-  `accent_soft`（当前行底）/`card_shadow`（卡片投影）/`accent_shadow`（当前行光晕）
-  三 token，两套板同步值；`viz_*` 四个舞台
-  token 两套板保持相同——播放页封面/可视化舞台恒定深底浅字（媒体播放页惯例）：
-  `applyImmersion` 只维护 `AppStore.stageImmersion` 标记（进入置位/退出清除），
-  `applyWindowChrome` 据此分流——舞台沉浸期间应用恒定深色舞台 chrome，其余时候
-  按当前模式自适应。window 兜底色与系统栏字色的唯一入口是
-  `AppStore.applyWindowChrome`（自适应分支经 `resourceManager.getColorSync` 按
-  当前模式解析），启动（EntryAbility）、系统配置变更
-  （`AppAbilityStage.onConfigurationUpdate`——UIAbility 无此回调，全局配置变更
-  只通知 AbilityStage）与播放页进出都会重应用；标记保证在播放页期间切系统
-  深浅时系统栏字色不会被自适应成深字压在深舞台上（不可见）。弹出菜单一律用原生
-  `Menu`/`MenuItem`/`MenuItemGroup` 组件（bindMenu/bindContextMenu 的 builder 内写
-  `Menu(){ MenuItem(...).onClick() }`）：磨砂材质、圆角、行高、字号、按压高亮、
-  分组分隔线全部系统托管，深浅色自动适配——**不要自绘菜单卡片**（实心底+描边+
-  重投影是 Android 风格，与系统割裂；`backgroundBlurStyle` 自绘玻璃的文字色错配
-  曾致浅色模式浅底浅字，已踩坑）；选中态勾选用 `symbolEndIcon: new
-  SymbolGlyphModifier($r('sys.symbol.checkmark'))`，分组标题用
-  `MenuItemGroup({ header: '字符串' })`；原生菜单无红色危险项语义，破坏性操作
-  （如从曲库删除）菜单项走 `AlertDialog` 二次确认（已按 surface 底+大圆角适配）。
-  `bindSheet`/`AlertDialog` 用实心自适应底色（surface）托管；accent 底上的前景
-  图标/文字固定用 `on_accent`，`paper` 只用于 ink 底；`TextInput` 必须显式设
-  fontColor/placeholderColor（默认色随系统主题，浅色模式下会在深色输入底上形成
-  深底深字不可见，已踩坑）
+## 架构要点（速记）
 
-## 音乐可视化 shader 管线
+- 零第三方运行时依赖（仅 devDependencies @ohos/hypium），全部使用系统能力。
+- `module.json5` 必须含 `"pages": "$profile:main_pages"`：缺失时构建不报错，但运行时 loadContent 返回 401 白屏（已踩坑）。
+- 播放内核 AVPlayer（每次切歌重建实例 + 代际号废弃旧回调）；媒体会话 AVSession。
+- 状态管理统一 V2 体系（@ObservedV2/@Trace + @ComponentV2/@Param/@Local）。
+- **真机渲染红线**：全局单例的 @Trace 对 if 分支条件与属性插值不触发 UI 更新，
+  渲染层必须走 `addStateListener/removeStateListener` 多播订阅 + @Local 镜像。
+- 播放页舞台双态互斥（封面模式 / 可视化模式），不要恢复旧设计。
+- 在线源 OnlineSource 走 SWR 缓存（默认视图持久化到 filesDir）。
 
-### 源码书写与构建
-
-- **shader 源码在 `entry/src/main/cpp/shaders/`**（按 GLSL ES 1.00 书写：`varying` / `gl_FragColor` / `texture2D`，uniform 每行一个声明）。
-- CMake 构建期经 `entry/src/main/cpp/tools/gen_shader_header.py` 转成 GLES3 头文件 `shader_src.h`（生成到构建目录、不进源码树；注入头 15/4/5 行，编译报错行号减去它即源文件行号）。
-
-### 场景注册（三处同步）
-
-- **手机端与 `shader_playground/` 当前都启用 `fractal.frag` / `pan.frag` / `aurora.frag` / `spectrum.frag` 四场景**，顺序由 `CMakeLists.txt` 的 `SHADER_SCENES`、`VisualizerCore.ets` 的 `VIZ_PRESET_NAMES` 与 playground `presets.ts` 共同定义，`PRESET_COUNT` 从名称清单派生。
-- 增删场景须同步这三处，`pipelineConsistency.test.ts` 会做跨端一致性检查。
-
-### 调试器同源
-
-- 本地调试器 `shader_playground/`（仓库根下，Vite+TS，pnpm-lock.yaml 唯一权威，`pnpm dev` → 8791）读同一份磁盘 GLSL，用 `src/glslPatch.ts` 做等价转换跑 WebGL2，**预览与端侧永远同源**。
-
-### 防闪烁规范（沿用至今）
-
-- 色相演化 ≤0.003/ms（~3 分钟一圈）；音频量（beat/bass/treble）只驱动亮度/尺寸，绝不进色相；饱和度适中；真硬阈值一律 smoothstep 软化。
-
-### 性能架构（pan v17 / aurora v15 起）
-
-- **pan 状态纹理**：每颗水珠状态是每帧常量，主 pass 前先以 20×4 小视口（`uStateMode=1`）用**同一份 pan.frag** 把状态写进 RGBA16F 纹理（依赖 `EXT_color_buffer_float`/`_half_float`，缺失时 C++ 在 #version 后插 `#define PAN_NO_STATE_TEX 1` 编译逐像素回退变体——状态计算抽成 `dropState()` 单一实现，两路径零分叉；状态纹理尺寸常量 `kPanStateTexW/H` 与 pan.frag 的 `DROPLET_COUNT/PAN_STATE_ROWS`、playground 的 `PAN_STATE_W/H` 三处一致，有测试锁定）。
-- **pan 锅外裁剪**：锅椭圆外像素按 `panMask/wallMask/outerMask` 掩模跳过 field/bg/水珠着色（约 70% 像素白算的根除）。
-- **aurora**：水面倒影只算最近主帘，软特征 fbm 用 common.glsl 的 `fbm3`。
-- **平滑切换**：风格变化启动 1.5s 交叉淡化（presetTrans 0→1 经 NAPI 第 8 参传入，shader 里场景增量乘 smoothstep(uTransition) 渐入，旧画面不清空、靠反馈层衰减余晖自然消散——基于上一画布的 crossfade）；切风格触发反馈纹理重建时先把旧帧 blit 拷贝到新尺寸（保留交叉淡化的旧画面）。
-- **按场景比例降采样**：内部降采样、上屏线性放大柔化（`visualizer.cpp` 的 `kPresetScale`：fractal/spectrum 0.5、pan 0.45、aurora 0.33，与 playground `presets.ts` 的 renderScale 逐项对齐、pipelineConsistency.test.ts 锁定；pan/aurora 逐像素成本高且形态柔软，更低比例视觉近无损）。
-
-### 帧驱动与体感输入
-
-- 帧驱动 displaySync(30fps)→NAPI `renderFrame(t,seed,playing,beat,bass,treble,presetLock,transition,tiltX,tiltY,spin,kick)`，**返回 bool**（是否真的绘制了——场景 program 由子线程共享 context 异步编译，未就绪时返回 false，ArkTS 侧据此显示"编译中占位"（恒暗底+柔光呼吸，首帧后 300ms 淡出），避免切到可视化时空屏）。
-- 绘帧间隔按场景取 `VisualizerCore` 的 `VIZ_FRAME_INTERVAL_MS`（默认 25ms；aurora 40ms=25fps——慢场景无感，真机 GPU 超载时同步 renderFrame 会阻塞 UI 线程，场景级降帧治本）。
-- beat/bass/treble 仅驱动局部元素亮度/尺寸，速度类恒定。
-- **uTilt**（设备姿态）：VisualizerView 订阅 ORIENTATION 传感器（免权限），gamma→x（左右横滚→水平）、beta→y（前后俯仰→垂直）经 VisualizerCore.normalizeTilt（±4° 死区、±40° 满量程）+低通传入，驱动全场景 uv 相机视差。
-- **uSpin**（滚转）：alpha 相对进入舞台时基准的差分经 wrapAngleDelta+normalizeSpin（±5° 死区、±60° 满量程）+低通，驱动全场景滚转（common.glsl 的 motionSpinKick，最大 ±20°）。
-- **uKick**（冲击）：LINEAR_ACCELEROMETER 去重力线加速度经 accelKickLevel（阈值 1.5m/s²、满量程 8m/s²）attack、逐帧指数 decay（600ms），需 `ohos.permission.ACCELEROMETER`，被拒降级为 0。
-- 三者只进几何/亮度，不进色相/速度；传感器不可用时保持 0 退化为无体感。
-
-### 真机踩坑（勿重蹈）
-
-- ① XComponent 回调须在 NAPI Init 经 `exports.__NATIVE_XCOMPONENT_OBJ__` 早期注册（onLoad 才注册 surface 已创建不回放）；**重进播放页时 XComponent 是新实例，early 注册的对象已失效、created 事件早于 onLoad 的 fallback 注册被丢——EGL 永不初始化（第二次进入必黑屏）**，已加 `OH_NativeXComponent_RegisterSurfaceShowCallback` 兜底（show 晚于 onLoad 注册触发、带 window，VizOnSurfaceShow 幂等补初始化）；destroy 后 `gTexW/gTexH` 必须清零，否则新 context 复用已失效纹理 id。
-- ② GLSL `#version 300 es` 须首行（由生成脚本注入，源文件不要写）。
-- ③ 过曝防御 0.86+各层≤0.15+半分辨率。
-- ④ EGLNativeWindowType 经 uintptr_t 中转。
-- ⑤ 节流 25ms<33.3ms(30fps)。
-- ⑥ 沉浸全局恒定全屏布局。
-- ⑦ 每个场景一个 GL program，uniform 位置在创建时缓存，不要每帧 glGetUniformLocation。
-
-## 桌面服务卡片（2x2 播放卡片）
-
-- 架构（`form/FormAbility.ets` + `form/pages/MusicCard.ets` + `common/FormStateFile.ets`）：
-  FormExtension 与主 UIAbility **不共享内存**，靠应用沙箱 filesDir 下两个 JSON 文件交接——
-  `form_state.json`（主进程经 `AppStore.syncFormState` 写入快照，与推送同节奏落盘）、
-  `form_ids.json`（卡片实例 id 由 `FormAbility.onAddForm` 从 want 的
-  `FormParam.IDENTITY_KEY` 登记、`onRemoveForm` 移除；**系统不提供第三方查询本应用
-  卡片 formId 的接口**，必须自己落盘记录）。
-- **进度刷新机制**：卡片无法本地走秒、只能靠主进程推送驱动重绘
-  （**真机踩坑**：TextTimer 虽官方标注 API 10 起支持卡片，但真机卡片上
-  `onTimer` 不触发，"卡片本地走秒"路线已验证不成立；`setInterval` 在
-  卡片页面同样不可用）。**现行双驱动**（`AppStore.syncFormState`）：
-  ① 状态变化（播控/切歌/seek/失败停止等）即时推送；② 播放中自驱
-  `setInterval`（`FORM_PROGRESS_PUSH_MS` 1s，节流窗口=定时器周期；用户
-  决策接受每秒推送/写盘的常驻成本）每秒推送——音频长时任务保活下后台
-  定时器可靠，不依赖真机后台会停报的 AVPlayer `timeUpdate`（timeUpdate
-  仅刷新插值锚点 `formTickBaseAt`，保证停报时快照位置仍准；启停/切歌
-  即重锚、位置夹在时长内）。推送载荷带 `anchorAt`（墙钟采样时刻），卡片
-  按「锚点+墙钟增量」推算显示位置，推送到达延迟/丢拍时显示仍准。
-  seek 是不连续跳变，`PlayerController.seek` 即时 `notifyState` 广播新
-  锚点并同步 AVSession 播放态，否则卡片/锁屏从旧锚点外推出错。
-  推送载荷必须经 `toCardPayload` 映射（快照键 `coverPath` → 卡片键
-  `cover`，直接推原始快照卡片收不到封面，已踩坑）；`FormAbility.buildCardData`
-  （加卡/系统拉起时的快照）同用该映射并含进度字段与锚点。
-  `updateEnabled: false`（无定时刷新配额消耗），刷新完全靠主动推送；
-  秒推节奏可用 `hilog | grep formPush` 核验。
-- 卡片按钮控制通道（踩坑史，最终方案 message + CommonEvent）：
-  ① call 型 `postCardAction` 在真机+模拟器均不送达（点击零反应、无
-  onNewWant 日志，原因未明），弃用；② router 型可用但会把应用拉到前台
-  （违背卡片免进应用的本意）；③ **最终：message 型发到 FormAbility
-  （`onFormEvent` 解析 `method`），经 `commonEventManager.publish` 转发
-  自定义公共事件 `CARD_ACTION_EVENT`，主进程 AppStore 订阅执行播放控制**
-  ——完全后台、不拉前台。主进程存活即响应（播放中/暂停都有后台长时任务
-  保活）；主进程被杀后点击静默无效（FormExtensionContext 无 startAbility
-  无法拉起，点卡片空白 router 进应用即恢复），已知限制。EntryAbility 的
-  `handleCardAction`（want.parameters.method）保留：兜底冷启动带参拉起。
-- 卡片内**无法引用应用主题资源**（`$r('app.color.*')` 不可用），配色写死对齐
-  `dark/element/color.json` 的 viz token；控制图标用自带 SVG（`ic_card_*.svg`），
-  勿用 `sys.media.*` 图标名（无法在本机 id_defined.json 核实存在性）。
-- form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
-  window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
-
-## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
-
-- **麦克风律动**（`common/MicSpectrum.ets` + `common/Fft.ets`）：设置页开关
-  （`appStore.setMicLive`）→ AtManager 请求 MICROPHONE（Stage 模型权限入口是
-  `abilityAccessCtrl.createAtManager().requestPermissionsFromUser`，
-  UIAbilityContext 上的同名方法是 FA 模型遗留不可用）→ AVAudioCapturer
-  16k/单声道/S16LE 采集（AudioStreamInfo 的 `encodingType` 必填
-  ENCODING_TYPE_RAW）→ 1024 点滑窗 FFT（`Fft.ets` 纯函数 LocalUnit 可测）
-  → beat 突增检测 + bass/treble EMA → 就地更新 levels 供 VisualizerView
-  帧循环拉取。采集器跟随舞台激活态启停（省电）；环境声无效（~3s 无能量）
-  或采集失败（模拟器无麦）自动回退 VisualizerCore 合成。外放才有效，
-  耳机场景收不到声是物理限制不是 bug。标定常数（GAIN/RATIO）集中在
-  MicSpectrum 顶部，真机校准在此调。
-- **2x4 桌面卡片**（`form/pages/MusicCardWide.ets`）：与 2x2 共用
-  FormAbility 与 form_state.json（含 positionMs/durationMs/progress/anchorAt）；
-  进度刷新机制见「桌面服务卡片」一节（状态变化即时推送 + 播放中每秒
-  自驱推送、墙钟锚点外推）。**两个卡片页面文件的
-  顶层 LocalStorage 变量不得同名**（同 ets 编译单元冲突，已踩坑）。
-- **分享歌曲卡片图**（PlayerPage 顶栏分享按钮 → bindSheet）：预览卡
-  `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件
-  onClick 内（临时授权，免申请受限的 WRITE_IMAGEVIDEO）→
-  photoAccessHelper.createAsset + image ImagePacker.packToFile 写入相册。
-  分享图标 `sys.symbol.arrow_up_and_rectangle_on_rectangle`（id_defined.json
-  已核实；`sys.symbol.share` 不存在）。
-- @Trace 跨单例镜像仍走 stateListener 管道：AppStore 设置项变更后调
-  `player.notifyPrefs()`（public 转发私有 notifyState('prefs')），各页面
-  在既有订阅回调里刷新 @Local 镜像（如 micOn）。
+> 以上每条的完整原因、踩坑记录与其余细则见 skill `music-app-platform-ui`。
 
 ## 本地命令
 
@@ -236,3 +35,13 @@
 
 - 系统资源引用（`sys.symbol.*`/`sys.color.*`）先在 `/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/id_defined.json` 中核实名称存在性再用
 - rawfile 演示曲目文件名约定 `demoXX_歌手 - 歌名.wav`，由 `MusicLibrary.fillFromFileName` 解析；重新生成见 git 历史（python3 合成脚本）
+
+## 主题索引（按需加载 skill）
+
+| skill | 何时加载 |
+|---|---|
+| `music-app-platform-ui` | 改 ArkTS 页面/组件、播放内核、媒体会话、主题与颜色资源、播放页手势与舞台、在线源与缓存、排查真机渲染不更新或白屏 |
+| `music-app-shader-pipeline` | 改 `entry/src/main/cpp/shaders` 下 GLSL、增删可视化场景、调帧驱动/displaySync、接入传感器体感、排查可视化黑屏/闪烁/掉帧、改 shader_playground |
+| `music-app-service-card` | 改 `form/` 下卡片页面或 FormAbility、卡片进度不刷新或按钮无响应、卡片配色与 form_config.json、麦克风律动、分享卡片图 |
+
+> 新增主题优先建 skill 并在此登记，不要继续往本文件堆长内容。
