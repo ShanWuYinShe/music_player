@@ -36,19 +36,25 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
   `(isExpanding: boolean, ratio: number)`（单值非数组）；
   ⑨避让区高度入口是 `AppStore.readSafeArea()`，配置变更（旋转/折叠展开，
   `AppAbilityStage.onConfigurationUpdate`）时会重读；⑩seek 后即时持久化断点；
-  ⑪首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」与「全部 N」
-  chip 冗余已裁撤，2026-09 用户决策）：首屏直接是源切换胶囊行（导入/设置
+  ⑪首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」chip 冗余已裁撤，
+  2026-09 用户决策）：首屏是一级签排印行（**曲库/喜欢/最近/在线 四签平铺**，
+  喜欢/最近为跨源一级视图不挂在本地签下——2026-09 用户决策；导入/设置
   图标居行尾，顶部避让并入该行 padding `safeTopVp+8`）→ 系统 Search →
-  筛选行 → 列表；封面占位统一走 `components/CoverArt.ets`（无内嵌封面时
+  列表头行（左「N 首」计数 + 右排序入口，在线签只显计数无排序）→ 列表；
+  封面占位统一走 `components/CoverArt.ets`（无内嵌封面时
   以**歌名首字**做大字排版占位：列表/迷你条浅色 token 板 `surface_alt`，
   播放页纸带 `onStage` 变体恒暗 viz token 板；不做哈希派生渐变——
   2026-09 用户决策「默认封面放歌名，不要哈希当颜色」——勿再手写
   「灰块+音符」占位）；
-  ⑫本地/在线切换走 `Tabs`（`index` 单向受控 + `onChange` 进 `switchSource`，
-  点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证；
-  切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色；
-  TabContent 不挂 tabBar（`barHeight(0)` + `barOverlap` 压掉系统预留空栏，
-  否则顶部留 91vp 空隙，已实测）；⑬搜索框用系统 `Search`（受控 `value` + `onChange`/
+  ⑫一级签切换走 `Tabs`（4 个 TabContent，`index` 单向受控 + `onChange` 进
+  `switchTab`，点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，
+  已查证；切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色
+  无图标；TabContent 不挂 tabBar（`barHeight(0)` + `barOverlap` 压掉系统预留
+  空栏，否则顶部留 91vp 空隙，已实测）。手势映射：迷你条折返 `>`/`<` =
+  曲库↔在线直达；平直横滑 = 曲库→喜欢→最近循环（在线不参与，需显式切换）。
+  喜欢/最近签进入时把播放队列替换为该视图跨源列表（`setOnlineQueue`），
+  连播/上一首下一首跟随所见；搜索不跳签——内容签内搜索即筛其子集，
+  在线签仍服务端搜索；⑬搜索框用系统 `Search`（受控 `value` + `onChange`/
   `onSubmit`，清除键/键盘搜索键系统托管）；⑭迷你条为底部通栏（与页面同宽、
   上缘发丝线分隔）+ `backgroundBlurStyle(COMPONENT_THICK)` 磨砂；
   `BlurStyle` 无 `BehindWindow`，窗内列表透出用 COMPONENT 系列）；
@@ -74,7 +80,7 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
   操作，不要恢复。
 
 - 播放页舞台双态**互斥**：封面模式（默认）以模糊放大的封面做氛围背景、`VisualizerView` 的 `active=false` 停帧 + visibility 隐藏（XComponent 不卸载，避免 EGL 重建黑屏坑），可视化模式才全屏渲染——不要恢复"封面浮于全速可视化之上"的旧设计；播放页手势对齐 Poweramp 官方 Player UI：封面与可视化区**左右滑动切歌**（封面是三格纸带 [上一首|当前|下一首]：邻居格常驻挂载（解码预热，拖动零首帧卡顿）、格间 24vp 空隙、窗口 clip 裁剪、整条只有 stripX 一次平移——成熟播放器 pager 模型；成歌松手**一次性完成"三格内容旋转一格（目标曲进中格）+ 位移反向补偿一格"**（同一帧互抵，屏幕像素一动不动），此后中格恒为目标曲——**落定不再有任何换内容动作**（旧版落定把中格从旧曲换成目标曲，正是"滑动完成瞬间文字闪一下"的根因）；吸附动画由 **onFinish** 驱动收敛，严禁按固定时长掐断弹簧（剩余路程瞬移肉眼可见）；未达阈值/曲目未变弹簧回中；空侧 rubber-band 阻尼封顶拖不动（表达"这边没有了"）；成歌判定在子组件——超 60vp 或 120ms 窗口甩速 ≥1vp/ms（≥20vp 快 flick），父组件只按方向切歌不再按阈值拦（甩动位移可不足阈值）；上一首格含 5 秒回曲首规则——超 5 秒右滑空侧）、舞台点击对称切换——**点按大封面切入可视化舞台、可视化舞台点画面回封面**（返回曲库只走左上箭头/系统侧滑——内容区点击不做导航，曾用 tap-on-cover 跳库，因轻扫切歌未达阈值被判成点击会误退回首页而废弃，用户决策 2026-09）；**XComponent(SURFACE) 原生表面区域收不到点击也不收手势**（挂在 XComponent、其父容器、透明点击层、TapGesture 全都无效，真机实测），可视化舞台的**点击回封面与左右滑动切歌都必须绑在前景内容层的舞台交互层上**（旧"点画面循环切风格"与"滑动切歌"在真机无响应的根因即此；交互层用 `layoutWeight(1)` 透明 Column 而非 Blank——Blank 对 PanGesture 命中不如实体容器可靠）；滑动与点击同层时必须自己区分：PanGesture 记录本次是否达阈值滑过（`vizSwipeMoved`），滑过则吞掉同一笔触尾随的 onClick，否则一滑就误判成点击跳回封面（用户报障现象）；切可视化风格走顶栏魔法棒菜单；
-- **在线源（`OnlineSource`）**：首页「本地/在线」源切换，`OnlineSource.fetchSongs(q)` 拉取 `/songs`（解析纯函数在 `source/OnlineApi.ets`，可 LocalUnit 单测）；在线搜索由 Index 防抖 600ms 触发，列表即服务端返回不做本地二次过滤；本地曲库时长由服务端解析容器元数据返回（durationMs），客户端 prepared 后仍会校准。**在线列表缓存（SWR）**：成功结果进 OnlineSource 内存缓存（按查询词键控，容量 8，来回切源秒开），默认视图（空查询）同时持久化 `filesDir/online_list_cache.json`（杀进程重开秒开）；进在线页先展示缓存（不再整页 loading），TTL 10 分钟内不发网络、过期静默刷新，下拉刷新/重复点在线标签/重试/改服务地址强制绕过缓存，换 baseUrl 缓存整体失效（纯函数 `isCacheFresh`/`serializeOnlineCache`/`parseOnlineCache` 在 OnlineApi.ets）；在线页同时拉 `/providers`（`fetchProviders`）获取网易云登录态（仅用于试听曲不进缓存与播放页「VIP 试听」标注的判定；服务端源状态不进客户端 UI），曲目 `vip` 字段驱动 VIP 徽标与播放页「VIP 试听」标注；播放失败（无版权/网络错误）由 `PlayerController.handlePlaybackFailure` 统一 toast + 自动跳下一首，连续 3 首失败熔断；服务地址设置页持久化，留空回落默认地址（契约见上级 AGENTS.md）。**收藏/最近跨源融合（2026-09 用户决策「喜欢不区分在线离线」）**：在线歌元数据持久化在 `source/OnlineSongStore.ets`（`filesDir/online_songs.json`，纯函数 `serializeOnlineSongStore`/`parseOnlineSongStore` 在 OnlineApi.ets），收藏（`AppStore.toggleFavorite` 唯一入口，PlayerPage ♥ 调用）与播放（`playSongInternal` 内 upsert）时注册；喜欢/最近 Tab 经 `LibraryFilter.FilterOptions.onlineSongs` 补位混排（ALL Tab 不混入；注册表非响应式，靠 favoriteIds/recentIds 的 @Trace 改写触发 @Computed 重算）；`PlayerController.findSong` 第三级兜底注册表（点播收藏在线歌/续播恢复都走这条）；换服务地址时注册表条目流地址按当前生效地址重拼（服务端 id 稳定）。**收藏钉住缓存**：收藏的在线歌同步进 `OnlineCache` pin 集合（不持久化，启动由收藏∩注册表重建），淘汰垫后（纯函数 `evictOrder`：非 pin 最旧在前、pin 垫后、在途跳过；全 pin 超限时 pin 内按 lastAccess 兜底，磁盘 500MB 硬上限不破），未缓存的收藏歌主动排队整曲下载（VIP 未登录试听曲不下载防污染）；下载队列限并发 2（`MAX_ACTIVE_DOWNLOADS`），播放伴随下载与收藏补下载共用，播放下载随切歌中止（代际号）、收藏下载不中止；取消收藏解除 pin（已下音频回归普通 LRU，不删文件）；注册表只留收藏∪最近引用的条目（`retain`），清空曲库时一并清。长按菜单「从曲库删除」对在线歌不显示（`isOnlineId` 判定）。
+- **在线源（`OnlineSource`）**：首页一级签「在线」，`OnlineSource.fetchSongs(q)` 拉取 `/songs`（解析纯函数在 `source/OnlineApi.ets`，可 LocalUnit 单测）；在线搜索由 Index 防抖 600ms 触发，列表即服务端返回不做本地二次过滤；本地曲库时长由服务端解析容器元数据返回（durationMs），客户端 prepared 后仍会校准。**在线列表缓存（SWR）**：成功结果进 OnlineSource 内存缓存（按查询词键控，容量 8，来回切源秒开），默认视图（空查询）同时持久化 `filesDir/online_list_cache.json`（杀进程重开秒开）；进在线页先展示缓存（不再整页 loading），TTL 10 分钟内不发网络、过期静默刷新，下拉刷新/重复点在线标签/重试/改服务地址强制绕过缓存，换 baseUrl 缓存整体失效（纯函数 `isCacheFresh`/`serializeOnlineCache`/`parseOnlineCache` 在 OnlineApi.ets）；在线页同时拉 `/providers`（`fetchProviders`）获取网易云登录态（仅用于试听曲不进缓存与播放页「VIP 试听」标注的判定；服务端源状态不进客户端 UI），曲目 `vip` 字段驱动 VIP 徽标与播放页「VIP 试听」标注；播放失败（无版权/网络错误）由 `PlayerController.handlePlaybackFailure` 统一 toast + 自动跳下一首，连续 3 首失败熔断；服务地址设置页持久化，留空回落默认地址（契约见上级 AGENTS.md）。**收藏/最近跨源融合（2026-09 用户决策「喜欢不区分在线离线」）**：在线歌元数据持久化在 `source/OnlineSongStore.ets`（`filesDir/online_songs.json`，纯函数 `serializeOnlineSongStore`/`parseOnlineSongStore` 在 OnlineApi.ets），收藏（`AppStore.toggleFavorite` 唯一入口，PlayerPage ♥ 调用）与播放（`playSongInternal` 内 upsert）时注册；喜欢/最近 Tab 经 `LibraryFilter.FilterOptions.onlineSongs` 补位混排（ALL Tab 不混入；注册表非响应式，靠 favoriteIds/recentIds 的 @Trace 改写触发 @Computed 重算）；`PlayerController.findSong` 第三级兜底注册表（点播收藏在线歌/续播恢复都走这条）；换服务地址时注册表条目流地址按当前生效地址重拼（服务端 id 稳定）。**收藏钉住缓存**：收藏的在线歌同步进 `OnlineCache` pin 集合（不持久化，启动由收藏∩注册表重建），淘汰垫后（纯函数 `evictOrder`：非 pin 最旧在前、pin 垫后、在途跳过；全 pin 超限时 pin 内按 lastAccess 兜底，磁盘 500MB 硬上限不破），未缓存的收藏歌主动排队整曲下载（VIP 未登录试听曲不下载防污染）；下载队列限并发 2（`MAX_ACTIVE_DOWNLOADS`），播放伴随下载与收藏补下载共用，播放下载随切歌中止（代际号）、收藏下载不中止；取消收藏解除 pin（已下音频回归普通 LRU，不删文件）；注册表只留收藏∪最近引用的条目（`retain`），清空曲库时一并清。长按菜单「从曲库删除」对在线歌不显示（`isOnlineId` 判定）。
 
 - 自适应深浅双主题（暖纸浅色 + Poweramp 深色）：`base/element/color.json`=浅色板
   （page_bg #F7F4EE / surface #FFFFFF / accent #A8791F 深金），`dark/element/color.json`=

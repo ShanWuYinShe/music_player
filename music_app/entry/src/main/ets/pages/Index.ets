@@ -14,10 +14,16 @@ import { SettingsPage } from './SettingsPage';
 /** 金色 accent 文件级常量：@Builder 内引用组件字段需 this 前缀，常量直引更净 */
 const CURRENT_TINT: Resource = $r('app.color.accent');
 
-/** 曲目来源：本地曲库 / 在线服务 */
-enum SourceTab {
-  LOCAL = 0,
-  ONLINE = 1
+/**
+ * 首页一级签：曲库（本地全部）/ 喜欢 / 最近（两者跨源：本地+在线混排）
+ * / 在线（服务端曲库+网络源）。喜欢/最近升为一级入口——收藏不区分在线
+ * 离线后它们是跨源视图，不再挂在本地签下当筛选器（2026-09 用户决策）
+ */
+enum HomeTab {
+  LIBRARY = 0,
+  FAVORITES = 1,
+  RECENT = 2,
+  ONLINE = 3
 }
 
 /** 在线搜索防抖：输入停顿该时长后触发服务端搜索（毫秒） */
@@ -81,11 +87,11 @@ class SongListDataSource implements IDataSource {
 struct Index {
   pathStack: NavPathStack = new NavPathStack();
   @Local searchText: string = '';
-  @Local tab: LibraryTab = LibraryTab.ALL;
   /** 曲库排序方式：初始值来自持久化偏好，变更即落盘（重启恢复） */
   @Local sortMode: SortMode = appStore.userData.sortMode;
   @Local scanning: boolean = false;
-  @Local sourceTab: SourceTab = SourceTab.LOCAL;
+  /** 当前一级签（受控 Tabs index；滑动切页经 onChange 回写同一状态） */
+  @Local homeTab: HomeTab = HomeTab.LIBRARY;
   @Local onlineLoading: boolean = false;
   /** 在线拉取失败提示（有旧列表时仍展示旧列表） */
   @Local onlineError: string = '';
@@ -109,8 +115,10 @@ struct Index {
   private onlineRequestId: number = 0;
   /** LazyForEach 数据源 */
   private songSource: SongListDataSource = new SongListDataSource();
-  /** 列表滚动控制器：本地/在线各持一个（Scroller 不可绑定多个滚动组件） */
+  /** 列表滚动控制器：四个一级签各持一个（Scroller 不可绑定多个滚动组件） */
   private localScroller: Scroller = new Scroller();
+  private favScroller: Scroller = new Scroller();
+  private recentScroller: Scroller = new Scroller();
   private onlineScroller: Scroller = new Scroller();
   /** 远离顶部时在拇指区露出回顶按钮（onScrollIndex 驱动） */
   @Local showBackTop: boolean = false;
@@ -189,19 +197,19 @@ struct Index {
     this.cancelLocalFilter();
   }
 
-  /** 当前 Tab 与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
-   * 在线模式展示 onlineSongs（最近一次成功结果，q 已在服务端匹配并聚合
+  /** 当前签与搜索词过滤后的列表（缓存计算，build 内多处引用只算一次）。
+   * 在线签展示 onlineSongs（最近一次成功结果，q 已在服务端匹配并聚合
    * 网络源），不再本地二次过滤，避免网络源结果被本地标题匹配误滤掉，
    * 也不直读 player.songs——它是播放队列，加载期间还是本地曲库。
-   * 本地分支读微防抖后的 debouncedQuery：击键不同时触发全量 filter+sort */
+   * 内容签读微防抖后的 debouncedQuery：击键不同时触发全量 filter+sort */
   @Computed
   get filteredSongs(): SongRecord[] {
-    if (this.sourceTab === SourceTab.ONLINE) {
+    if (this.homeTab === HomeTab.ONLINE) {
       return this.onlineSongs;
     }
     const opts: FilterOptions = {
       query: this.debouncedQuery,
-      tab: this.tab,
+      tab: this.filterTab(),
       sort: this.sortMode,
       favoriteIds: appStore.userData.favoriteIds,
       recentIds: appStore.userData.recentIds,
@@ -213,37 +221,21 @@ struct Index {
     return filterAndSort(appStore.player.songs, opts);
   }
 
+  /** 一级签 → 筛选语义：曲库=全部本地，喜欢/最近同名映射（跨源补位在
+   * LibraryFilter 内完成） */
+  private filterTab(): LibraryTab {
+    if (this.homeTab === HomeTab.FAVORITES) {
+      return LibraryTab.FAVORITES;
+    }
+    if (this.homeTab === HomeTab.RECENT) {
+      return LibraryTab.RECENT;
+    }
+    return LibraryTab.ALL;
+  }
+
   @Monitor('filteredSongs')
   onFilteredSongsChange(): void {
     this.songSource.reload(this.filteredSongs);
-  }
-
-  /** 分类计数缓存：三个 chip 多处读取共享一次计算 */
-  @Computed
-  get tabCounts(): Map<LibraryTab, number> {
-    const counts = new Map<LibraryTab, number>();
-    counts.set(LibraryTab.ALL, appStore.player.songs.length);
-    // O(曲目数+记录数)：以现有曲目 id 建 Set 替代逐条线性扫；喜欢/最近的
-    // 在线歌经注册表补位（与 filteredSongs 同源，全部 Tab 不含在线歌）
-    const known = new Set(appStore.player.songs.map((song) => song.id));
-    for (const song of appStore.onlineStore.all()) {
-      known.add(song.id);
-    }
-    let favCount = 0;
-    for (const id of appStore.userData.favoriteIds) {
-      if (known.has(id)) {
-        favCount++;
-      }
-    }
-    counts.set(LibraryTab.FAVORITES, favCount);
-    let recentCount = 0;
-    for (const id of appStore.userData.recentIds) {
-      if (known.has(id)) {
-        recentCount++;
-      }
-    }
-    counts.set(LibraryTab.RECENT, recentCount);
-    return counts;
   }
 
   build() {
@@ -303,14 +295,16 @@ struct Index {
           (_isExpanding: boolean, ratio: number): void => this.applyDriftVisible(ratio))
 
         Column() {
-        // 源切换（主模式）+ 页面级操作：点选走 switchSource 改受控 index，
-        // 列表区滑动由 Tabs onChange 回写同一入口；导入/设置居右（原
-        // Navigation menus 迁入——标题栏已整条去除）
-        Row({ space: 8 }) {
-          this.SourceChip(SourceTab.LOCAL, '本地', $r('sys.symbol.music_note_list'))
-          this.SourceChip(SourceTab.ONLINE, '在线', $r('sys.symbol.music_note_radiowaves_left_and_right'))
+        // 一级签（曲库/喜欢/最近/在线）+ 页面级操作：点选走 switchTab 改
+        // 受控 index，列表区滑动由 Tabs onChange 回写同一入口；导入/设置
+        // 居右（原 Navigation menus 迁入——标题栏已整条去除）
+        Row({ space: 2 }) {
+          this.HomeTabChip(HomeTab.LIBRARY, '曲库')
+          this.HomeTabChip(HomeTab.FAVORITES, '喜欢')
+          this.HomeTabChip(HomeTab.RECENT, '最近')
+          this.HomeTabChip(HomeTab.ONLINE, '在线')
           Blank()
-          if (this.sourceTab === SourceTab.LOCAL) {
+          if (this.homeTab === HomeTab.LIBRARY) {
             // 本地曲库常驻导入入口：平台(API 24)已移除静默扫描公共媒体库的
             // 权限与 API，AudioViewPicker 用户选择是唯一导入途径
             SymbolGlyph($r('sys.symbol.folder_badge_plus'))
@@ -329,23 +323,26 @@ struct Index {
         }
         .width('100%')
         // 顶部留白含状态栏避让（标题栏去除后内容顶到系统栏下）
-        .padding({ left: 20, right: 16, top: appStore.safeTopVp + 8, bottom: 2 })
+        .padding({ left: 12, right: 8, top: appStore.safeTopVp + 8, bottom: 2 })
 
-        // 系统搜索框（样式/清除键/键盘搜索键由系统托管，深浅自动适配）：
-        // 输入语义与旧自绘框一致（本地即时过滤 + 切全部，在线防抖服务端搜）
+        // 系统搜索框（清除键/键盘搜索键由系统托管，深浅自动适配）：
+        // 输入语义随签——内容签即时过滤（在喜欢/最近内搜索即筛其子集），
+        // 在线防抖服务端搜；暖纸底+小圆角融入排印版面
         Row() {
           Search({
             value: this.searchText,
-            placeholder: this.sourceTab === SourceTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
+            placeholder: this.homeTab === HomeTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
           })
             .layoutWeight(1)
             .constraintSize({ minHeight: 40 })
             .fontColor($r('app.color.ink'))
             .placeholderColor($r('app.color.ink_faint'))
+            .backgroundColor($r('app.color.surface_alt'))
+            .borderRadius(12)
             .onChange((value: string) => {
               const prev = this.searchText;
               this.searchText = value;
-              if (this.sourceTab === SourceTab.ONLINE) {
+              if (this.homeTab === HomeTab.ONLINE) {
                 // 在线搜索由服务端完成（含网络源聚合），输入停顿后触发；
                 // 框内清除键清空走 150ms 小防抖回到服务器曲库全量（连点清空
                 // 不堆连接，在途旧查询由 OnlineSource abort）
@@ -362,17 +359,13 @@ struct Index {
                 }
                 return;
               }
-              if (value.trim() !== '' && this.tab !== LibraryTab.ALL) {
-                // 搜索时自动切回全部，避免「喜欢」子集里搜不到造成困惑
-                this.tab = LibraryTab.ALL;
-              }
-              // 本地即时过滤改 120ms 微防抖：击键不同时触发全量 filter+sort
-              // 双遍重算（千首量级输入卡），120ms 体感仍即时
+              // 内容签即时过滤，不跳签——在喜欢/最近里搜索就是筛其子集，
+              // 找不到时空态如实呈现（跨源签里搜不到比误跳曲库更诚实）
               this.scheduleLocalFilter();
             })
             .onSubmit((value: string) => {
               // 键盘搜索键：在线立即触发一次（不等防抖），本地已是微防抖过滤
-              if (this.sourceTab === SourceTab.ONLINE) {
+              if (this.homeTab === HomeTab.ONLINE) {
                 this.cancelPendingSearch();
                 this.cancelClearSearch();
                 this.enterOnline(value.trim());
@@ -383,41 +376,37 @@ struct Index {
             })
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 6, bottom: 2 })
+        .padding({ left: 20, right: 20, top: 8, bottom: 2 })
 
-        // 列表过滤器（本地源语义，在线隐藏）：分类 + 排序是列表的就近过滤器，
-        // 章节索引文字风放搜索下方
-        if (this.sourceTab === SourceTab.LOCAL) {
-          Row({ space: 0 }) {
-            this.TabChip(LibraryTab.ALL, '全部')
-            this.TabChip(LibraryTab.FAVORITES, '喜欢')
-            this.TabChip(LibraryTab.RECENT, '最近')
-            Blank()
+        // 列表头（章节题注）：左侧「N 首」计数，右侧排序入口（内容签语义，
+        // 在线列表为服务端顺序无排序）
+        Row() {
+          Text(this.headerCountText())
+            .fontSize(12)
+            .fontColor($r('app.color.editorial_meta'))
+            .letterSpacing(0.5)
+          Blank()
+          if (this.homeTab !== HomeTab.ONLINE) {
             this.SortButton()
           }
-          .width('100%')
-          .padding({ left: 12, right: 12, top: 8, bottom: 4 })
         }
+        .width('100%')
+        .padding({ left: 20, right: 8, top: 4, bottom: 2 })
 
-        // 源切换 Tabs（系统滑动手势 + 切换动画）：TabContent 不带 tabBar
+        // 一级签 Tabs（系统滑动手势 + 切换动画）：TabContent 不带 tabBar
         // （系统栏定高 91vp 且两项左右散开，不符合分段控件观感），切换条用
-        // 自绘胶囊行（点选经 switchSource 改受控 index；滑动经 onChange 回写）
-        Tabs({ barPosition: BarPosition.Start, index: this.sourceTab }) {
+        // 自绘排印签行（点选经 switchTab 改受控 index；滑动经 onChange 回写）
+        Tabs({ barPosition: BarPosition.Start, index: this.homeTab }) {
           TabContent() {
-            if (this.filteredSongs.length === 0) {
-              if (appStore.player.songs.length === 0 && this.searchText.trim() === '') {
-                this.LibraryEmptyView()
-              } else if (this.searchText.trim() !== '') {
-                this.NoResultView()
-              } else if (this.tab === LibraryTab.FAVORITES) {
-                this.EmptyHintView($r('sys.symbol.heart'), '还没有喜欢的歌曲',
-                  '长按歌曲或点击播放页 ♥，把喜欢的歌收进来')
-              } else {
-                this.EmptyHintView($r('sys.symbol.clock'), '还没有播放记录', '点一首歌开始听吧')
-              }
-            } else {
-              this.SongList(this.localScroller)
-            }
+            this.ContentTabBody(this.localScroller)
+          }
+
+          TabContent() {
+            this.ContentTabBody(this.favScroller)
+          }
+
+          TabContent() {
+            this.ContentTabBody(this.recentScroller)
           }
 
           TabContent() {
@@ -446,8 +435,8 @@ struct Index {
         .layoutWeight(1)
         .width('100%')
         .onChange((index: number) => {
-          if (index !== this.sourceTab) {
-            this.switchSource(index);
+          if (index !== this.homeTab) {
+            this.switchTab(index as HomeTab);
           }
         })
 
@@ -500,7 +489,7 @@ struct Index {
               isPlaying: appStore.player.isPlaying,
               keyword: this.searchText,
               loggedIn: this.loggedIn,
-              onItemClick: (id: string) => appStore.player.playSong(id)
+              onItemClick: (id: string) => this.playFromList(id)
             })
               .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
             // 笔意线：目录行的分隔语言（最后一行由列表底部自然收尾，不画）。
@@ -536,54 +525,57 @@ struct Index {
     })
   }
 
-  /** 分类计数：在 Builder 内部读取 @Computed 状态以建立响应依赖（按值传参不刷新） */
-  private chipCount(tab: LibraryTab): number {
-    return this.tabCounts.get(tab) ?? 0;
+  /** 列表头计数文案：在线首次加载未出结果时显示加载中，避免「0 首」闪现 */
+  private headerCountText(): string {
+    if (this.homeTab === HomeTab.ONLINE && this.onlineLoading && this.filteredSongs.length === 0) {
+      return '正在加载';
+    }
+    return `${this.filteredSongs.length} 首`;
   }
 
+  /**
+   * 一级签（排印章节风）：纯文字标签，选中金粗 + 下方书脊短金线，无底色
+   * 无图标——章节索引的杂志目录语言。选中加粗宽度微涨由同行 space 吸收
+   */
   @Builder
-  TabChip(tab: LibraryTab, label: string) {
-    Text(this.chipCount(tab) > 0 ? `${label} ${this.chipCount(tab)}` : label)
-      .fontSize(14)
-      .fontColor(this.tab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
-      .fontWeight(this.tab === tab ? FontWeight.Bold : FontWeight.Normal)
-      .letterSpacing(this.tab === tab ? 0.5 : 0)
-      // 文字标签风（章节索引）：无底无框，热区由 padding 保 40vp
-      .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-      .accessibilityText(`分类${label}`)
-      .onClick(() => {
-        this.tab = tab;
-        this.showBackTop = false;
-        this.localScroller.scrollToIndex(0);
-      })
-  }
-
-  /** 源切换（Tabs 系统栏不用后，由该行点选驱动受控 index；
-   * 选中态读 sourceTab，滑动切页经 onChange 回写后同样刷新）。
-   * 排印风：选中项朱砂重字 + 下方短朱线（书脊标记），无底色 */
-  @Builder
-  SourceChip(tab: SourceTab, label: string, icon: Resource) {
-    Column({ space: 4 }) {
-      Row({ space: 5 }) {
-        SymbolGlyph(icon)
-          .fontSize(14)
-          .fontColor([this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta')])
-        Text(label)
-          .fontSize(15)
-          .fontColor(this.sourceTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
-          .fontWeight(this.sourceTab === tab ? FontWeight.Bold : FontWeight.Normal)
-      }
-      // 选中项下方短金线（书脊标记）
+  HomeTabChip(tab: HomeTab, label: string) {
+    Column({ space: 5 }) {
+      Text(label)
+        .fontSize(17)
+        .fontColor(this.homeTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
+        .fontWeight(this.homeTab === tab ? FontWeight.Bold : FontWeight.Normal)
+        .letterSpacing(this.homeTab === tab ? 1 : 0.5)
+      // 选中项下方书脊短金线
       Row()
-        .width(20)
-        .height(2)
-        .borderRadius(1)
-        .backgroundColor(this.sourceTab === tab ? CURRENT_TINT : Color.Transparent)
+        .width(26)
+        .height(2.5)
+        .borderRadius(1.25)
+        .backgroundColor(this.homeTab === tab ? CURRENT_TINT : Color.Transparent)
     }
     // 上下 padding 补足 40vp 触控热区
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
     .accessibilityText(`切换到${label}`)
-    .onClick(() => this.switchSource(tab))
+    .onClick(() => this.switchTab(tab))
+  }
+
+  /** 内容签主体（曲库/喜欢/最近共用）：非空出列表；空态分流——搜索无结果 /
+   * 曲库空（导入引导）/ 喜欢与最近各自的空态提示 */
+  @Builder
+  ContentTabBody(scroller: Scroller) {
+    if (this.filteredSongs.length === 0) {
+      if (this.searchText.trim() !== '') {
+        this.NoResultView()
+      } else if (this.homeTab === HomeTab.LIBRARY && appStore.player.songs.length === 0) {
+        this.LibraryEmptyView()
+      } else if (this.homeTab === HomeTab.FAVORITES) {
+        this.EmptyHintView($r('sys.symbol.heart'), '还没有喜欢的歌曲',
+          '在播放页点 ♥，喜欢的本地与在线歌都会收进来')
+      } else if (this.homeTab === HomeTab.RECENT) {
+        this.EmptyHintView($r('sys.symbol.clock'), '还没有播放记录', '点一首歌开始听吧')
+      }
+    } else {
+      this.SongList(scroller)
+    }
   }
 
   /** 底部回顶（情境出现才占位）：底部常驻触发器只剩它 + 迷你条，
@@ -627,9 +619,30 @@ struct Index {
     .bindMenu(this.SortMenu())
   }
 
-  /** 当前可见列表的滚动控制器（本地/在线二选一） */
+  /** 列表点播：喜欢/最近两签先把队列替换为该签可见列表（跨源连播跟随
+   * 所见）；曲库签不替换——队列即本地曲库整库（filterAndSort 的筛选源），
+   * 搜索中点播若按结果替换队列，清空搜索后曲库会剩残集（真机推演）。
+   * 两签的队列污染由切签时 refreshSongs 自愈（见 switchTab）；在线签
+   * 队列已是服务端列表，直接播 */
+  private playFromList(id: string): void {
+    if (this.homeTab === HomeTab.FAVORITES || this.homeTab === HomeTab.RECENT) {
+      appStore.player.setOnlineQueue(this.filteredSongs.slice());
+    }
+    appStore.player.playSong(id);
+  }
+
+  /** 当前可见列表的滚动控制器（四个一级签二选一取当前） */
   private activeScroller(): Scroller {
-    return this.sourceTab === SourceTab.ONLINE ? this.onlineScroller : this.localScroller;
+    if (this.homeTab === HomeTab.ONLINE) {
+      return this.onlineScroller;
+    }
+    if (this.homeTab === HomeTab.FAVORITES) {
+      return this.favScroller;
+    }
+    if (this.homeTab === HomeTab.RECENT) {
+      return this.recentScroller;
+    }
+    return this.localScroller;
   }
 
   /** 在线列表状态视图（列表区域整体呈现，非顶部插行）：加载中 /
@@ -715,7 +728,7 @@ struct Index {
           const count = appStore.player.queueNext(song.id);
           promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
         })
-      if (this.sourceTab === SourceTab.LOCAL && !isOnlineId(song.id)) {
+      if (!isOnlineId(song.id)) {
         MenuItem({
           symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')),
           content: '从曲库删除'
@@ -903,27 +916,30 @@ struct Index {
   /** 从设置页返回时，仅在服务地址刚变更过才重拉在线曲库；
    * 从播放页等页面返回不再盲目重拉，避免打断现有队列与列表状态 */
   onPageShow(): void {
-    if (this.sourceTab === SourceTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
+    if (this.homeTab === HomeTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
       this.enterOnline(this.searchText.trim(), true);
     }
   }
 
-  /** 切换曲目来源：本地回读曲库，在线优先展示缓存（TTL 内不联网）；
-   * 重复点击已选中的「在线」等同强制刷新。搜索词保留——切源不丢查询，
-   * 切在线时直接按词取缓存或搜索 */
-  private switchSource(tab: SourceTab): void {
-    if (this.sourceTab === tab && tab === SourceTab.LOCAL) {
+  /** 切换一级签：内容签（曲库/喜欢/最近）统一回读本地曲库队列——队列是
+   * 内容签列表的筛选源（filterAndSort 入参），点播时才按可见列表替换
+   * （见 playFromList），切签必须先自愈，否则上一签替换过的队列会让
+   * 本签漏歌（真机实测：进喜欢后最近只剩收藏里的在线歌）；在线优先展示
+   * 缓存（TTL 内不联网）。重复点击已选中的「在线」等同强制刷新。
+   * 搜索词保留——切签不丢查询 */
+  private switchTab(tab: HomeTab): void {
+    if (this.homeTab === tab && tab === HomeTab.LIBRARY) {
       return;
     }
     // 重复点在线=强制刷新（缓存旁路，保留原「重复点击在线等同刷新」语义）
-    const forceOnline = this.sourceTab === tab && tab === SourceTab.ONLINE;
-    this.sourceTab = tab;
+    const forceOnline = this.homeTab === tab && tab === HomeTab.ONLINE;
+    this.homeTab = tab;
     this.showBackTop = false;
     this.cancelPendingSearch();
     this.cancelClearSearch();
     this.cancelLocalFilter();
     this.debouncedQuery = this.searchText;
-    if (tab === SourceTab.ONLINE) {
+    if (tab === HomeTab.ONLINE) {
       this.enterOnline(this.searchText.trim(), forceOnline);
     } else {
       appStore.player.refreshSongs();
@@ -931,29 +947,26 @@ struct Index {
     this.activeScroller().scrollToIndex(0);
   }
 
-  /** 迷你条弧线手势：顶层源循环切换（> 下一个 / < 上一个，两源即往返）。
-   * 不弹 toast——切换结果由源切换行高亮直接可见（2026-09 用户决策去提示） */
+  /** 迷你条弧线手势：曲库 ↔ 在线 直达切换（> 去在线 / < 回曲库）。
+   * 不弹 toast——切换结果由一级签高亮直接可见（2026-09 用户决策去提示） */
   private cycleSource(direction: number): void {
-    const next = direction > 0 ? SourceTab.ONLINE : SourceTab.LOCAL;
-    if (next !== this.sourceTab) {
-      this.switchSource(next);
+    const next = direction > 0 ? HomeTab.ONLINE : HomeTab.LIBRARY;
+    if (next !== this.homeTab) {
+      this.switchTab(next);
     }
   }
 
-  /** 迷你条横滑手势：本地分类标签循环（> 下一个 / < 上一个，越界回绕）。
-   * 仅本地源响应——在线页无分类标签行；目标为当前分类时不动作 */
+  /** 迷你条横滑手势：内容签循环（> 下一个 / < 上一个，曲库→喜欢→最近回绕）。
+   * 在线签不参与——保持「在线需显式切换（点签/折返）」语义；目标为当前签时不动作 */
   private cycleTab(direction: number): void {
-    if (this.sourceTab !== SourceTab.LOCAL) {
+    if (this.homeTab === HomeTab.ONLINE) {
       return;
     }
-    const order: LibraryTab[] = [LibraryTab.ALL, LibraryTab.FAVORITES, LibraryTab.RECENT];
-    const idx = order.indexOf(this.tab);
+    const order: HomeTab[] = [HomeTab.LIBRARY, HomeTab.FAVORITES, HomeTab.RECENT];
+    const idx = order.indexOf(this.homeTab);
     const next = order[(idx + direction + order.length) % order.length];
-    if (next !== this.tab) {
-      this.tab = next;
-      this.showBackTop = false;
-      this.localScroller.scrollToIndex(0);
-      // 不弹 toast——分类高亮直接可见（2026-09 用户决策去提示）
+    if (next !== this.homeTab) {
+      this.switchTab(next);
     }
   }
 
@@ -1073,14 +1086,14 @@ struct Index {
       if (reqId !== this.onlineRequestId) {
         return; // 已有更新的查询在途，过期响应丢弃
       }
-      if (this.sourceTab !== SourceTab.ONLINE) {
-        return; // 已切回本地：晚到的响应不得替换 player.songs 污染本地列表
-        // （切回在线时 switchSource 会重新拉取）
+      if (this.homeTab !== HomeTab.ONLINE) {
+        return; // 已切走：晚到的响应不得替换 player.songs 污染内容签列表
+        // （切回在线时 switchTab 会重新拉取）
       }
       this.onlineSongs = list;
       appStore.player.setOnlineQueue(list);
     } catch (err) {
-      if (reqId !== this.onlineRequestId || this.sourceTab !== SourceTab.ONLINE) {
+      if (reqId !== this.onlineRequestId || this.homeTab !== HomeTab.ONLINE) {
         return;
       }
       this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
