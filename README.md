@@ -13,7 +13,7 @@
 music_app/          HarmonyOS 客户端工程（DevEco Studio 打开此目录）
 music_server/       Go 服务端（Dockerfile + 单元测试；由 workwork 仓库 submodule 构建）
 shader_playground/  GLSL 着色器实验场（Vite + TS，pnpm 管理）
-tools/              music_app 签名脚本（auto_sign.sh 等，须在仓库根执行）
+tools/              music_app 签名脚本（auto_sign.sh 等按脚本自身位置解析仓库根，任意目录可执行）
 ```
 
 ## 构建

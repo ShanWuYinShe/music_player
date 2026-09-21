@@ -48,9 +48,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 版本从 shader_playground/package.json 的 packageManager 字段读取
+      # （action 未传 version 时自动读该字段；package.json 不在仓库根，
+      # 须显式指定 package_json_file。2026-09-22 经官方 README 查证）
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          package_json_file: shader_playground/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: 24

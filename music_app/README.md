@@ -87,7 +87,7 @@ $HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
 **一键签名构建+安装**（推荐，签名有效期内无需打开 IDE）：
 
 ```bash
-# 以下命令均须在仓库根（music_player/）执行，脚本按自身位置解析仓库根
+# 脚本按自身位置解析仓库根，任意目录下均可执行
 tools/auto_sign.sh          # 校验签名材料并构建 signed HAP
 tools/auto_sign.sh install  # 校验 + 构建 + 安装 + 启动到已连接设备
 ```
