@@ -26,6 +26,8 @@ export interface FilterOptions {
   sort: SortMode;
   favoriteIds: string[];
   recentIds: string[];
+  /** 在线歌曲注册表条目：喜欢/最近列表的在线歌补位来源（全部 Tab 不混入） */
+  onlineSongs?: SongRecord[];
 }
 
 /**
@@ -53,17 +55,28 @@ function findById(songs: SongRecord[], id: string): SongRecord | null {
   return null;
 }
 
+/** id → 曲目：先查本地曲库，再查在线注册表补位（喜欢/最近跨源融合） */
+function findSongById(songs: SongRecord[], onlineSongs: SongRecord[], id: string): SongRecord | null {
+  const local = findById(songs, id);
+  if (local !== null) {
+    return local;
+  }
+  return findById(onlineSongs, id);
+}
+
 /**
  * 按分类取基础集合：
  * - 全部：曲库原顺序
  * - 喜欢：按收藏时间倒序（最新收藏在前）
  * - 最近：按播放时间倒序
+ * 喜欢/最近的在线歌从 onlineSongs 补位（id 不在本地曲库时），与本地歌混排。
  */
 function baseSongs(songs: SongRecord[], opts: FilterOptions): SongRecord[] {
   const result: SongRecord[] = [];
+  const onlineSongs = opts.onlineSongs ?? [];
   if (opts.tab === LibraryTab.FAVORITES) {
     for (let i = opts.favoriteIds.length - 1; i >= 0; i--) {
-      const song = findById(songs, opts.favoriteIds[i]);
+      const song = findSongById(songs, onlineSongs, opts.favoriteIds[i]);
       if (song) {
         result.push(song);
       }
@@ -72,7 +85,7 @@ function baseSongs(songs: SongRecord[], opts: FilterOptions): SongRecord[] {
   }
   if (opts.tab === LibraryTab.RECENT) {
     for (const id of opts.recentIds) {
-      const song = findById(songs, id);
+      const song = findSongById(songs, onlineSongs, id);
       if (song) {
         result.push(song);
       }

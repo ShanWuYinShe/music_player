@@ -16,6 +16,7 @@
   渲染层必须走 `addStateListener/removeStateListener` 多播订阅 + @Local 镜像。
 - 播放页舞台双态互斥（封面模式 / 可视化模式），不要恢复旧设计。
 - 在线源 OnlineSource 走 SWR 缓存（默认视图持久化到 filesDir）。
+- 收藏/最近播放跨源融合：在线歌元数据注册表（`OnlineSongStore`，filesDir/online_songs.json）持久化，喜欢/最近列表混排展示，收藏的在线歌钉住整曲缓存不被 LRU 淘汰。
 
 > 以上每条的完整原因、踩坑记录与其余细则见 skill `music-app-platform-ui`。
 

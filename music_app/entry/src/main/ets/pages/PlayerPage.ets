@@ -916,7 +916,8 @@ export struct PlayerPage {
     if (!song) {
       return;
     }
-    const fav = appStore.userData.toggleFavorite(song.id);
+    // 统一收藏入口：在线歌经 AppStore 注册元数据并钉住缓存补下载
+    const fav = appStore.toggleFavorite(song);
     this.isFavoriteNow = fav; // @Trace 插值在真机不可靠，图标刷新显式走镜像
     promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
     // 收藏动作触觉反馈：软震动一档（权限被拒/无马达时静默失败）

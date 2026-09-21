@@ -7,7 +7,9 @@ import {
   ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL,
   songsUrl, providersUrl, parseOnlineSongs, parseOnlineProviders,
   OnlineSongItem, OnlineSongsResponse,
-  OnlineCacheEntry, isCacheFresh, serializeOnlineCache, parseOnlineCache
+  OnlineCacheEntry, isCacheFresh, serializeOnlineCache, parseOnlineCache,
+  isOnlineId, onlineItemId, rebuildStreamUrl,
+  serializeOnlineSongStore, parseOnlineSongStore, evictOrder, CacheEntryLike
 } from '../main/ets/source/OnlineApi';
 import {
   PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
@@ -41,6 +43,25 @@ function expectRgb(rgb: number[], r: number, g: number, b: number): void {
 function mkEntry(baseUrl: string, savedAt: number): OnlineCacheEntry {
   const songs: SongRecord[] = [mk('online:1', '雨后琶音', '湖畔晚风', 18000)];
   return { baseUrl: baseUrl, savedAt: savedAt, songs: songs };
+}
+
+/** 构造注册表在线歌曲记录（fileName 为流地址，还原/补位测试共用） */
+function mkOnline(itemId: string, title: string): SongRecord {
+  return {
+    id: `online:${itemId}`,
+    title: title,
+    artist: '湖畔晚风',
+    album: '',
+    duration: 240000,
+    fileName: `http://h/api/music/stream/${itemId}`,
+    coverPath: ''
+  };
+}
+
+/** evictOrder 测试用条目形态（满足 CacheEntryLike） */
+interface TestCacheEntry {
+  size: number;
+  lastAccess: number;
 }
 
 export default function LocalUnitSuite() {
@@ -179,6 +200,75 @@ export default function LocalUnitSuite() {
       });
       expect(result.length).assertEqual(0);
     });
+
+    it('favoritesTabFillsOnlineSongsFromRegistry', 0, () => {
+      // 收藏含本地与在线 id：在线歌从注册表补位，按收藏时间倒序混排
+      const registry: SongRecord[] = [mkOnline('n1', '云端序曲'), mkOnline('n2', '云端夜航')];
+      const result = filterAndSort(songs, {
+        query: '',
+        tab: LibraryTab.FAVORITES,
+        sort: SortMode.DEFAULT,
+        favoriteIds: ['a', 'online:n1', 'c'],
+        recentIds: [],
+        onlineSongs: registry
+      });
+      expect(result.length).assertEqual(3);
+      expect(result[0].id).assertEqual('c'); // favoriteIds 末尾=最新收藏在前
+      expect(result[1].id).assertEqual('online:n1');
+      expect(result[1].title).assertEqual('云端序曲');
+      expect(result[1].fileName).assertEqual('http://h/api/music/stream/n1');
+      expect(result[2].id).assertEqual('a');
+      // 注册表也找不到的收藏 id 依旧跳过
+      const missing = filterAndSort(songs, {
+        query: '',
+        tab: LibraryTab.FAVORITES,
+        sort: SortMode.DEFAULT,
+        favoriteIds: ['online:gone'],
+        recentIds: [],
+        onlineSongs: registry
+      });
+      expect(missing.length).assertEqual(0);
+    });
+
+    it('recentTabFillsOnlineSongsAndQueryFiltersThem', 0, () => {
+      const registry: SongRecord[] = [mkOnline('n1', '云端序曲'), mkOnline('n2', '云端夜航')];
+      const result = filterAndSort(songs, {
+        query: '',
+        tab: LibraryTab.RECENT,
+        sort: SortMode.DEFAULT,
+        favoriteIds: [],
+        recentIds: ['b', 'online:n2', 'online:n1'],
+        onlineSongs: registry
+      });
+      expect(result.length).assertEqual(3);
+      expect(result[0].id).assertEqual('b'); // recentIds 顺序=最新播放在前
+      expect(result[1].id).assertEqual('online:n2');
+      expect(result[2].id).assertEqual('online:n1');
+      // 查询词过滤对补位的在线歌同样生效
+      const filtered = filterAndSort(songs, {
+        query: '夜航',
+        tab: LibraryTab.RECENT,
+        sort: SortMode.DEFAULT,
+        favoriteIds: [],
+        recentIds: ['b', 'online:n2', 'online:n1'],
+        onlineSongs: registry
+      });
+      expect(filtered.length).assertEqual(1);
+      expect(filtered[0].id).assertEqual('online:n2');
+    });
+
+    it('allTabExcludesOnlineSongs', 0, () => {
+      // 全部 Tab 只列本地曲库，注册表条目不混入
+      const result = filterAndSort(songs, {
+        query: '',
+        tab: LibraryTab.ALL,
+        sort: SortMode.DEFAULT,
+        favoriteIds: ['online:n1'],
+        recentIds: [],
+        onlineSongs: [mkOnline('n1', '云端序曲')]
+      });
+      expect(result.length).assertEqual(songs.length);
+    });
   });
 
   describe('OnlineApiTest', () => {
@@ -284,6 +374,100 @@ export default function LocalUnitSuite() {
       expect(parseOnlineProviders('')).assertNull();
       expect(parseOnlineProviders('not json')).assertNull();
       expect(parseOnlineProviders('{}')).assertNull();
+    });
+  });
+
+  describe('OnlineSongStoreApiTest', () => {
+    it('onlineIdHelpers', 0, () => {
+      expect(isOnlineId('online:a1b2')).assertTrue();
+      expect(isOnlineId('demo01.mp3')).assertFalse();
+      expect(onlineItemId('online:a1b2')).assertEqual('a1b2');
+      expect(onlineItemId('demo01.mp3')).assertEqual('');
+    });
+
+    it('rebuildStreamUrlJoinsPath', 0, () => {
+      expect(rebuildStreamUrl('http://h/api/music/', 'n1')).assertEqual('http://h/api/music/stream/n1');
+      expect(rebuildStreamUrl('http://h/api/music', 'n1')).assertEqual('http://h/api/music/stream/n1');
+    });
+
+    it('songStoreRoundTripKeepsFields', 0, () => {
+      const song = mkOnline('n1', '云端序曲');
+      song.format = 'FLAC';
+      song.vip = true;
+      const restored = parseOnlineSongStore(
+        serializeOnlineSongStore('http://h/api/music', [song]), 'http://h/api/music');
+      if (restored === null) {
+        expect(false).assertTrue();
+        return;
+      }
+      expect(restored.length).assertEqual(1);
+      expect(restored[0].id).assertEqual('online:n1');
+      expect(restored[0].title).assertEqual('云端序曲');
+      expect(restored[0].artist).assertEqual('湖畔晚风');
+      expect(restored[0].duration).assertEqual(240000);
+      expect(restored[0].fileName).assertEqual('http://h/api/music/stream/n1');
+      expect(restored[0].format).assertEqual('FLAC');
+      expect(restored[0].vip).assertTrue();
+    });
+
+    it('songStoreRebuildsUrlOnBaseUrlChange', 0, () => {
+      // 换服务地址后流地址重拼为新服，其余字段不变
+      const restored = parseOnlineSongStore(
+        serializeOnlineSongStore('http://old/api/music', [mkOnline('n1', '云端序曲')]),
+        'http://new/api/music');
+      if (restored === null) {
+        expect(false).assertTrue();
+        return;
+      }
+      expect(restored.length).assertEqual(1);
+      expect(restored[0].fileName).assertEqual('http://new/api/music/stream/n1');
+      expect(restored[0].title).assertEqual('云端序曲');
+    });
+
+    it('songStoreRejectsInvalidInput', 0, () => {
+      expect(parseOnlineSongStore('', 'http://h/api')).assertNull();
+      expect(parseOnlineSongStore('not json', 'http://h/api')).assertNull();
+      // 缺 version 字段（旧文件形态）拒绝
+      expect(parseOnlineSongStore('{"baseUrl":"http://h/api","songs":[]}', 'http://h/api')).assertNull();
+      // 缺 baseUrl 拒绝
+      expect(parseOnlineSongStore('{"version":1,"songs":[]}', 'http://h/api')).assertNull();
+      // 条目过滤：非在线 id / 缺 title 的条目跳过，合法条目保留
+      const localSong = mk('a', '本地歌', '', 1000);
+      const noTitle: SongRecord = {
+        id: 'online:x', title: '', artist: '', album: '', duration: 0,
+        fileName: 'http://h/api/music/stream/x', coverPath: ''
+      };
+      const body = serializeOnlineSongStore('http://h/api', [localSong, noTitle, mkOnline('n1', '云端序曲')]);
+      const restored = parseOnlineSongStore(body, 'http://h/api');
+      if (restored === null) {
+        expect(false).assertTrue();
+        return;
+      }
+      expect(restored.length).assertEqual(1);
+      expect(restored[0].id).assertEqual('online:n1');
+    });
+
+    it('evictOrderPrefersOldestNonPinned', 0, () => {
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('a', { size: 10, lastAccess: 100 });
+      entries.set('b', { size: 10, lastAccess: 50 }); // 最旧但在途
+      entries.set('c', { size: 10, lastAccess: 20 }); // 钉住
+      entries.set('d', { size: 10, lastAccess: 300 });
+      const pinned = new Set<string>(['c']);
+      const skip = new Set<string>(['b']);
+      // 在途跳过；非钉住按 lastAccess 升序在前；钉住垫后（即便更旧）
+      const order = evictOrder(entries, pinned, skip);
+      expect(order.join(',')).assertEqual('a,d,c');
+    });
+
+    it('evictOrderFallsBackToPinnedWhenAllPinned', 0, () => {
+      // 全员钉住仍超限时，钉住内部按 lastAccess 升序兜底（磁盘硬上限）
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('p1', { size: 10, lastAccess: 5 });
+      entries.set('p2', { size: 10, lastAccess: 9 });
+      entries.set('p3', { size: 10, lastAccess: 7 });
+      const order = evictOrder(entries, new Set<string>(['p1', 'p2', 'p3']), new Set<string>());
+      expect(order.join(',')).assertEqual('p1,p3,p2');
     });
   });
 

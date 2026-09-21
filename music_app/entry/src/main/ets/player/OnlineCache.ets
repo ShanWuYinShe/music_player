@@ -2,6 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { evictOrder } from '../source/OnlineApi';
 
 const TAG = 'OnlineCache';
 const DOMAIN = 0x0003;
@@ -17,6 +18,15 @@ const PERSIST_DIRTY_LIMIT = 20;
 const PERSIST_INTERVAL_MS = 30000;
 /** 索引文件名（存于缓存目录内） */
 const INDEX_FILE = 'index.json';
+/** 同时进行的整曲下载上限：播放伴随下载 + 收藏批量补下载共用此队列 */
+const MAX_ACTIVE_DOWNLOADS = 2;
+
+/** 待下载任务（prefetch 入队；shouldContinue 在出队与每个分片时复核） */
+interface PendingDownload {
+  songId: string;
+  url: string;
+  shouldContinue: () => boolean;
+}
 
 /** 缓存索引条目 */
 class CacheEntry {
@@ -30,13 +40,20 @@ class CacheEntry {
  * 复播命中即走本地 fd（秒开、可离线、不重复耗流量）。
  * key 为 SongRecord.id（online: 前缀已隔离本地 id，服务端 id 稳定）；
  * VIP 未登录试听片段由调用方判定不可缓存（key 不区分试听/完整，避免
- * 登录后试听字节污染完整音频），本类只管存取与 LRU 淘汰。
+ * 登录后试听字节污染完整音频），本类只管存取与淘汰。
+ * 下载经排队限并发（MAX_ACTIVE_DOWNLOADS）；收藏曲目由外部同步进
+ * pinned 集合——淘汰时垫后，仅当非钉住总量自身超限才会轮到它们。
  */
 export class OnlineCache {
   private dir: string = '';
   private index: Map<string, CacheEntry> = new Map<string, CacheEntry>();
-  /** 正在后台下载的 key（防重复下载；切歌取消后移出） */
+  /** 已入队或正在下载的 key（防重复下载；切歌取消后移出） */
   private inflight: Set<string> = new Set<string>();
+  /** 收藏钉住集合（事实源为收藏∩注册表，启动/收藏变更时外部整体替换） */
+  private pinned: Set<string> = new Set<string>();
+  /** 待下载队列与在途下载数（限并发，收藏批量补下载不爆发） */
+  private queue: PendingDownload[] = [];
+  private activeCount: number = 0;
   /** 落盘节流态：攒够次数或超间隔才写文件（高频切歌不碰磁盘） */
   private dirtyCount: number = 0;
   private lastPersistMs: number = 0;
@@ -99,16 +116,47 @@ export class OnlineCache {
     this.persistIndex();
   }
 
+  /** 是否已有该曲完整缓存（收藏同步时判定是否需要主动补下载） */
+  has(songId: string): boolean {
+    return this.index.has(songId);
+  }
+
+  /** 收藏钉住集合整体替换（外部事实源推导后同步；不持久化，重启重建） */
+  setPinned(ids: Set<string>): void {
+    this.pinned = ids;
+  }
+
   /**
    * 后台整曲下载：播放同时存盘，下次复播命中。
-   * shouldContinue 在每个分片回调检查——切歌后旧下载中止并删除半成品，
-   * 不浪费流量；下载失败静默（仅打日志），不影响当前播放。
+   * 任务入队限并发（收藏批量补下载时不爆发）；shouldContinue 在出队与
+   * 每个分片回调复核——切歌后旧下载中止并删除半成品，不浪费流量；
+   * 下载失败静默（仅打日志），不影响当前播放。
    */
   prefetch(songId: string, url: string, shouldContinue: () => boolean): void {
     if (this.dir === '' || this.index.has(songId) || this.inflight.has(songId)) {
       return;
     }
     this.inflight.add(songId);
+    this.queue.push({ songId: songId, url: url, shouldContinue: shouldContinue });
+    this.pump();
+  }
+
+  /** 调度：空闲额度内出队启动；出队时已失效（切歌取消等）的任务直接丢弃 */
+  private pump(): void {
+    while (this.activeCount < MAX_ACTIVE_DOWNLOADS && this.queue.length > 0) {
+      const task = this.queue.shift() as PendingDownload;
+      if (!task.shouldContinue()) {
+        this.inflight.delete(task.songId);
+        continue;
+      }
+      this.activeCount += 1;
+      this.startDownload(task);
+    }
+  }
+
+  /** 单个下载任务执行体（原 prefetch 主体） */
+  private startDownload(task: PendingDownload): void {
+    const songId = task.songId;
     const path = this.filePath(songId);
     let fd = -1;
     let done = false;
@@ -118,6 +166,7 @@ export class OnlineCache {
         return;
       }
       done = true;
+      this.activeCount -= 1;
       this.inflight.delete(songId);
       try {
         request.destroy();
@@ -137,12 +186,14 @@ export class OnlineCache {
           }
         } catch (err) {
         }
+        this.pump();
         return;
       }
       try {
         const size = fs.statSync(path).size;
         if (size <= 0) {
           fs.unlinkSync(path);
+          this.pump();
           return;
         }
         const entry = new CacheEntry();
@@ -155,6 +206,7 @@ export class OnlineCache {
       } catch (err) {
         hilog.warn(DOMAIN, TAG, 'commit cache failed: %{public}s', JSON.stringify(err));
       }
+      this.pump();
     };
     try {
       fd = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC).fd;
@@ -164,7 +216,7 @@ export class OnlineCache {
       return;
     }
     request.on('dataReceive', (buf: ArrayBuffer) => {
-      if (!shouldContinue()) {
+      if (!task.shouldContinue()) {
         finish(false);
         return;
       }
@@ -176,10 +228,10 @@ export class OnlineCache {
       }
     });
     request.on('dataEnd', () => {
-      finish(shouldContinue());
+      finish(task.shouldContinue());
     });
     try {
-      request.requestInStream(url, {
+      request.requestInStream(task.url, {
         method: http.RequestMethod.GET,
         connectTimeout: CONNECT_TIMEOUT_MS,
         readTimeout: READ_TIMEOUT_MS
@@ -282,30 +334,16 @@ export class OnlineCache {
     }
   }
 
-  /** LRU 淘汰到上限内（在途下载不计入、不淘汰） */
+  /** 超限淘汰：按 evictOrder 序删除（非钉住最旧在前、钉住垫后；在途不参与） */
   private evictIfNeeded(): void {
     let total = 0;
-    for (const key of this.index.keys()) {
-      const entry = this.index.get(key);
-      if (entry) {
-        total += entry.size;
-      }
+    for (const entry of this.index.values()) {
+      total += entry.size;
     }
     if (total <= MAX_CACHE_BYTES) {
       return;
     }
-    const ordered: string[] = [];
-    for (const key of this.index.keys()) {
-      if (!this.inflight.has(key)) {
-        ordered.push(key);
-      }
-    }
-    ordered.sort((a, b) => {
-      const ea = this.index.get(a);
-      const eb = this.index.get(b);
-      return (ea ? ea.lastAccess : 0) - (eb ? eb.lastAccess : 0);
-    });
-    for (const key of ordered) {
+    for (const key of evictOrder(this.index, this.pinned, this.inflight)) {
       if (total <= MAX_CACHE_BYTES) {
         break;
       }

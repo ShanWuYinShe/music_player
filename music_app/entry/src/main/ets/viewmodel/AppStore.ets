@@ -8,6 +8,9 @@ import display from '@ohos.display';
 import { MusicLibrary } from '../library/MusicLibrary';
 import { PlayerController } from '../player/PlayerController';
 import { OnlineSource } from '../source/MusicSource';
+import { OnlineSongStore } from '../source/OnlineSongStore';
+import { effectiveBaseUrl, isOnlineId } from '../source/OnlineApi';
+import { SongRecord } from '../model/Song';
 import { UserData } from './UserData';
 import { writeFormState, FormPlaybackState, readFormIds, CARD_ACTION_EVENT, appendCardProbe, toCardPayload } from '../common/FormStateFile';
 import { MicSpectrum } from '../common/MicSpectrum';
@@ -36,6 +39,9 @@ const FORM_PROGRESS_PUSH_MS = 1000;
 export class AppStore {
   readonly library: MusicLibrary = new MusicLibrary();
   readonly userData: UserData = new UserData();
+  /** 在线歌曲元数据注册表：收藏/播过的在线歌持久化（声明须先于 player，
+   * constructor 构造播放内核时注入） */
+  readonly onlineStore: OnlineSongStore = new OnlineSongStore();
   readonly player: PlayerController;
   readonly onlineSource: OnlineSource = new OnlineSource();
   /** 主 Ability 上下文（页面取 window 设置系统栏样式用） */
@@ -73,8 +79,8 @@ export class AppStore {
   private cardSubscriber: commonEventManager.CommonEventSubscriber | null = null;
 
   constructor() {
-    // 字段按声明顺序初始化，userData 先于 player 构造
-    this.player = new PlayerController(this.library, this.userData);
+    // 字段按声明顺序初始化，userData/onlineStore 先于 player 构造
+    this.player = new PlayerController(this.library, this.userData, this.onlineStore);
   }
 
   async init(context: common.UIAbilityContext): Promise<void> {
@@ -83,6 +89,9 @@ export class AppStore {
     this.onlineSource.configuredUrl = this.pref.getSync(KEY_ONLINE_BASE_URL, '') as string;
     // 在线列表缓存目录：注入即恢复持久化的默认视图（杀进程重开秒开在线页）
     this.onlineSource.setCacheDir(context.filesDir);
+    // 在线歌曲注册表：恢复收藏/播过的在线歌元数据——须先于 player.init，
+    // 续播恢复（restoreLastSession）经 findSong 兜底查本表
+    this.onlineStore.init(context.filesDir, this.onlineSource.baseUrl);
     this.micOn = this.pref.getSync(KEY_MIC_LIVE, false) as boolean;
     this.userData.init(this.pref);
     this.library.init(context);
@@ -99,8 +108,46 @@ export class AppStore {
     this.player.progressListener = () => {
       this.formTickBaseAt = Date.now();
     };
+    // 收藏的在线歌恢复钉住并补下载（上次未下完的整曲续传，不随切歌中止）
+    this.syncOnlinePins();
     this.syncFormState();
     this.subscribeCardActions();
+  }
+
+  /**
+   * 统一收藏入口（PlayerPage ♥ 按钮）：UserData 记账 + 在线歌注册表同步
+   * ——收藏即注册元数据（重启后喜欢列表可见可播）并钉住缓存、主动整曲
+   * 下载；取消收藏解除钉住（已下音频回归普通 LRU）。本地曲目仅记账。
+   */
+  toggleFavorite(song: SongRecord): boolean {
+    const fav = this.userData.toggleFavorite(song.id);
+    if (isOnlineId(song.id)) {
+      if (fav) {
+        this.onlineStore.upsert(song);
+      }
+      // 注册表只留收藏 ∪ 最近引用的在线歌（孤儿条目删除）
+      const keep = new Set<string>();
+      for (const id of this.userData.favoriteIds.concat(this.userData.recentIds)) {
+        if (isOnlineId(id)) {
+          keep.add(id);
+        }
+      }
+      this.onlineStore.retain(keep);
+      this.syncOnlinePins();
+    }
+    return fav;
+  }
+
+  /** 收藏的在线歌（经注册表取元数据）→ 播放内核钉住缓存并补下载 */
+  private syncOnlinePins(): void {
+    const songs: SongRecord[] = [];
+    for (const id of this.userData.favoriteIds) {
+      const song = this.onlineStore.get(id);
+      if (song !== null) {
+        songs.push(song);
+      }
+    }
+    this.player.syncOnlinePins(songs);
   }
 
   /**
@@ -371,6 +418,8 @@ export class AppStore {
     this.onlineConfigDirty = true;
     // 地址变更即 providers 缓存失效：换服务端后登录态可能不同
     this.providersFetchedAt = 0;
+    // 注册表条目流地址按新生效地址重拼（服务端 id 稳定，收藏/续播直达新服）
+    this.onlineStore.setBaseUrl(effectiveBaseUrl(trimmed));
     if (this.pref) {
       try {
         this.pref.putSync(KEY_ONLINE_BASE_URL, trimmed);
@@ -392,12 +441,16 @@ export class AppStore {
 
   /**
    * 清空曲库：先停播放（释放当前 fd），再删文件与索引、清用户数据。
+   * 收藏/最近随之清空，在线注册表条目成孤儿一并清掉、缓存钉住解除
+   * （已下音频回归普通 LRU，不删文件）。
    */
   clearLibrary(): void {
     this.player.stopPlayback();
     this.player.clearPlayNextQueue();
     this.library.clearAll();
     this.userData.clearAll();
+    this.onlineStore.retain(new Set<string>());
+    this.player.syncOnlinePins([]);
     this.player.refreshSongs();
   }
 

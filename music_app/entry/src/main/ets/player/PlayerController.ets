@@ -9,6 +9,7 @@ import { MusicLibrary } from '../library/MusicLibrary';
 import { UserData } from '../viewmodel/UserData';
 import { SessionController, SessionHandlers } from './SessionController';
 import { OnlineCache } from './OnlineCache';
+import { OnlineSongStore } from '../source/OnlineSongStore';
 
 const TAG = 'PlayerController';
 const DOMAIN = 0x0003;
@@ -86,6 +87,9 @@ export class PlayerController {
   private sleepTimerId: number = -1;
   /** 在线音频整曲缓存：复播走本地 fd，不重复耗流量（init 时传入 context） */
   private onlineCache: OnlineCache = new OnlineCache();
+  /** 在线歌曲元数据注册表（AppStore 注入）：播放查找兜底 + 播过/收藏的
+   * 在线歌 upsert（重启后喜欢/最近列表补位、续播恢复都靠它） */
+  private onlineStore: OnlineSongStore;
   /** 在线曲目是否允许进缓存：VIP 未登录试听片段不得缓存（登录后试听字节
    * 会污染完整音频），由 AppStore 按网易云登录态注入，默认全允许 */
   isOnlineCacheable: (song: SongRecord) => boolean = () => true;
@@ -127,9 +131,27 @@ export class PlayerController {
   /** 已处理播放失败的代际号：error 事件与 stateChange(error) 双入口去重 */
   private failureGen: number = -1;
 
-  constructor(library: MusicLibrary, userData: UserData) {
+  constructor(library: MusicLibrary, userData: UserData, onlineStore: OnlineSongStore) {
     this.library = library;
     this.userData = userData;
+    this.onlineStore = onlineStore;
+  }
+
+  /**
+   * 同步收藏钉住与补下载（AppStore 在启动恢复、收藏切换、清空曲库后调用）：
+   * favoriteSongs 为当前仍收藏的在线曲目（元数据来自注册表）——整表替换
+   * 缓存 pin 集合；未缓存且允许缓存（VIP 未登录试听除外）的排队整曲下载。
+   */
+  syncOnlinePins(favoriteSongs: SongRecord[]): void {
+    const pinned = new Set<string>();
+    for (const song of favoriteSongs) {
+      pinned.add(song.id);
+      if (!this.onlineCache.has(song.id) && this.isOnlineCacheable(song)) {
+        // 收藏下载不随切歌中止（与播放伴随下载不同）
+        this.onlineCache.prefetch(song.id, song.fileName, () => true);
+      }
+    }
+    this.onlineCache.setPinned(pinned);
   }
 
   /** 应用启动时初始化（UIAbility onCreate 调用） */
@@ -221,6 +243,10 @@ export class PlayerController {
     this.notifyState('song');
     this.pendingSeekMs = 0;
     this.userData.addRecent(id);
+    if (isNetworkUrl(song.fileName)) {
+      // 播过的在线歌注册元数据：重启后最近播放列表补位、续播可恢复
+      this.onlineStore.upsert(song);
+    }
     this.loadAndPlay(song);
   }
 
@@ -552,12 +578,13 @@ export class PlayerController {
     this.songIndex = index;
   }
 
-  /** 队列查找：当前队列索引优先，本地曲库兜底（启动恢复等场景） */
+  /** 队列查找：当前队列索引优先，本地曲库兜底（启动恢复等场景），
+   * 在线注册表末位兜底（收藏/最近里的在线歌不在前两者时的点播与续播恢复） */
   private findSong(id: string): SongRecord | null {
     if (id === '') {
       return null;
     }
-    return this.songIndex.get(id) ?? this.library.getSongById(id);
+    return this.songIndex.get(id) ?? this.library.getSongById(id) ?? this.onlineStore.get(id);
   }
 
   /** 加载曲目并自动播放：重建 AVPlayer 实例，状态推进全部由 stateChange 事件驱动 */

@@ -5,6 +5,7 @@ import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
+import { isOnlineId } from '../source/OnlineApi';
 import { SongItem } from '../components/SongItem';
 import { MiniPlayerBar, MiniInfo, MINI_BAR_HEIGHT } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
@@ -203,7 +204,11 @@ struct Index {
       tab: this.tab,
       sort: this.sortMode,
       favoriteIds: appStore.userData.favoriteIds,
-      recentIds: appStore.userData.recentIds
+      recentIds: appStore.userData.recentIds,
+      // 喜欢/最近的在线歌经注册表补位与本地歌混排。注册表本身非响应式，
+      // 但收藏/播放在线歌的动作都先改写 favoriteIds/recentIds（@Trace），
+      // 本 @Computed 随之重算，届时读到的注册表已是最新
+      onlineSongs: appStore.onlineStore.all()
     };
     return filterAndSort(appStore.player.songs, opts);
   }
@@ -218,8 +223,12 @@ struct Index {
   get tabCounts(): Map<LibraryTab, number> {
     const counts = new Map<LibraryTab, number>();
     counts.set(LibraryTab.ALL, appStore.player.songs.length);
-    // O(曲目数+记录数)：以现有曲目 id 建 Set 替代逐条线性扫
+    // O(曲目数+记录数)：以现有曲目 id 建 Set 替代逐条线性扫；喜欢/最近的
+    // 在线歌经注册表补位（与 filteredSongs 同源，全部 Tab 不含在线歌）
     const known = new Set(appStore.player.songs.map((song) => song.id));
+    for (const song of appStore.onlineStore.all()) {
+      known.add(song.id);
+    }
     let favCount = 0;
     for (const id of appStore.userData.favoriteIds) {
       if (known.has(id)) {
@@ -706,7 +715,7 @@ struct Index {
           const count = appStore.player.queueNext(song.id);
           promptAction.showToast({ message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中' });
         })
-      if (this.sourceTab === SourceTab.LOCAL) {
+      if (this.sourceTab === SourceTab.LOCAL && !isOnlineId(song.id)) {
         MenuItem({
           symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.trash')),
           content: '从曲库删除'
