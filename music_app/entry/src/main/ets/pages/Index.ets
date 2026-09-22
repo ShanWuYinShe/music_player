@@ -2,6 +2,7 @@ import displaySync from '@ohos.graphics.displaySync';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { dayPhaseOverlay } from '../common/InkMood';
 import { picker } from '@kit.CoreFileKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
@@ -1151,7 +1152,11 @@ struct Index {
       if (reqId !== this.onlineRequestId || this.homeTab !== HomeTab.ONLINE) {
         return;
       }
-      this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
+      // http 错误是 {code,message} 形态而非 Error 实例（如 2300006 DNS 解析
+      // 失败）：统一按字段提取，避免有价值的原因被显示成「未知错误」
+      const be = err as BusinessError;
+      const detail = be.message !== undefined && be.message !== '' ? be.message : '未知错误';
+      this.onlineError = `连接失败：${detail}`;
       if (this.onlineSongs.length > 0) {
         // 拉取失败但有旧缓存：队列本就是旧列表，无需重复 setQueue，
         // 只提示继续用旧列表
