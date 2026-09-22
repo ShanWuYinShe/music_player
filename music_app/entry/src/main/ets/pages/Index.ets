@@ -393,57 +393,64 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 8, top: 4, bottom: 2 })
 
-        // 一级签 Tabs（系统滑动手势 + 切换动画）：TabContent 不带 tabBar
-        // （系统栏定高 91vp 且两项左右散开，不符合分段控件观感），切换条用
-        // 自绘排印签行（点选经 switchTab 改受控 index；滑动经 onChange 回写）
-        Tabs({ barPosition: BarPosition.Start, index: this.homeTab }) {
-          TabContent() {
-            this.ContentTabBody(this.localScroller)
-          }
+        // 列表区（Stack 让回顶按钮悬浮其上——旧版按钮插在 Column 布局流
+        // 内，一出现就挤占 layoutWeight 列表视口、整列表跳缩一截）：
+        // TabContent 不带 tabBar（系统栏定高 91vp 且两项左右散开，不符合
+        // 分段控件观感），切换条用自绘排印签行（点选经 switchTab 改受控
+        // index；滑动经 onChange 回写）
+        Stack({ alignContent: Alignment.BottomEnd }) {
+          Tabs({ barPosition: BarPosition.Start, index: this.homeTab }) {
+            TabContent() {
+              this.ContentTabBody(this.localScroller)
+            }
 
-          TabContent() {
-            this.ContentTabBody(this.favScroller)
-          }
+            TabContent() {
+              this.ContentTabBody(this.favScroller)
+            }
 
-          TabContent() {
-            this.ContentTabBody(this.recentScroller)
-          }
+            TabContent() {
+              this.ContentTabBody(this.recentScroller)
+            }
 
-          TabContent() {
-            if (this.filteredSongs.length === 0) {
-              this.OnlineStatusView()
-            } else {
-              // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
-              Refresh({ refreshing: $$this.isRefreshing }) {
-                this.SongList(this.onlineScroller)
+            TabContent() {
+              if (this.filteredSongs.length === 0) {
+                this.OnlineStatusView()
+              } else {
+                // 在线列表：下拉刷新（HarmonyOS 标准刷新交互），刷新态由加载流程收尾
+                Refresh({ refreshing: $$this.isRefreshing }) {
+                  this.SongList(this.onlineScroller)
+                }
+                .onRefreshing(() => {
+                  this.enterOnline(this.searchText.trim(), true).finally(() => {
+                    this.isRefreshing = false;
+                  });
+                })
+                // TabContent 非线性布局：layoutWeight 失效致内容居中留白，
+                // 用足高替代（空态 Column 居中即所求，保留 layoutWeight 无碍）
+                .height('100%')
               }
-              .onRefreshing(() => {
-                this.enterOnline(this.searchText.trim(), true).finally(() => {
-                  this.isRefreshing = false;
-                });
-              })
-              // TabContent 非线性布局：layoutWeight 失效致内容居中留白，
-              // 用足高替代（空态 Column 居中即所求，保留 layoutWeight 无碍）
-              .height('100%')
             }
           }
+          // TabContent 不挂 tabBar 时系统仍保留 91vp 空栏（实测截图布局树
+          // TabBar bounds 182px），barHeight(0)+barOverlap 压掉，页面零空隙
+          .barHeight(0)
+          .barOverlap(true)
+          .width('100%')
+          .height('100%')
+          .onChange((index: number) => {
+            if (index !== this.homeTab) {
+              this.switchTab(index as HomeTab);
+            }
+          })
+
+          // 底部回顶（FAB 悬浮）：远离顶部时才出现在列表右下角，回到顶部
+          // 自动收起；悬浮不参与布局流，出现/消失不再改变列表视口高度
+          if (this.showBackTop) {
+            this.BottomToolbar()
+          }
         }
-        // TabContent 不挂 tabBar 时系统仍保留 91vp 空栏（实测截图布局树
-        // TabBar bounds 182px），barHeight(0)+barOverlap 压掉，页面零空隙
-        .barHeight(0)
-        .barOverlap(true)
         .layoutWeight(1)
         .width('100%')
-        .onChange((index: number) => {
-          if (index !== this.homeTab) {
-            this.switchTab(index as HomeTab);
-          }
-        })
-
-        // 底部回顶：远离顶部时才在拇指区占位，回到顶部自动收起不留白
-        if (this.showBackTop) {
-          this.BottomToolbar()
-        }
 
         // 底部迷你播放条（常驻：无播放曲目时显示占位态，不再随曲目显隐
         // 造成 UI 跳动——用户决策）。其内容经 @Local 镜像（见 mini 字段注释）；
@@ -582,26 +589,22 @@ struct Index {
     }
   }
 
-  /** 底部回顶（情境出现才占位）：底部常驻触发器只剩它 + 迷你条，
-   * 源/分类/排序已回顶部，悬停映射由迷你条下滑触发 */
+  /** 底部回顶按钮（FAB 悬浮于列表区右下角，不参与布局流）：18 + 上下
+   * padding 22 = 40vp 热区；出现/消失不改变列表视口高度 */
   @Builder
   BottomToolbar() {
-    Row() {
-      Blank()
-      SymbolGlyph($r('sys.symbol.arrow_up'))
-        .fontSize(18)
-        .fontColor([$r('app.color.on_accent')])
-        // 18 + 上下 padding 22 = 40vp 热区
-        .padding(11)
-        .borderRadius(20)
-        .backgroundColor($r('app.color.accent'))
-        .accessibilityText('回到顶部')
-        .onClick(() => {
-          this.activeScroller().scrollToIndex(0, true);
-        })
-    }
-    .width('100%')
-    .padding({ left: 12, right: 12, top: 4, bottom: 8 })
+    SymbolGlyph($r('sys.symbol.arrow_up'))
+      .fontSize(18)
+      .fontColor([$r('app.color.on_accent')])
+      .padding(11)
+      .borderRadius(20)
+      .backgroundColor($r('app.color.accent'))
+      .shadow({ radius: 12, color: 'rgba(0,0,0,0.25)', offsetY: 2 })
+      .margin({ right: 16, bottom: 14 })
+      .accessibilityText('回到顶部')
+      .onClick(() => {
+        this.activeScroller().scrollToIndex(0, true);
+      })
   }
 
   /** 排序按钮（本地源语义：在线列表为服务端顺序，无排序入口）。
