@@ -29,6 +29,12 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 别名已移除�
    `https://music.chaoset.com/api/v1` 拉一次 songs；浏览器登录 /admin/ 试传一个
    小文件并确认曲库列表出现。
 
+## 版本统一
+
+基础镜像版本由 workwork 仓库的 `versions.env` 作主本统一管理（本仓
+`deploy/versions.env` 是其在音乐站的落地）。跨仓校验/同步工具：workwork 仓
+`scripts/sync-versions.sh check|sync`；勿单方面修改本仓版本值。
+
 ## 运维
 
 - **版本升级**：改 `versions.env` → `make build` → `make up <svc...>`；
