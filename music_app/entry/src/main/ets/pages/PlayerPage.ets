@@ -243,13 +243,13 @@ export struct PlayerPage {
               .height('100%')
               .linearGradient({
                 angle: 135,
-                colors: [['#1D1B18', 0], ['#0C0B0A', 0.55], ['#060606', 1]]
+                colors: [[$r('app.color.viz_stage_grad_far'), 0], [$r('app.color.viz_stage_grad_mid'), 0.55], [$r('app.color.viz_stage_grad_near'), 1]]
               })
           }
           Column()
             .width('100%')
             .height('100%')
-            .backgroundColor('rgba(10,10,9,0.52)')
+            .backgroundColor($r('app.color.viz_scrim'))
         }
         .width('100%')
         .height('100%')
@@ -268,7 +268,7 @@ export struct PlayerPage {
             .height(132)
             .linearGradient({
               angle: 180,
-              colors: [['rgba(5,4,3,0.58)', 0], ['rgba(5,4,3,0)', 1]]
+              colors: [[$r('app.color.viz_fade_soft'), 0], [$r('app.color.viz_fade_clear'), 1]]
             })
           Blank()
           Column()
@@ -276,7 +276,7 @@ export struct PlayerPage {
             .height(380)
             .linearGradient({
               angle: 0,
-              colors: [['rgba(5,4,3,0.80)', 0], ['rgba(5,4,3,0)', 1]]
+              colors: [[$r('app.color.viz_fade_strong'), 0], [$r('app.color.viz_fade_clear'), 1]]
             })
         }
         .width('100%')
@@ -504,7 +504,7 @@ export struct PlayerPage {
           .width('100%')
           .constraintSize({ minHeight: 44 })
           .borderRadius(12)
-          .backgroundColor('rgba(255,255,255,0.06)')
+          .backgroundColor($r('app.color.viz_btn_bg'))
           .padding({ left: 14, right: 12 })
           .margin({ top: 10 })
           .accessibilityText('打开播放队列')
@@ -546,7 +546,7 @@ export struct PlayerPage {
           .borderRadius(18)
           .backgroundColor($r('app.color.accent'))
           .accessibilityText(this.isPlaying ? '暂停' : '播放')
-          .shadow({ radius: 18, color: 'rgba(0,0,0,0.4)', offsetY: 3 })
+          .shadow({ radius: 18, color: $r('app.color.viz_shadow'), offsetY: 3 })
           .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
           .onClick(() => this.player.togglePlay())
 
@@ -619,7 +619,7 @@ export struct PlayerPage {
           // minHeight 替代固定高度：触控热区达标（≥40vp），系统大字体时随内容撑高
           .constraintSize({ minHeight: 40 })
           .borderRadius(20)
-          .backgroundColor('rgba(255,255,255,0.08)')
+          .backgroundColor($r('app.color.viz_btn_bg_strong'))
           .padding({ left: 12, right: 12 })
           .accessibilityText('定时关闭')
           .bindMenu(this.SleepMenu())
@@ -869,29 +869,29 @@ export struct PlayerPage {
           Stack() {
             Text(this.song !== null ? this.song.title.substring(0, 1) : '♪')
               .fontSize(72)
-              .fontColor('#8E8878')
+              .fontColor($r('app.color.viz_fg_faint'))
           }
           .width('100%')
           .aspectRatio(1)
           .borderRadius(18)
-          .backgroundColor('#2A2823')
+          .backgroundColor($r('app.color.viz_card_bg_alt'))
         }
         Text(this.song !== null ? this.song.title : '未在播放')
           .fontSize(22)
-          .fontColor('#F3EFE4')
+          .fontColor($r('app.color.viz_fg'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
         Text(this.song !== null ? this.song.artist : '')
           .fontSize(14)
-          .fontColor('#C6C0B0')
+          .fontColor($r('app.color.viz_fg_soft'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
         // 题款：按歌名稳定选取的山水词句（隐约居中，不与落款抢）
         Text(this.song !== null ? verseFor(this.song.title) : '')
           .fontSize(11)
-          .fontColor('#8E8878')
+          .fontColor($r('app.color.viz_fg_faint'))
           .letterSpacing(3)
           .textAlign(TextAlign.Center)
           .maxLines(1)
@@ -902,7 +902,7 @@ export struct PlayerPage {
           SealMark({ text: '乐', side: 16, radius: 3 })
           Text('音乐播放器')
             .fontSize(11)
-            .fontColor('#8E8878')
+            .fontColor($r('app.color.viz_fg_faint'))
             .letterSpacing(2)
         }
         .margin({ top: 2 })
@@ -910,7 +910,7 @@ export struct PlayerPage {
       }
       .padding(18)
       .borderRadius(24)
-      .backgroundColor('#1E1C19')
+      .backgroundColor($r('app.color.viz_card_bg'))
       .id('share_card')
 
       SaveButton({ text: SaveDescription.SAVE_IMAGE, buttonType: ButtonType.Capsule })

@@ -294,7 +294,7 @@ export struct CoverSwipe {
               .width(this.widthVp)
               .height(this.widthVp)
               .scale({ x: this.playScale, y: this.playScale })
-              .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+              .shadow({ radius: 24, color: $r('app.color.cover_shadow'), offsetY: 8 })
           } else {
             Column()
               .width(this.widthVp)
@@ -310,7 +310,7 @@ export struct CoverSwipe {
             .width(this.widthVp)
             .height(this.widthVp)
             .scale({ x: this.playScale, y: this.playScale })
-            .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+            .shadow({ radius: 24, color: $r('app.color.cover_shadow'), offsetY: 8 })
           if (this.trioR !== null) {
             CoverArt({
               coverPath: (this.trioR as CoverRef).path,
@@ -321,7 +321,7 @@ export struct CoverSwipe {
               .width(this.widthVp)
               .height(this.widthVp)
               .scale({ x: this.playScale, y: this.playScale })
-              .shadow({ radius: 24, color: 'rgba(0,0,0,0.5)', offsetY: 8 })
+              .shadow({ radius: 24, color: $r('app.color.cover_shadow'), offsetY: 8 })
           } else {
             Column()
               .width(this.widthVp)

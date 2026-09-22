@@ -584,7 +584,7 @@ struct Index {
       .padding(11)
       .borderRadius(20)
       .backgroundColor($r('app.color.accent'))
-      .shadow({ radius: 12, color: 'rgba(0,0,0,0.25)', offsetY: 2 })
+      .shadow({ radius: 12, color: $r('app.color.floating_shadow'), offsetY: 2 })
       .margin({ right: 16, bottom: 14 })
       .accessibilityText('回到顶部')
       .onClick(() => {

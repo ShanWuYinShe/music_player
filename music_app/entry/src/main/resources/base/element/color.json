@@ -91,6 +91,62 @@
     {
       "name": "viz_line",
       "value": "#464135"
+    },
+    {
+      "name": "viz_stage_grad_far",
+      "value": "#1D1B18"
+    },
+    {
+      "name": "viz_stage_grad_mid",
+      "value": "#0C0B0A"
+    },
+    {
+      "name": "viz_stage_grad_near",
+      "value": "#060606"
+    },
+    {
+      "name": "viz_scrim",
+      "value": "#850A0A09"
+    },
+    {
+      "name": "viz_fade_soft",
+      "value": "#94050403"
+    },
+    {
+      "name": "viz_fade_strong",
+      "value": "#CC050403"
+    },
+    {
+      "name": "viz_fade_clear",
+      "value": "#00050403"
+    },
+    {
+      "name": "viz_btn_bg",
+      "value": "#0FFFFFFF"
+    },
+    {
+      "name": "viz_btn_bg_strong",
+      "value": "#14FFFFFF"
+    },
+    {
+      "name": "viz_shadow",
+      "value": "#66000000"
+    },
+    {
+      "name": "viz_card_bg",
+      "value": "#1E1C19"
+    },
+    {
+      "name": "viz_card_bg_alt",
+      "value": "#2A2823"
+    },
+    {
+      "name": "cover_shadow",
+      "value": "#80000000"
+    },
+    {
+      "name": "floating_shadow",
+      "value": "#40000000"
     }
   ]
 }
