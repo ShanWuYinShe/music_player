@@ -453,8 +453,7 @@ struct Index {
           info: this.mini,
           bottomInset: appStore.safeBottomVp,
           onTapOpen: () => this.pathStack.pushPathByName('player', null),
-          onSwipeTab: (direction: number) => this.cycleTab(direction),
-          onSwipeSource: (direction: number) => this.cycleSource(direction)
+          onSwipeCycle: (direction: number) => this.cycleTab(direction)
         })
         }
         .width('100%')
@@ -947,22 +946,13 @@ struct Index {
     this.activeScroller().scrollToIndex(0);
   }
 
-  /** 迷你条弧线手势：曲库 ↔ 在线 直达切换（> 去在线 / < 回曲库）。
-   * 不弹 toast——切换结果由一级签高亮直接可见（2026-09 用户决策去提示） */
-  private cycleSource(direction: number): void {
-    const next = direction > 0 ? HomeTab.ONLINE : HomeTab.LIBRARY;
-    if (next !== this.homeTab) {
-      this.switchTab(next);
-    }
-  }
-
-  /** 迷你条横滑手势：内容签循环（> 下一个 / < 上一个，曲库→喜欢→最近回绕）。
-   * 在线签不参与——保持「在线需显式切换（点签/折返）」语义；目标为当前签时不动作 */
+  /** 迷你条横向笔画（横滑/折返统一）：一级签相邻循环——> 下一个 /
+   * < 上一个，四签全参与、越界回绕。一级签扁平化后无「分类/源」两层，
+   * 旧「折返切源+横滑切分类」双事件会让惯用折返笔画的用户永远只在
+   * 曲库↔在线之间跳（真机反馈），统一为相邻移动后任何横向笔画都能
+   * 到达全部签。不弹 toast——结果由一级签高亮直接可见 */
   private cycleTab(direction: number): void {
-    if (this.homeTab === HomeTab.ONLINE) {
-      return;
-    }
-    const order: HomeTab[] = [HomeTab.LIBRARY, HomeTab.FAVORITES, HomeTab.RECENT];
+    const order: HomeTab[] = [HomeTab.LIBRARY, HomeTab.FAVORITES, HomeTab.RECENT, HomeTab.ONLINE];
     const idx = order.indexOf(this.homeTab);
     const next = order[(idx + direction + order.length) % order.length];
     if (next !== this.homeTab) {
