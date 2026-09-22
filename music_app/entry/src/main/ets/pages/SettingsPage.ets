@@ -22,6 +22,8 @@ export struct SettingsPage {
    * 弱网重进不再停留「获取中…」 */
   @Local appVersion: string = '…';
   @Local serverVersion: string = appStore.serverVersionCache || '获取中…';
+  /** 本地曲库首数镜像：library 非响应式,清空按钮动作里手动归零刷新 */
+  @Local libraryCount: number = appStore.library.getAllSongs().length;
 
   aboutToAppear(): void {
     // 版本号直接在 BundleInfo 顶层（versionName, since 9）——旧代码读
@@ -135,7 +137,7 @@ export struct SettingsPage {
         Text('在线音乐源')
           .fontSize(16)
           .fontColor($r('app.color.ink'))
-        Text('music_server 服务地址（含 /api 前缀），留空使用默认服务。')
+        Text('服务地址（含 /api 前缀），留空使用默认服务。')
           .fontSize(12)
           .fontColor($r('app.color.ink_soft'))
         TextInput({ text: this.urlInput, placeholder: DEFAULT_ONLINE_BASE_URL })
@@ -205,7 +207,7 @@ export struct SettingsPage {
           Text('清空曲库')
             .fontSize(15)
             .fontColor($r('app.color.danger'))
-          Text(`删除全部 ${appStore.library.getAllSongs().length} 首歌曲的文件与记录，同时清空喜欢和播放记录，不可恢复。`)
+          Text(`删除全部 ${this.libraryCount} 首歌曲的文件与记录，同时清空喜欢和播放记录，不可恢复。`)
             .fontSize(12)
             .fontColor($r('app.color.ink_soft'))
         }
@@ -220,7 +222,7 @@ export struct SettingsPage {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .backgroundColor($r('app.color.surface_alt'))
           .fontColor($r('app.color.danger'))
-          .enabled(appStore.library.getAllSongs().length > 0 || appStore.userData.favoriteIds.length > 0)
+          .enabled(this.libraryCount > 0 || appStore.userData.favoriteIds.length > 0)
           .onClick(() => this.confirmClearLibrary())
       }
       .width('100%')
@@ -295,7 +297,7 @@ export struct SettingsPage {
   private librarySummary(): string {
     // 只统计本地曲库（在线模式下 player.songs 是在线列表，不代表本地文件）
     const songs = appStore.library.getAllSongs();
-    if (songs.length === 0) {
+    if (this.libraryCount === 0 || songs.length === 0) {
       return '还没有歌曲，去首页导入吧';
     }
     const total = formatTotalDuration(songs.reduce((sum, song) =>
@@ -325,6 +327,7 @@ export struct SettingsPage {
         fontColor: $r('app.color.danger'),
         action: () => {
           appStore.clearLibrary();
+          this.libraryCount = 0; // 统计卡/危险区计数同步归零（library 非响应式）
           promptAction.showToast({ message: '曲库已清空' });
         }
       }

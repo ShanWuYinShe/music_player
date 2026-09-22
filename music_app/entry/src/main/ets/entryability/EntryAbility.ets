@@ -33,14 +33,7 @@ export default class EntryAbility extends UIAbility {
     if (!params) {
       return;
     }
-    const method = params['method'];
-    if (method === 'toggle') {
-      appStore.player.togglePlay();
-    } else if (method === 'next') {
-      appStore.player.next();
-    } else if (method === 'previous') {
-      appStore.player.previous();
-    }
+    appStore.dispatchCardAction(String(params['method']));
   }
 
   onDestroy(): void {

@@ -181,8 +181,9 @@ export class PlayerController {
     this.rebuildIndex(this.songs);
   }
 
-  /** 切换为在线曲目队列（在线列表拉取成功后调用） */
-  setOnlineQueue(list: SongRecord[]): void {
+  /** 整体替换播放队列（在线列表拉取 / 喜欢·最近签点播与横滑前对齐可见
+   * 列表共用；插播队列与当前曲不受影响） */
+  setQueue(list: SongRecord[]): void {
     this.songs = list.slice();
     this.rebuildIndex(this.songs);
   }

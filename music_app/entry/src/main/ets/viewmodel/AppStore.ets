@@ -12,7 +12,7 @@ import { OnlineSongStore } from '../source/OnlineSongStore';
 import { effectiveBaseUrl, isOnlineId } from '../source/OnlineApi';
 import { SongRecord } from '../model/Song';
 import { UserData } from './UserData';
-import { writeFormState, FormPlaybackState, readFormIds, CARD_ACTION_EVENT, appendCardProbe, toCardPayload } from '../common/FormStateFile';
+import { writeFormState, FormPlaybackState, readFormIds, CARD_ACTION_EVENT, toCardPayload } from '../common/FormStateFile';
 import { MicSpectrum } from '../common/MicSpectrum';
 
 const TAG = 'AppStore';
@@ -158,30 +158,35 @@ export class AppStore {
    * 过来）：主进程存活即可后台响应播放控制，不拉起前台界面。
    */
   private subscribeCardActions(): void {
+    const ctx = this.abilityContext;
+    if (ctx === null) {
+      return; // 无 context 无法限定发布方（init 时序保证此处已注入）
+    }
     const subscriber = commonEventManager.createSubscriberSync({
-      events: [CARD_ACTION_EVENT]
+      events: [CARD_ACTION_EVENT],
+      // 只收本应用的卡片指令，屏蔽第三方伪造的公共事件
+      publisherBundleName: ctx.applicationInfo.name
     });
     commonEventManager.subscribe(subscriber, (err, data) => {
       if (err) {
         hilog.warn(DOMAIN, TAG, 'card action subscribe failed: %{public}s', JSON.stringify(err));
         return;
       }
-      const method = data.data;
-      hilog.info(DOMAIN, TAG, 'card action received: %{public}s', method);
-      const ctx = this.abilityContext;
-      if (ctx !== null) {
-        appendCardProbe(ctx.filesDir, `received ${method}`);
-      }
-      if (method === 'toggle') {
-        this.player.togglePlay();
-      } else if (method === 'next') {
-        this.player.next();
-      } else if (method === 'previous') {
-        this.player.previous();
-      }
+      this.dispatchCardAction(String(data.data));
     });
     this.cardSubscriber = subscriber;
     hilog.info(DOMAIN, TAG, 'card action subscriber registered');
+  }
+
+  /** 卡片播放控制指令唯一分派（call 指令与公共事件两条链路共用） */
+  dispatchCardAction(method: string): void {
+    if (method === 'toggle') {
+      this.player.togglePlay();
+    } else if (method === 'next') {
+      this.player.next();
+    } else if (method === 'previous') {
+      this.player.previous();
+    }
   }
 
   /** 应用销毁时退订卡片指令事件并撤秒推定时器（EntryAbility.onDestroy 调用） */
@@ -267,15 +272,17 @@ export class AppStore {
     if (ctx === null) {
       return;
     }
-    // 状态事件即重锚：启停/切歌瞬间进度锚定 currentTime，防止暂停期间
-    // 累计的墙钟差被计入插值
-    this.formTickBaseAt = Date.now();
-    const song = this.player.currentSong;
-    const duration = this.player.duration;
+    // 墙钟外推：真机后台 timeUpdate 停报时 currentTime 冻结，按上次采样
+    // 锚点补齐增量卡片进度才走准；算完即把本次采样设为新锚点（暂停/切歌
+    // 事件走不到外推分支、顺带重锚，不会把暂停期墙钟差计入）
+    const sampledAt = Date.now();
     let position = this.player.currentTime;
     if (this.player.isPlaying && this.formTickBaseAt > 0) {
-      position += Math.max(0, Date.now() - this.formTickBaseAt);
+      position += Math.max(0, sampledAt - this.formTickBaseAt);
     }
+    this.formTickBaseAt = sampledAt;
+    const song = this.player.currentSong;
+    const duration = this.player.duration;
     if (duration > 0 && position > duration) {
       position = duration;
     }
@@ -303,8 +310,9 @@ export class AppStore {
           // 卡片可能刚被移除，忽略单实例失败
         });
     }
-    // 秒推节奏探针：真机核验推送是否按秒到达（hilog | grep formPush）
-    hilog.info(DOMAIN, TAG, 'formPush pos=%{public}d playing=%{public}s reason=%{public}s',
+    // 推送节奏诊断日志降 debug：生产路径不再每秒刷 info（排查卡片时
+    // hilog -L debug | grep formPush 仍可用）
+    hilog.debug(DOMAIN, TAG, 'formPush pos=%{public}d playing=%{public}s reason=%{public}s',
       Math.floor(position), String(this.player.isPlaying), reason);
     // 定时器随播放态启停：暂停/停止即撤
     if (this.player.isPlaying) {
@@ -447,7 +455,19 @@ export class AppStore {
    * 收藏/最近随之清空，在线注册表条目成孤儿一并清掉、缓存钉住解除
    * （已下音频回归普通 LRU，不删文件）。
    */
+  /** 曲库已被清空（设置页危险操作）：页面在导航返回时消费此标志，把
+   * 最近冻结快照等派生态失效——跨页通知走标志而非事件，与在线配置变更
+   * 同一套模式 */
+  private libraryCleared = false;
+
+  consumeLibraryCleared(): boolean {
+    const cleared = this.libraryCleared;
+    this.libraryCleared = false;
+    return cleared;
+  }
+
   clearLibrary(): void {
+    this.libraryCleared = true;
     this.player.stopPlayback();
     this.player.clearPlayNextQueue();
     this.library.clearAll();

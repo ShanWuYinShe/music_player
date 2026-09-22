@@ -264,7 +264,11 @@ export class MusicLibrary {
     }
     const record = await this.makeRecord(target);
     if (this.songs.some((item) => item.id === record.id)) {
-      fs.unlinkSync(target); // stat 失败漏判的重复导入，丢弃新拷贝
+      try {
+        fs.unlinkSync(target); // stat 失败漏判的重复导入，丢弃新拷贝
+      } catch (err) {
+        // 删除失败不改判导入结果：文件留在原处，仍按「已在曲库」返回
+      }
       return null;
     }
     return record;

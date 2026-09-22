@@ -7,6 +7,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController, CoverRef } from '../player/PlayerController';
 import { ReloadDataSource } from '../common/ReloadDataSource';
+import { firstGlyph } from '../common/TextFormat';
 import { SongRecord } from '../model/Song';
 import { PlayMode, playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
@@ -880,7 +881,7 @@ export struct PlayerPage {
             .objectFit(ImageFit.Cover)
         } else {
           Stack() {
-            Text(this.song !== null ? this.song.title.substring(0, 1) : '♪')
+            Text(this.song !== null ? firstGlyph(this.song.title) : '♪')
               .fontSize(72)
               .fontColor($r('app.color.viz_fg_faint'))
           }

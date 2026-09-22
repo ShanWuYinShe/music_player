@@ -1,4 +1,5 @@
 import displaySync from '@ohos.graphics.displaySync';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { dayPhaseOverlay } from '../common/InkMood';
 import { picker } from '@kit.CoreFileKit';
 import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
@@ -14,6 +15,9 @@ import { SettingsPage } from './SettingsPage';
 
 /** 金色 accent 文件级常量：@Builder 内引用组件字段需 this 前缀，常量直引更净 */
 const CURRENT_TINT: Resource = $r('app.color.accent');
+
+const TAG = 'Index';
+const DOMAIN = 0x0003;
 
 /**
  * 首页一级签：曲库（本地全部）/ 喜欢 / 最近（两者跨源：本地+在线混排）
@@ -133,13 +137,15 @@ struct Index {
       //                      避免大曲库下每次播放/暂停全列表重建
       //   reason='song'    → 切歌，旧行与新行当前态都要刷，走整表 reload
       //   reason='prefs'   → 音量/模式/定时，不涉及行状态，跳过
+      //   reason='seek'    → 进度跳转，同样不涉及行状态，跳过（拖进度条
+      //                      每次都整表重建列表纯属浪费）
       // 其余（曲库变更等）同样整表 reload
       if (reason === 'playing') {
         const id = appStore.player.currentSongId;
         if (id !== '') {
           this.songSource.notifyChanged(id);
         }
-      } else if (reason !== 'prefs') {
+      } else if (reason !== 'prefs' && reason !== 'seek') {
         this.songSource.reload(this.filteredSongs);
       }
     };
@@ -430,7 +436,7 @@ struct Index {
           // 底部回顶（FAB 悬浮）：远离顶部时才出现在列表右下角，回到顶部
           // 自动收起；悬浮不参与布局流，出现/消失不再改变列表视口高度
           if (this.showBackTop) {
-            this.BottomToolbar()
+            this.BackToTopButton()
           }
         }
         .layoutWeight(1)
@@ -577,7 +583,7 @@ struct Index {
   /** 底部回顶按钮（FAB 悬浮于列表区右下角，不参与布局流）：18 + 上下
    * padding 22 = 40vp 热区；出现/消失不改变列表视口高度 */
   @Builder
-  BottomToolbar() {
+  BackToTopButton() {
     SymbolGlyph($r('sys.symbol.arrow_up'))
       .fontSize(18)
       .fontColor([$r('app.color.on_accent')])
@@ -635,7 +641,7 @@ struct Index {
    * 队列已是服务端列表，直接播 */
   private playFromList(id: string): void {
     if (this.homeTab === HomeTab.FAVORITES || this.homeTab === HomeTab.RECENT) {
-      appStore.player.setOnlineQueue(this.filteredSongs.slice());
+      appStore.player.setQueue(this.filteredSongs.slice());
     }
     appStore.player.playSong(id);
   }
@@ -920,6 +926,11 @@ struct Index {
     if (this.homeTab === HomeTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
       this.enterOnline(this.searchText.trim(), true);
     }
+    if (appStore.consumeLibraryCleared()) {
+      // 曲库被清空：最近冻结快照已成幽灵列表，失效回 live（与删歌/导入同语义）
+      this.recentFrozen = null;
+      this.songSource.reload(this.filteredSongs);
+    }
   }
 
   /** 切换一级签：内容签（曲库/喜欢/最近）统一回读本地曲库队列——队列是
@@ -954,7 +965,7 @@ struct Index {
         // 锁屏、卡片走同一队列全部一致；离签 refreshSongs 已自愈
         const snap = this.recentFrozen;
         if (snap !== null && snap.length > 0) {
-          appStore.player.setOnlineQueue(snap.slice());
+          appStore.player.setQueue(snap.slice());
         }
       } else {
         this.recentFrozen = null;
@@ -963,7 +974,7 @@ struct Index {
           // 下一首未必是收藏，会滑到列表外的歌
           const fav = this.filteredSongs;
           if (fav.length > 0) {
-            appStore.player.setOnlineQueue(fav.slice());
+            appStore.player.setQueue(fav.slice());
           }
         }
       }
@@ -1090,7 +1101,7 @@ struct Index {
     if (cached !== null) {
       this.onlineSongs = cached.songs;
       this.loggedIn = appStore.neteaseLoggedIn;
-      appStore.player.setOnlineQueue(cached.songs);
+      appStore.player.setQueue(cached.songs);
       if (cached.fresh) {
         // 登录态不阻塞展示（下一首真正起播由 isOnlineCacheable 实时读取
         // appStore.neteaseLoggedIn）：fire-and-forget，回来仅更新提示
@@ -1125,14 +1136,14 @@ struct Index {
         // （切回在线时 switchTab 会重新拉取）
       }
       this.onlineSongs = list;
-      appStore.player.setOnlineQueue(list);
+      appStore.player.setQueue(list);
     } catch (err) {
       if (reqId !== this.onlineRequestId || this.homeTab !== HomeTab.ONLINE) {
         return;
       }
       this.onlineError = `连接失败：${err instanceof Error ? err.message : '未知错误'}`;
       if (this.onlineSongs.length > 0) {
-        // 拉取失败但有旧缓存：队列本就是旧列表，无需重复 setOnlineQueue，
+        // 拉取失败但有旧缓存：队列本就是旧列表，无需重复 setQueue，
         // 只提示继续用旧列表
         promptAction.showToast({ message: '在线列表拉取失败，正在展示上次结果' });
       }
@@ -1180,8 +1191,10 @@ struct Index {
         promptAction.showToast({ message: message });
       }
     } catch (err) {
-      // 用户取消选择不提示
-      console.info(`picker canceled or failed: ${JSON.stringify(err)}`);
+      // 用户取消选择不提示（取消与失败同路径返回，无从区分）；真实 IO
+      // 失败也在本条日志里，可按 code 定位
+      hilog.warn(DOMAIN, TAG, 'import picker failed or canceled: %{public}s',
+        JSON.stringify(err));
     } finally {
       this.scanning = false;
     }

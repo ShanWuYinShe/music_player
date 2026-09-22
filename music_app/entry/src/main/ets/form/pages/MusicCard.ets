@@ -1,3 +1,6 @@
+import { firstGlyph } from '../../common/TextFormat';
+import { cardPlayAction } from '../CardActions';
+
 let cardStorage = new LocalStorage();
 
 /**
@@ -15,16 +18,7 @@ struct MusicCard {
   @LocalStorageProp('cover') cover: string = '';
   @LocalStorageProp('playing') playing: boolean = false;
 
-  /** 控制按钮：message 型发指令到 FormAbility（经公共事件转发主进程后台
-   * 执行，不拉起应用）。call 型真机不送达、router 型会拉前台，均已踩坑 */
-  private callAction(method: string): void {
-    postCardAction(this, {
-      action: 'message',
-      abilityName: 'MusicFormAbility',
-      params: { method: method }
-    });
-  }
-
+  /** 控制按钮统一走 form/CardActions 的 cardPlayAction */
   build() {
     Column() {
       Row() {
@@ -36,7 +30,7 @@ struct MusicCard {
             .objectFit(ImageFit.Cover)
         } else {
           Stack() {
-            Text(this.title !== '' ? this.title.substring(0, 1) : '♪')
+            Text(this.title !== '' ? firstGlyph(this.title) : '♪')
               .fontSize(44)
               .fontWeight(FontWeight.Bold)
               .fontColor('#8E8878')
@@ -77,17 +71,17 @@ struct MusicCard {
         Image($r('app.media.ic_card_prev'))
           .width(26)
           .height(26)
-          .onClick(() => this.callAction('previous'))
+          .onClick(() => cardPlayAction(this, 'previous'))
           .padding(4)
         Image(this.playing ? $r('app.media.ic_card_pause') : $r('app.media.ic_card_play'))
           .width(40)
           .height(40)
-          .onClick(() => this.callAction('toggle'))
+          .onClick(() => cardPlayAction(this, 'toggle'))
           .padding(4)
         Image($r('app.media.ic_card_next'))
           .width(26)
           .height(26)
-          .onClick(() => this.callAction('next'))
+          .onClick(() => cardPlayAction(this, 'next'))
           .padding(4)
       }
       .justifyContent(FlexAlign.Center)

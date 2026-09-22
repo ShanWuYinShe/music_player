@@ -32,23 +32,6 @@ export interface FormPlaybackState {
   anchorAt: number;
 }
 
-/** 卡片动作诊断探针落盘路径（真机验证用：订阅回调收到指令即记一行） */
-export function cardProbePath(filesDir: string): string {
-  return `${filesDir}/card_probe.log`;
-}
-
-/** 追加一条诊断行（订阅注册/指令收到）；失败静默 */
-export function appendCardProbe(filesDir: string, line: string): void {
-  try {
-    const file = fs.openSync(cardProbePath(filesDir),
-      fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.APPEND);
-    fs.writeSync(file.fd, `${Date.now()} ${line}\n`);
-    fs.closeSync(file);
-  } catch (err) {
-    // 诊断探针失败不影响功能
-  }
-}
-
 /** 状态快照落盘路径（主进程写 / FormExtension 进程读的进程间交接文件） */
 function formStatePath(filesDir: string): string {
   return `${filesDir}/form_state.json`;

@@ -247,10 +247,19 @@ export class OnlineCache {
     }
   }
 
-  /** 缓存文件名：id 含 online:/斜杠等非法字符，转义后加统一后缀 */
+  /** 缓存文件名：id 含 online:/斜杠等非法字符时转义——折叠有理论碰撞
+   *（不同 id 折出同名），转义过的名字追加短 hash 兜底；干净 id 名字不变，
+   * 已缓存文件零迁移 */
   private filePath(songId: string): string {
     const safe = songId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return `${this.dir}/${safe}.audio`;
+    if (safe === songId) {
+      return `${this.dir}/${safe}.audio`;
+    }
+    let hash = 5381;
+    for (let i = 0; i < songId.length; i++) {
+      hash = ((hash * 33) ^ songId.charCodeAt(i)) & 0x7fffffff;
+    }
+    return `${this.dir}/${safe}.${hash.toString(36)}.audio`;
   }
 
   private indexPath(): string {

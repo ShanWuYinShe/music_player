@@ -286,6 +286,8 @@ export struct CoverSwipe {
         Row({ space: CELL_GAP_VP }) {
           if (this.trioL !== null) {
             CoverArt({
+              // ArkTS 无非空断言，build 内 if 已保证非空：as 收窄是 DSL
+              // 惯用（分支内不能声明局部常量）
               coverPath: (this.trioL as CoverRef).path,
               seedId: (this.trioL as CoverRef).seed,
               fallbackText: (this.trioL as CoverRef).title,
