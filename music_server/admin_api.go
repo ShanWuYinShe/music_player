@@ -127,7 +127,7 @@ func (s *musicServer) handleAdminLibraryList(w http.ResponseWriter, r *http.Requ
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
-	// 分页:page 从 1,pageSize 默认 100 上限 500(全量曲库列表由业务 /api/songs 承载)。
+	// 分页:page 从 1,pageSize 默认 100 上限 500(全量曲库列表由业务 /api/v1/songs 承载)。
 	page, pageSize := 1, 100
 	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
 		page = p

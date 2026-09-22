@@ -88,7 +88,7 @@ func TestNeteaseSearchMerged(t *testing.T) {
 	server := newTestServerWithNetease(t, f.api.URL)
 
 	rec := httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?q=晴天", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?q=晴天", nil))
 	var resp struct {
 		Total int    `json:"total"`
 		Songs []Song `json:"songs"`
@@ -121,7 +121,7 @@ func TestNeteaseSearchMerged(t *testing.T) {
 
 	// 命中本地 + 追加网络:q 同时匹配本地与上游。
 	rec = httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?q=晨光", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?q=晨光", nil))
 	resp = struct {
 		Total int    `json:"total"`
 		Songs []Song `json:"songs"`
@@ -144,7 +144,7 @@ func TestNeteaseSearchDegraded(t *testing.T) {
 	server := newTestServerWithNetease(t, f.api.URL)
 
 	rec := httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?q=晨光", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?q=晨光", nil))
 	var resp struct {
 		Total int `json:"total"`
 	}
@@ -162,7 +162,7 @@ func TestNeteaseStreamProxy(t *testing.T) {
 	server := newTestServerWithNetease(t, f.api.URL)
 	mux := server.routes()
 
-	req := httptest.NewRequest("GET", "/api/stream/ne_167855", nil)
+	req := httptest.NewRequest("GET", "/api/v1/stream/ne_167855", nil)
 	req.Header.Set("Range", "bytes=4-7")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -184,7 +184,7 @@ func TestNeteaseStreamNoCopyright(t *testing.T) {
 	mux := server.routes()
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/stream/ne_186016", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/stream/ne_186016", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expect 404 for no-copyright song, got %d", rec.Code)
 	}
@@ -199,20 +199,20 @@ func TestNeteaseDisabled(t *testing.T) {
 	mux := server.routes()
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/stream/ne_167855", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/stream/ne_167855", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expect 404 when disabled, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 	if strings.Contains(rec.Body.String(), "netease") {
 		t.Fatal("providers should not list netease when disabled")
 	}
 
 	// q 搜索在禁用时也只走本地。
 	rec = httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?q=晨光", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?q=晨光", nil))
 	var resp struct {
 		Total int `json:"total"`
 	}
@@ -374,14 +374,14 @@ func TestProvidersNeteaseLoginState(t *testing.T) {
 	server := newTestServerWithNetease(t, f.api.URL) // 无 cookie
 	server.netease = newNeteaseClient(f.api.URL, "", "")
 	rec := httptest.NewRecorder()
-	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 	if !strings.Contains(rec.Body.String(), `"loggedIn":false`) {
 		t.Fatalf("expect loggedIn=false without cookie, got %s", rec.Body.String())
 	}
 
 	server.netease = newNeteaseClient(f.api.URL, "MUSIC_U=x", "")
 	rec = httptest.NewRecorder()
-	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 	if !strings.Contains(rec.Body.String(), `"loggedIn":true`) {
 		t.Fatalf("expect loggedIn=true with env cookie, got %s", rec.Body.String())
 	}
@@ -392,7 +392,7 @@ func TestProvidersNeteaseLoginState(t *testing.T) {
 	}
 	server.netease = newNeteaseClient(f.api.URL, "", cookiePath)
 	rec = httptest.NewRecorder()
-	server.handleProviders(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	server.handleProviders(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 	if !strings.Contains(rec.Body.String(), `"loggedIn":true`) {
 		t.Fatalf("expect loggedIn=true with cookie file, got %s", rec.Body.String())
 	}

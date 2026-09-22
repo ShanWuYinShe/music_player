@@ -11,7 +11,8 @@ export const ONLINE_ID_PREFIX = 'online:';
 
 /**
  * 默认在线服务地址：独立站 music.chaoset.com 的 /api/v1/ 规范前缀。
- * 旧默认 https://yinghuoren.com/api/music（workwork 聚合栈）经过渡反代仍可用，
+ * 旧默认 https://yinghuoren.com/api/music（workwork 聚合栈）已随过渡反代
+ * 移除而失效，按旧地址轮询的存量安装需在设置页手填新地址；
  * 已安装的旧版本与用户手填地址不受影响。用户在设置页配置的地址优先生效。
  */
 export const DEFAULT_ONLINE_BASE_URL = 'https://music.chaoset.com/api/v1';

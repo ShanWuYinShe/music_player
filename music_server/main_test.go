@@ -110,7 +110,7 @@ func TestHandleSongsSearchAndLimit(t *testing.T) {
 	server := newTestServer(t, mkLibrary(t))
 
 	rec := httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?q=晨光", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?q=晨光", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -127,7 +127,7 @@ func TestHandleSongsSearchAndLimit(t *testing.T) {
 
 	// limit 截断:total 反映全量,songs 只返回 limit 条。
 	rec = httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?limit=2", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?limit=2", nil))
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestHandleSongsSearchAndLimit(t *testing.T) {
 
 	// 非法 limit 拒绝。
 	rec = httptest.NewRecorder()
-	server.handleSongs(rec, httptest.NewRequest("GET", "/api/songs?limit=-1", nil))
+	server.handleSongs(rec, httptest.NewRequest("GET", "/api/v1/songs?limit=-1", nil))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid limit status %d", rec.Code)
 	}
@@ -158,7 +158,7 @@ func TestHandleStreamRange(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/stream/"+target.ID, nil)
+	req := httptest.NewRequest("GET", "/api/v1/stream/"+target.ID, nil)
 	req.Header.Set("Range", "bytes=0-0")
 	server.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusPartialContent {
@@ -170,7 +170,7 @@ func TestHandleStreamRange(t *testing.T) {
 
 	// 未知 ID 404。
 	rec = httptest.NewRecorder()
-	server.routes().ServeHTTP(rec, httptest.NewRequest("GET", "/api/stream/deadbeefdeadbeef", nil))
+	server.routes().ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/stream/deadbeefdeadbeef", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown id status %d", rec.Code)
 	}
@@ -182,13 +182,13 @@ func TestRateLimit(t *testing.T) {
 	handler := server.requireRateLimit(server.handleProviders)
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
-		handler(rec, httptest.NewRequest("GET", "/api/providers", nil))
+		handler(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("request %d status %d", i, rec.Code)
 		}
 	}
 	rec := httptest.NewRecorder()
-	handler(rec, httptest.NewRequest("GET", "/api/providers", nil))
+	handler(rec, httptest.NewRequest("GET", "/api/v1/providers", nil))
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("expect 429, got %d", rec.Code)
 	}
@@ -204,7 +204,7 @@ func TestHandleHealthRoutes(t *testing.T) {
 	version = "v0.0.0-test"
 	defer func() { version = old }()
 
-	for _, path := range []string{"/health", "/api/health"} {
+	for _, path := range []string{"/health", "/api/v1/health"} {
 		rec := httptest.NewRecorder()
 		server.routes().ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != http.StatusOK {

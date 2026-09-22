@@ -2,7 +2,7 @@
 
 `music_server` + `netease_api`（自 workwork 迁入）的独立站编排。与 workwork
 聚合栈零互通：独立 bridge、独立数据目录、独立版本来源（[versions.env](versions.env)）。
-API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 为过渡期别名；
+API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 别名已移除（404）；
 `GET /healthz` 无鉴权存活探针。
 
 ## 首次部署（服务器）
@@ -41,5 +41,5 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 为过渡期别�
 - **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`
   须可被 uid 1001 写入（容器 `user: "1001:1001"`），首次部署
   `chown -R 1001 data`。
-- **过渡期别名**：`/api/*` 仅供 workwork nginx 过渡反代与存量 App，客户端
+- **旧别名已移除**：`/api/*` 一律 404；存量旧版 App（默认 `yinghuoren.com/api/music`）需在设置页手填新地址
   全量切换后删除（nginx 模板注释 + music_server `apiV1Prefix` 归一化）。

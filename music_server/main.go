@@ -4,7 +4,7 @@
 // 元数据从文件名解析(约定「歌手 - 歌名.ext」,兼容「序号_歌手 - 歌名.ext」)。
 //
 // 认证模型与 media_server 一致:边缘 Cloudflare mTLS 已挡住匿名流量,
-// nginx 以固定前缀 /api/music/ 反代并去前缀转发;服务内只做 per-IP 限流。
+// 独立站 nginx 原样透传 /api/v1/* 到本服务;服务内只做 per-IP 限流。
 package main
 
 import (
@@ -171,26 +171,21 @@ func main() {
 	}
 }
 
-// apiV1Prefix 是独立站(music.chaoset.com)部署的对外规范业务前缀
-// (web-service-conventions)。内部路由仍以 /api 书写,入口把 /api/v1/x 归一为
-// /api/x;旧 /api/* 为过渡期废弃别名(workwork nginx 反代与存量 App 在用),
-// 客户端全量切换后一并移除。
-const apiV1Prefix = "/api/v1"
-
 // routes 注册全部路由。抽成方法供 main 与单元测试共用:
 // PathValue 只有在请求经 ServeMux 路由后才有值,测试必须走完整 mux。
-// 返回值经 /api/v1 归一化包装,健康探针按独立站约定补 /healthz(无版本前缀)。
+// 业务路由直接以独立站规范前缀 /api/v1 书写(web-service-conventions),
+// 无旧前缀别名——过渡期 /api/* 别名已移除,存量旧版 App 需在设置页手填
+// 新地址;健康探针按独立站约定补 /healthz(无版本前缀)。
 func (s *musicServer) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	// /healthz:独立站约定的无鉴权存活探针(nginx /healthz 直达,不带 /api 前缀)。
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	// /api/health 别名:workwork 过渡反代重写为 /api/health,与 media_server
-	// 对齐,公网排障可直接 curl https://<域名>/api/v1/health 拿到版本号。
-	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /api/providers", s.requireAppToken(s.requireRateLimit(s.handleProviders)))
-	mux.HandleFunc("GET /api/songs", s.requireAppToken(s.requireRateLimit(s.handleSongs)))
-	mux.HandleFunc("GET /api/stream/{id}", s.requireAppToken(s.requireRateLimit(s.handleStream)))
+	// /api/v1/health:公网排障可直接 curl https://<域名>/api/v1/health 拿到版本号。
+	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
+	mux.HandleFunc("GET /api/v1/providers", s.requireAppToken(s.requireRateLimit(s.handleProviders)))
+	mux.HandleFunc("GET /api/v1/songs", s.requireAppToken(s.requireRateLimit(s.handleSongs)))
+	mux.HandleFunc("GET /api/v1/stream/{id}", s.requireAppToken(s.requireRateLimit(s.handleStream)))
 	// 站内薄管理(/admin/api/v1/*):曲库上传与网易云扫码登录,原 workwork
 	// admin 功能随站迁移;边缘 nginx basic auth 之外的可选令牌兜底见
 	// requireAdminToken。不走业务限流(管理面由边缘 limit_req 承载)。
@@ -203,13 +198,7 @@ func (s *musicServer) routes() http.Handler {
 	mux.HandleFunc("GET /admin/api/v1/netease/login/check", s.requireAdminToken(s.handleAdminNeteasePoll))
 	mux.HandleFunc("GET /admin/api/v1/netease/login/state", s.requireAdminToken(s.handleAdminNeteaseState))
 	mux.HandleFunc("POST /admin/api/v1/netease/login/logout", s.requireAdminToken(s.handleAdminNeteaseLogout))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 归一化只改写路由用的 Path,Query 不受影响。
-		if rest, ok := strings.CutPrefix(r.URL.Path, apiV1Prefix); ok {
-			r.URL.Path = "/api" + rest
-		}
-		mux.ServeHTTP(w, r)
-	})
+	return mux
 }
 
 // handleHealth 供编排层 healthcheck 探测,不做限流。

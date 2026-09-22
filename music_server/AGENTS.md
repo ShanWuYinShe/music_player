@@ -15,19 +15,18 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 
 ## API(下表按内部路由书写)
 
-对外规范前缀是 `/api/v1`(独立站约定,`main.go` 的 routes() 把 `/api/v1/x`
-归一为 `/api/x`);旧 `/api/*` 为过渡期废弃别名,行为与 `/api/v1/*` 完全一致。
-独立站部署下经 nginx 原样透传;workwork 过渡反代期间旧路径
-`/api/music/<path>` 由其重写后到达。
+对外业务前缀是 `/api/v1`(独立站约定),路由直接以该前缀书写;过渡期旧
+别名 `/api/*` 已移除(404),workwork 过渡反代与按旧默认地址轮询的存量
+安装不再可用,需在 App 设置页手填新地址。独立站部署下经 nginx 原样透传。
 
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | healthcheck,无限流 |
 | `GET /healthz` | 存活探针(独立站约定,无鉴权,nginx /healthz 直达),无限流 |
-| `GET /api/health` | `/health` 的别名,公网排障可直接拿版本号,无限流 |
-| `GET /api/providers` | 源列表(library + 启用的 netease);netease 源带 `loggedIn`(是否已配置账号 cookie) |
-| `GET /api/songs?q=&limit=` | q 空:本地曲库全量 + 网易「新歌速递」推荐追加(在线页开箱即有内容);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
-| `GET /api/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
+| `GET /api/v1/health` | `/health` 的带前缀别名,公网排障可直接拿版本号,无限流 |
+| `GET /api/v1/providers` | 源列表(library + 启用的 netease);netease 源带 `loggedIn`(是否已配置账号 cookie) |
+| `GET /api/v1/songs?q=&limit=` | q 空:本地曲库全量 + 网易「新歌速递」推荐追加(在线页开箱即有内容);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
+| `GET /api/v1/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
 
 - 网络源曲目带 `vip` 标记(fee=1/4 付费曲目):服务端未配置 cookie 时上游只发
   30~60s 试听片段,客户端据此显示「试听」提示;`loggedIn` 与 `vip` 组合即完整语义

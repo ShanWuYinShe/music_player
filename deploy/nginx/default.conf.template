@@ -81,8 +81,8 @@ server {
         try_files $uri /admin/index.html;
     }
 
-    # 业务 API：/api/v1/* 为规范前缀，/api/* 为过渡期旧别名（music_server
-    # 内部归一化，行为一致）。不做路径改写，原样透传。
+    # 业务 API：/api/v1/* 为规范前缀（旧 /api/* 别名已移除，music_server
+    # 直接按 /api/v1 注册路由）。不做路径改写，原样透传。
     # client_max_body_size：业务 API 全 GET，16m 仅防滥用。
     location / {
         proxy_pass http://$music_upstream;
