@@ -7,7 +7,7 @@ import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
 import { isOnlineId } from '../source/OnlineApi';
 import { SongItem } from '../components/SongItem';
-import { MiniPlayerBar, MiniInfo, MINI_BAR_HEIGHT } from '../components/MiniPlayerBar';
+import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
 import { PlayerPage } from './PlayerPage';
 import { SettingsPage } from './SettingsPage';
 
@@ -459,9 +459,9 @@ struct Index {
         }
         .width('100%')
         .height('100%')
-        // 顶部避让已并入源切换行 padding（safeTopVp+8）；底部不留白——
-        // 迷你条自带 bottomInset 高度直贴屏幕物理底（磨砂延伸进安全区），
-        // 列表自身的底部留白已含迷你条与安全区高度
+        // 顶部避让已并入一级签行 padding（safeTopVp+8）；迷你条为 Column
+        // 内普通兄弟节点（不叠压列表），自带 bottomInset 直贴屏幕物理底
+        // （磨砂延伸进安全区），列表视口到迷你条上缘为止、不再额外预留
       }
       .width('100%')
       .height('100%')
@@ -516,9 +516,11 @@ struct Index {
     // 上方留白，必须足高
     .height('100%')
     // 水平不留容器 padding（行组件自带内边距，双层叠加曾让每行两侧
-    // 白让 ~30vp——真机反馈列表没吃满宽度）；只留底部：含常驻迷你条
-    // 高度，列表最后一行不被压住（迷你条不再随曲目显隐，留白也要常驻）
-    .padding({ left: 0, right: 0, bottom: 12 + MINI_BAR_HEIGHT + appStore.safeBottomVp })
+    // 白让 ~30vp）。底部只留 12vp 收尾呼吸——迷你条是 Column 内的普通
+    // 兄弟节点（不叠压列表），ArkUI 的 List padding 会收缩视口而非
+    // 抬高滚动内容：旧版按「迷你条悬浮」预留的 底部 padding 曾让视口
+    // 底部每屏空出 ~迷你条高度（真机反馈列表到迷你条之间大片留白）
+    .padding({ bottom: 12 })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
       // 滚过约一屏半才在拇指区露出回顶按钮（阈值太小稍滚即出，抢底部拇指区），
