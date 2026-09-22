@@ -278,7 +278,12 @@ export class AppStore {
     const sampledAt = Date.now();
     let position = this.player.currentTime;
     if (this.player.isPlaying && this.formTickBaseAt > 0) {
-      position += Math.max(0, sampledAt - this.formTickBaseAt);
+      // 新鲜度门槛：锚点过旧（长时间暂停后恢复/冷启动首推）说明两次采样
+      // 之间隔着非播放期，墙钟差不是播放增量，放弃外推等秒推重新积累
+      const delta = sampledAt - this.formTickBaseAt;
+      if (delta > 0 && delta <= FORM_PROGRESS_PUSH_MS * 2) {
+        position += delta;
+      }
     }
     this.formTickBaseAt = sampledAt;
     const song = this.player.currentSong;
@@ -294,7 +299,7 @@ export class AppStore {
       positionMs: Math.floor(position),
       durationMs: Math.floor(duration),
       progress: duration > 0 ? Math.min(1, position / duration) : 0,
-      anchorAt: Date.now()
+      anchorAt: sampledAt
     };
     const now = Date.now();
     if (reason === 'progress' && now - this.lastFormPushAt < FORM_PROGRESS_PUSH_MS) {

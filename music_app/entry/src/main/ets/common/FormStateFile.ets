@@ -9,6 +9,7 @@ const DOMAIN = 0x0002;
  * 主进程 AppStore 订阅执行播放控制（FormExtension 进程与主进程不共享
  * 内存，公共事件是跨进程转发指令的通道）。
  */
+export const APP_BUNDLE_NAME = 'com.lsyb.musicplayer';
 export const CARD_ACTION_EVENT = 'com.lsyb.musicplayer.card_action';
 
 /**

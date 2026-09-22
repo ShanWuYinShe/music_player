@@ -318,10 +318,38 @@ export class OnlineCache {
     }
   }
 
+  /** 旧命名迁移：短 hash 引入前的缓存名是 `${safe}.audio`（无 hash 后缀），
+   * 逐个改名到当前命名——否则升级后旧缓存全部对不上索引、被当孤儿清空 */
+  private migrateLegacyNames(names: Set<string>): void {
+    for (const key of this.index.keys()) {
+      const safe = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+      if (safe === key) {
+        continue;
+      }
+      const legacy = `${safe}.audio`;
+      if (!names.has(legacy)) {
+        continue;
+      }
+      const current = this.filePath(key).split('/').pop() ?? '';
+      try {
+        if (names.has(current)) {
+          fs.unlinkSync(`${this.dir}/${legacy}`); // 新名已在（重下过），旧名作废
+        } else {
+          fs.renameSync(`${this.dir}/${legacy}`, `${this.dir}/${current}`);
+          names.add(current);
+        }
+        names.delete(legacy);
+      } catch (err) {
+        // 迁移失败不影响功能：该文件会被当孤儿清掉，缓存 miss 重下
+      }
+    }
+  }
+
   /** 对账：删孤儿文件（在盘不在索引）、丢过期索引（在索引不在盘）、超限淘汰 */
   private reconcile(): void {
     try {
       const names = new Set<string>(fs.listFileSync(this.dir));
+      this.migrateLegacyNames(names);
       for (const key of this.index.keys()) {
         const segs = this.filePath(key).split('/');
         names.delete(segs[segs.length - 1]);

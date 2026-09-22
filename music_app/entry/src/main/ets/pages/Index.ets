@@ -917,17 +917,27 @@ struct Index {
         SettingsPage({ navPathStack: this.pathStack })
       }
       .hideTitleBar(true)
+      // NavDestination 返回不触发宿主 onPageShow（仅应用前后台切换触发），
+      // 跨页标志消费挂 onShown 才可靠；首次 push 进入也会触发，消费幂等无害
+      .onShown(() => this.consumeReturnFlags())
     }
   }
 
   /** 从设置页返回时，仅在服务地址刚变更过才重拉在线曲库；
    * 从播放页等页面返回不再盲目重拉，避免打断现有队列与列表状态 */
   onPageShow(): void {
+    // 保底：onPageShow 只在应用前后台切换等场景触发；NavDestination 返回
+    // 走 pageMap settings 的 onShown → consumeReturnFlags
+    this.consumeReturnFlags();
+  }
+
+  /** 设置页返回/显示时的跨页标志消费：在线服务地址变更则强制重拉；曲库
+   * 被清空则最近冻结快照失效回 live（幽灵列表，与删歌/导入同语义） */
+  private consumeReturnFlags(): void {
     if (this.homeTab === HomeTab.ONLINE && appStore.consumeOnlineConfigDirty()) {
       this.enterOnline(this.searchText.trim(), true);
     }
     if (appStore.consumeLibraryCleared()) {
-      // 曲库被清空：最近冻结快照已成幽灵列表，失效回 live（与删歌/导入同语义）
       this.recentFrozen = null;
       this.songSource.reload(this.filteredSongs);
     }

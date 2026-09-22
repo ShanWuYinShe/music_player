@@ -182,7 +182,7 @@ export struct SettingsPage {
           Text('麦克风律动')
             .fontSize(15)
             .fontColor($r('app.color.ink'))
-          Text('开启动后，可视化舞台将跟随外放的真实音乐跳动（需播放外放出声）。')
+          Text('开启后，可视化舞台将跟随外放的真实音乐跳动（需播放外放出声）。')
             .fontSize(12)
             .fontColor($r('app.color.ink_soft'))
         }

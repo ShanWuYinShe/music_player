@@ -398,10 +398,10 @@ export class PlayerController {
     }
   }
 
-  /** 相对跳转（秒）：耳机长按快进/快退入口；秒数缺省或非法兜底 15 秒，
-   * 终点夹取在 [0, duration] 内（seek 自身对未 prepared 无操作） */
+  /** 相对跳转（秒）：耳机长按快进/快退入口；接受有符号秒数（负=快退），
+   * 缺省兜底 15 秒，终点夹取在 [0, duration] 内（seek 自身对未 prepared 无操作） */
   seekBy(offsetSec?: number): void {
-    const offset = offsetSec !== undefined && offsetSec > 0 ? offsetSec : 15;
+    const offset = offsetSec ?? 15;
     const limit = this.duration > 0 ? this.duration : 0;
     const target = Math.min(Math.max(this.currentTime + offset * 1000, 0), limit);
     this.seek(Math.floor(target));

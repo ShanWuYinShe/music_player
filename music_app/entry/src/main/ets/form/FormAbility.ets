@@ -3,7 +3,7 @@ import formInfo from '@ohos.app.form.formInfo';
 import { Want } from '@kit.AbilityKit';
 import { commonEventManager } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { readFormState, addFormId, removeFormId, CARD_ACTION_EVENT, toCardPayload, emptyFormState, CardBindingPayload } from '../common/FormStateFile';
+import { readFormState, addFormId, removeFormId, APP_BUNDLE_NAME, CARD_ACTION_EVENT, toCardPayload, emptyFormState, CardBindingPayload } from '../common/FormStateFile';
 
 const TAG = 'MusicFormAbility';
 const DOMAIN = 0x0002;
@@ -57,7 +57,7 @@ export default class MusicFormAbility extends FormExtensionAbility {
       return;
     }
     commonEventManager.publish(CARD_ACTION_EVENT, {
-      bundleName: 'com.lsyb.musicplayer',
+      bundleName: APP_BUNDLE_NAME,
       data: method
     }, (err) => {
       if (err) {

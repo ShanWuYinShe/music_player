@@ -58,11 +58,27 @@ export class MicSpectrum {
   valid = false;
   active = false;
 
+  /** 在途 start 承诺：并发调用复用同一份，stop 也等它落定后再收——
+   * 否则快速连点会创建两个采集器（前者被覆盖泄漏、麦克风持续采集） */
+  private startPromise: Promise<boolean> | null = null;
+
   /** 创建并启动采集；失败（无麦克风/被系统拒绝）返回 false，调用方回退 */
   async start(): Promise<boolean> {
     if (this.active) {
       return true;
     }
+    if (this.startPromise !== null) {
+      return this.startPromise;
+    }
+    this.startPromise = this.doStart();
+    const result = await this.startPromise.finally(() => {
+      this.startPromise = null;
+    });
+    return result;
+  }
+
+  private async doStart(): Promise<boolean> {
+    let capturer: audio.AudioCapturer | null = null;
     try {
       const opts: audio.AudioCapturerOptions = {
         streamInfo: {
@@ -76,7 +92,7 @@ export class MicSpectrum {
           capturerFlags: 0
         }
       };
-      const capturer = await audio.createAudioCapturer(opts);
+      capturer = await audio.createAudioCapturer(opts);
       capturer.on('readData', (buf: ArrayBuffer) => this.onRead(buf));
       await capturer.start();
       this.capturer = capturer;
@@ -90,12 +106,23 @@ export class MicSpectrum {
       return true;
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'mic capturer start failed: %{public}s', JSON.stringify(err));
+      // 创建成功但 start 失败的实例必须释放（否则泄漏采集器与 readData 监听）
+      if (capturer !== null) {
+        try {
+          await capturer.release();
+        } catch (releaseErr) {
+        }
+      }
       this.capturer = null;
       return false;
     }
   }
 
   async stop(): Promise<void> {
+    if (this.startPromise !== null) {
+      await this.startPromise.catch(() => {
+      });
+    }
     const cap = this.capturer;
     this.capturer = null;
     this.active = false;
