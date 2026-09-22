@@ -30,6 +30,10 @@ description: music_app 真机/模拟器调试连接与安装：hdc 无线调试�
 - 失败/超时会留下 `Offline`/`Unknown` 僵尸条目，`auto_sign.sh` 的设备预检会被它们误导（`grep '^[0-9A-Za-z]'` 能匹配上）。动手前/失败后用 `hdc kill -r`（+ `start -r`）重启 server 清掉，`list targets` 回到 `[Empty]` 再继续。
 - 早前挂起的 `tconn` 可能把 server 卡住：表现为之前秒失败的地址也开始 hang。同样 `kill -r` 恢复。
 - `tconn` 单次超时设 12–15s（局域网足够）；端口扫描用 python asyncio，不要装 nmap（没装也不需要）。
+- 手机息屏会断开无线调试：重连成功后立刻跑安装；提醒用户装机期间别锁屏。
+- tconn 加 -remove 清僵尸实测不可用；清场一律 hdc kill -r，然后只重连验证过的 Connected 地址。
+- tconn 成功输出是 Connect OK；Connect failed 的条目会以 Offline/Unknown 残留，及时清场。
+
 - 沙盒 `workspace-write` 下 LAN 直连与扫描均可正常执行，已验证。
 
 ## 安装与验证
