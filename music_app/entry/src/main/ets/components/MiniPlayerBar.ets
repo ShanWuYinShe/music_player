@@ -33,13 +33,19 @@ export struct MiniPlayerBar {
   @Event onTapOpen: () => void = () => {
   };
   /**
-   * 横向笔画 = 一级签相邻循环（> 右移下一个 / < 左移上一个，四签全参与、
-   * 越界回绕）。一级签扁平化后无「分类/源」两层之分——平直横滑与折返
-   * 统一为相邻移动（2026-09 用户决策：滑动必须能到达全部签），分类器
-   * 只负责何时触发（折返早认/横滑抬手），方向语义一致：
-   * direction +1 = 序列中的下一个签，-1 = 上一个
+   * 折返笔画（画 > / <，笔画中早认）= 顶部一级签切换：右顶点 `>` =
+   * 下一个签、左顶点 `<` = 上一个签（四签循环、越界回绕）。
+   * 手势按频率分工（2026-09 用户决策）：平直横滑最顺手，留给最高频的
+   * 切歌（见 onSwipeTrack）；折返形态较难，承载低频的换签。
    */
-  @Event onSwipeCycle: (direction: number) => void = (_direction: number) => {
+  @Event onSwipeTab: (direction: number) => void = (_direction: number) => {
+  };
+  /**
+   * 平直横滑（抬手兜底分类）= 播放控制：左滑 = 下一首、右滑 = 上一首
+   * （与播放页纸带 pager 同向——下一首在右，内容跟手）。direction
+   * -1 = 左滑，+1 = 右滑。
+   */
+  @Event onSwipeTrack: (direction: number) => void = (_direction: number) => {
   };
   /** 底部安全区高度（vp）：磨砂底延伸进安全区，与系统导航条同色不割裂 */
   @Param bottomInset: number = 0;
@@ -168,13 +174,13 @@ export struct MiniPlayerBar {
       // 右顶点（`>`：向右走出 maxX，从顶点折回 maxX-ex）
       if (maxX >= 45 && maxX - ex >= 25) {
         this.gestureFired = true;
-        this.onSwipeCycle(1);
+        this.onSwipeTab(1);
         return;
       }
       // 左顶点（`<`：向左走出 -minX，从顶点折回 ex-minX）
       if (-minX >= 45 && ex - minX >= 25) {
         this.gestureFired = true;
-        this.onSwipeCycle(-1);
+        this.onSwipeTab(-1);
         return;
       }
     }
@@ -276,9 +282,8 @@ export struct MiniPlayerBar {
     // 拆组会被横滑手势抢先认领）。onActionUpdate 采样轨迹点（间隔取样，
     // 上限 32 点）并做早认——折返顶点成形即触发，不等抬手；
     // onActionEnd 只做兜底分类（慢笔画/漂移大没触发早认的）：
-    //   折返笔画（横向跨度 ≥70vp + 折回量 ≥30vp + 纵向轻微推进）→ 相邻签
-    //   平直横滑（纵向净移 <40vp、横向净移 ≥40vp）→ 相邻签
-    //   两者方向语义一致：右移/`>` = 下一个，左移/`<` = 上一个
+    //   折返笔画（横向跨度 ≥70vp + 折回量 ≥30vp + 纵向轻微推进）→ 切一级签
+    //   平直横滑（纵向净移 <40vp、横向净移 ≥40vp）→ 切歌（左滑下一首）
     //   其余（普通斜滑/纵向）→ 忽略，不误触发
     .priorityGesture(
       PanGesture({ fingers: 1, direction: PanDirection.All, distance: 25 })
@@ -327,12 +332,13 @@ export struct MiniPlayerBar {
           // 折返侧定方向：向左折返（顶点在左）= 上一个签，向右折返 = 下一个签
           if (xSpan >= 70 && (xSpan - adx) >= 30 && ady >= 15) {
             const apexLeft = -minX > maxX - dxNet;
-            this.onSwipeCycle(apexLeft ? -1 : 1);
+            this.onSwipeTab(apexLeft ? -1 : 1);
             return;
           }
-          // 平直横滑：相邻签循环（无折返倾向：跨度 ≈ |净移|）
+          // 平直横滑：播放控制（无折返倾向：跨度 ≈ |净移|）——
+          // 左滑 = 下一首、右滑 = 上一首（与播放页纸带同向）
           if (ady < 40 && adx >= 40) {
-            this.onSwipeCycle(dxNet < 0 ? -1 : 1);
+            this.onSwipeTrack(dxNet < 0 ? -1 : 1);
           }
         })
     )

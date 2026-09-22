@@ -447,13 +447,14 @@ struct Index {
 
         // 底部迷你播放条（常驻：无播放曲目时显示占位态，不再随曲目显隐
         // 造成 UI 跳动——用户决策）。其内容经 @Local 镜像（见 mini 字段注释）；
-        // 其上的手势 = 半屏拇指遥控：横滑切分类 / 画 <> 切源
+        // 其上的手势 = 半屏拇指遥控：平直横滑切歌（最高频）/ 画 <> 换签
         MiniPlayerBar({
           player: appStore.player,
           info: this.mini,
           bottomInset: appStore.safeBottomVp,
           onTapOpen: () => this.pathStack.pushPathByName('player', null),
-          onSwipeCycle: (direction: number) => this.cycleTab(direction)
+          onSwipeTab: (direction: number) => this.cycleTab(direction),
+          onSwipeTrack: (direction: number) => this.swipeTrack(direction)
         })
         }
         .width('100%')
@@ -492,10 +493,11 @@ struct Index {
             })
               .bindContextMenu(this.SongMenu(song), ResponseType.LongPress)
             // 笔意线：目录行的分隔语言（最后一行由列表底部自然收尾，不画）。
-            // 左实右渐隐——起笔重收笔轻，像一笔掠过的墨线
+            // 左实右渐隐——起笔重收笔轻，像一笔掠过的墨线；左端对齐歌名
+            // 起排处（行内边距16 + 竖线3 + 间距12 + 封面44 + 间距12 = 87）
             Row()
               .height(0.5)
-              .margin({ left: 71 })
+              .margin({ left: 87 })
               .linearGradient({
                 angle: 90,
                 colors: [
@@ -513,9 +515,10 @@ struct Index {
     // TabContent 非线性布局：layoutWeight 失效致列表按内容高居中、
     // 上方留白，必须足高
     .height('100%')
-    // 底部留白含常驻迷你条高度：列表最后一行不被压住（迷你条不再随曲目
-    // 显隐，留白也要常驻）
-    .padding({ left: 16, right: 16, bottom: 12 + MINI_BAR_HEIGHT + appStore.safeBottomVp })
+    // 水平不留容器 padding（行组件自带内边距，双层叠加曾让每行两侧
+    // 白让 ~30vp——真机反馈列表没吃满宽度）；只留底部：含常驻迷你条
+    // 高度，列表最后一行不被压住（迷你条不再随曲目显隐，留白也要常驻）
+    .padding({ left: 0, right: 0, bottom: 12 + MINI_BAR_HEIGHT + appStore.safeBottomVp })
     .scrollBar(BarState.Auto)
     .onScrollIndex((start: number) => {
       // 滚过约一屏半才在拇指区露出回顶按钮（阈值太小稍滚即出，抢底部拇指区），
@@ -946,17 +949,25 @@ struct Index {
     this.activeScroller().scrollToIndex(0);
   }
 
-  /** 迷你条横向笔画（横滑/折返统一）：一级签相邻循环——> 下一个 /
-   * < 上一个，四签全参与、越界回绕。一级签扁平化后无「分类/源」两层，
-   * 旧「折返切源+横滑切分类」双事件会让惯用折返笔画的用户永远只在
-   * 曲库↔在线之间跳（真机反馈），统一为相邻移动后任何横向笔画都能
-   * 到达全部签。不弹 toast——结果由一级签高亮直接可见 */
+  /** 迷你条折返手势（画 > / <）：一级签相邻切换——> 下一个 / < 上一个，
+   * 四签循环、越界回绕。不弹 toast——结果由一级签高亮直接可见 */
   private cycleTab(direction: number): void {
     const order: HomeTab[] = [HomeTab.LIBRARY, HomeTab.FAVORITES, HomeTab.RECENT, HomeTab.ONLINE];
     const idx = order.indexOf(this.homeTab);
     const next = order[(idx + direction + order.length) % order.length];
     if (next !== this.homeTab) {
       this.switchTab(next);
+    }
+  }
+
+  /** 迷你条平直横滑（最高频手势留给播放控制，2026-09 用户决策）：
+   * 左滑 = 下一首、右滑 = 上一首，与播放页纸带 pager 同向（内容跟手，
+   * 下一首在右）。方向参数：-1 = 左滑，+1 = 右滑 */
+  private swipeTrack(direction: number): void {
+    if (direction < 0) {
+      appStore.player.next();
+    } else {
+      appStore.player.previous();
     }
   }
 

@@ -102,8 +102,10 @@ export struct SongItem {
     }
     .width('100%')
     .alignItems(VerticalAlign.Center)
-    // 行高：大字排版需要呼吸感；无底色无阴影，触感反馈交给系统默认按压
-    .padding({ left: 12, right: 16, top: 14, bottom: 14 })
+    // 行高：行内边距是唯一一层水平内距（列表容器已无水平 padding，双层
+    // 叠加曾白让 ~30vp），上下 8 保证一屏密度——杂志行保留呼吸感但不过分
+    // 疏（此前上下 14 一行 ~83vp，一屏仅 7 首，真机反馈垂直留白过多）
+    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
     .onClick(() => this.onItemClick(this.song.id))
   }
 }
