@@ -998,8 +998,24 @@ struct Index {
       if (tab === HomeTab.RECENT) {
         // 进最近即冻结：以当前 MRU 顺序快照，会话内显示与队列都走它
         this.freezeRecent();
+        // 队列同拍对齐快照：横滑切歌不经过 playFromList（没点播直接滑），
+        // 队列若仍是上面 refreshSongs 恢复的整库顺序，左滑右滑切到的歌与
+        // 列表所见对不上（真机报障）。点播与横滑同源后，播放页 pager、
+        // 锁屏、卡片走同一队列全部一致；离签 refreshSongs 已自愈
+        const snap = this.recentFrozen;
+        if (snap !== null && snap.length > 0) {
+          appStore.player.setOnlineQueue(snap.slice());
+        }
       } else {
         this.recentFrozen = null;
+        if (tab === HomeTab.FAVORITES) {
+          // 喜欢签同理：直接横滑（没点播）也沿收藏列表逐行——整库顺序的
+          // 下一首未必是收藏，会滑到列表外的歌
+          const fav = this.filteredSongs;
+          if (fav.length > 0) {
+            appStore.player.setOnlineQueue(fav.slice());
+          }
+        }
       }
     }
     this.activeScroller().scrollToIndex(0);
