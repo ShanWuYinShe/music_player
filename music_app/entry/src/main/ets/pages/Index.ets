@@ -217,12 +217,13 @@ struct Index {
     if (this.homeTab === HomeTab.RECENT && this.recentFrozen !== null) {
       // 最近冻结会话：以进签快照为底，只做搜索过滤+排序，不再跟随 live
       // recentIds（切歌 addRecent 会持续改写它，跟随即每次整表重排）。
-      // tab 取 ALL 绕开 LibraryFilter 的 MRU 重建，保留快照顺序。
+      // tab 取 ALL 绕开 LibraryFilter 的 MRU 重建，保留快照顺序；sort 强制
+      // DEFAULT——最近=播放时间序，不随曲库的排序选择漂移（用户决策 2026-09）
       const frozen: SongRecord[] = this.recentFrozen;
       const snapOpts: FilterOptions = {
         query: this.debouncedQuery,
         tab: LibraryTab.ALL,
-        sort: this.sortMode,
+        sort: SortMode.DEFAULT,
         favoriteIds: appStore.userData.favoriteIds,
         recentIds: appStore.userData.recentIds,
         onlineSongs: appStore.onlineStore.all()
@@ -409,7 +410,9 @@ struct Index {
             .fontColor($r('app.color.editorial_meta'))
             .letterSpacing(0.5)
           Blank()
-          if (this.homeTab !== HomeTab.ONLINE) {
+          // 最近签无排序入口：最近=播放时间倒序（MRU），排序选择会破坏
+          // 语义（用户决策 2026-09）；曲库/喜欢保留
+          if (this.homeTab === HomeTab.LIBRARY || this.homeTab === HomeTab.FAVORITES) {
             this.SortButton()
           }
         }
@@ -652,12 +655,13 @@ struct Index {
 
   /** 冻结最近快照：进最近签时按当前 MRU 顺序快照（与显示层 live 推导同源，
    * 含在线歌注册表补位）。快照后显示与队列都走它，切歌 addRecent 只改持久化
-   * 真值不再重排屏幕——左滑右滑逐行走快照，与所见一致 */
+   * 真值不再重排屏幕——左滑右滑逐行走快照，与所见一致。sort 强制 DEFAULT：
+   * 最近=播放时间倒序，无排序语义（用户决策 2026-09） */
   private freezeRecent(): void {
     const opts: FilterOptions = {
       query: this.debouncedQuery,
       tab: LibraryTab.RECENT,
-      sort: this.sortMode,
+      sort: SortMode.DEFAULT,
       favoriteIds: appStore.userData.favoriteIds,
       recentIds: appStore.userData.recentIds,
       onlineSongs: appStore.onlineStore.all()
