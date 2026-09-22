@@ -222,6 +222,11 @@ export class PlayerController {
     this.playNextQueue = [];
   }
 
+  /** 从插播队列移除单曲（队列面板行长按入口；id 不在队列时无操作） */
+  removePlayNext(id: string): void {
+    this.playNextQueue = this.playNextQueue.filter((item) => item !== id);
+  }
+
   /** 点击列表项播放指定曲目（手动动作：清熔断计数，重新开始计数） */
   playSong(id: string): void {
     this.errorStreak = 0;

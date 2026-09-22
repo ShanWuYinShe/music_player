@@ -22,6 +22,42 @@ interface QueueEntry {
   inserted: boolean;
 }
 
+/**
+ * 队列数据源（LazyForEach 用）：在线签连播时队列可达数百首，ForEach
+ * 全量建节点过重；列表总是整体替换（queueEntries @Computed 快照经
+ * @Monitor reload），无增量增删场景。
+ */
+class QueueDataSource implements IDataSource {
+  private listeners: DataChangeListener[] = [];
+  private list: QueueEntry[] = [];
+
+  reload(list: QueueEntry[]): void {
+    this.list = list;
+    this.listeners.forEach((listener) => listener.onDataReloaded());
+  }
+
+  totalCount(): number {
+    return this.list.length;
+  }
+
+  getData(index: number): QueueEntry {
+    return this.list[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) < 0) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const idx = this.listeners.indexOf(listener);
+    if (idx >= 0) {
+      this.listeners.splice(idx, 1);
+    }
+  }
+}
+
 /** 分享卡题款词句：按歌名哈希稳定选取——同一首歌恒定一句，分享图内容稳定 */
 const INK_VERSES: string[] = [
   '曲终人不见 江上数峰青',
@@ -101,7 +137,14 @@ export struct PlayerPage {
   @Local micOn: boolean = appStore.micOn;
   /** 分享卡片半模态开关（魔法棒菜单入口） */
   @Local shareShow: boolean = false;
+  /** 队列数据源（LazyForEach）：queueEntries 变化经 @Monitor 整表 reload */
+  private queueSource: QueueDataSource = new QueueDataSource();
   private volumeBeforeMute: number = 1;
+
+  @Monitor('queueEntries')
+  onQueueEntriesChange(): void {
+    this.queueSource.reload(this.queueEntries);
+  }
 
   /** swipe 判定阈值（vp）由 CoverSwipe 导出：封面路径在子组件内判定，
    * 可视化舞台手势（无封面场景）在此判定，二者同值 */
@@ -147,6 +190,7 @@ export struct PlayerPage {
       this.nextCover = this.player.peekNextCover();
       this.micOn = appStore.micOn;
     };
+    this.queueSource.reload(this.queueEntries); // 队列数据源首灌：@Monitor 只捕变化，初值必须手动灌（真机实测首开空列表）
     this.stateListener(); // 进入即同步一次当前状态
     this.player.addStateListener(this.stateListener);
   }
@@ -424,15 +468,20 @@ export struct PlayerPage {
               .fontSize(22)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              // 超长歌名跑马灯滚动展示全名（截断替代方案，播放页大标题
+              // 不换行以免顶乱一屏版式）
+              .textOverflow({ overflow: TextOverflow.MARQUEE })
               .constraintSize({ minHeight: 30 })
             }
-            Text(this.song ? this.song.artist : '')
-              .fontSize(14)
-              .fontColor($r('app.color.viz_fg_soft'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .constraintSize({ minHeight: 20 })
+            // 歌手行：在线歌歌手拼在标题、artist 为空——空串时整行收起，
+            // 不留 minHeight 空白占位（真机走查：播放页歌手处一块空档）
+            if (this.song !== null && this.song.artist !== '') {
+              Text(this.song.artist)
+                .fontSize(14)
+                .fontColor($r('app.color.viz_fg_soft'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
             // 元数据行（Poweramp 式）：格式 · 来源 · 付费试听提示。常驻占位
             Text() {
               Span(this.song !== null ? this.songMetaText(this.song) : ' ')
@@ -691,7 +740,7 @@ export struct PlayerPage {
       .padding({ left: 20, right: 20, bottom: 8 })
 
       List({ space: 2, initialIndex: this.currentIndexIn(this.queueEntries) }) {
-        ForEach(this.queueEntries, (entry: QueueEntry, index: number) => {
+        LazyForEach(this.queueSource, (entry: QueueEntry, index: number) => {
           ListItem() {
             Row({ space: 12 }) {
               if (entry.song.id === (this.song?.id ?? '')) {
@@ -748,6 +797,7 @@ export struct PlayerPage {
               $r('app.color.surface_alt') : Color.Transparent)
             .accessibilityText(`播放${entry.song.title}，${entry.song.artist}`)
             .onClick(() => this.player.playSong(entry.song.id))
+            .bindContextMenu(this.QueueRowMenu(entry), ResponseType.LongPress)
           }
         }, (entry: QueueEntry) => `${entry.song.id}${entry.inserted ? '_q' : ''}`)
       }
@@ -758,6 +808,32 @@ export struct PlayerPage {
     .width('100%')
     .height('100%')
     .padding({ top: 8, bottom: 12 })
+  }
+
+  /** 队列行长按菜单：插播行可移除、普通行可加插；当前行无菜单。
+   * 原生 Menu 磨砂/圆角/按压态系统托管（与首页长按菜单同约定） */
+  @Builder
+  QueueRowMenu(entry: QueueEntry) {
+    Menu() {
+      if (entry.inserted) {
+        MenuItem({
+          symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.xmark')),
+          content: '从插播移除'
+        })
+          .onClick(() => this.player.removePlayNext(entry.song.id))
+      } else if (entry.song.id !== (this.song?.id ?? '')) {
+        MenuItem({
+          symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.list_bullet')),
+          content: '下一首播放'
+        })
+          .onClick(() => {
+            const count = this.player.queueNext(entry.song.id);
+            promptAction.showToast({
+              message: count > 0 ? `已加入下一首播放 · 共 ${count} 首` : '已在插播队列中'
+            });
+          })
+      }
+    }
   }
 
   /** 定时关闭菜单：原生 Menu/MenuItem，MenuItemGroup 分组标题 */

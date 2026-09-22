@@ -121,4 +121,5 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
   `bindSheet`/`AlertDialog` 用实心自适应底色（surface）托管；accent 底上的前景
   图标/文字固定用 `on_accent`，`paper` 只用于 ink 底；`TextInput` 必须显式设
   fontColor/placeholderColor（默认色随系统主题，浅色模式下会在深色输入底上形成
-  深底深字不可见，已踩坑）
+  深底深字不可见，已踩坑）；`Toggle` 必须显式 `selectedColor(accent)`——系统
+  默认蓝与整包金主题割裂（真机走查：设置页麦克风开关）。

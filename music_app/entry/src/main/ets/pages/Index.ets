@@ -333,6 +333,7 @@ struct Index {
             value: this.searchText,
             placeholder: this.homeTab === HomeTab.ONLINE ? '搜索歌曲、歌手、网络曲库' : '搜索歌曲、歌手',
           })
+            .id('home_search')
             .layoutWeight(1)
             .constraintSize({ minHeight: 40 })
             .fontColor($r('app.color.ink'))
@@ -454,12 +455,13 @@ struct Index {
 
         // 底部迷你播放条（常驻：无播放曲目时显示占位态，不再随曲目显隐
         // 造成 UI 跳动——用户决策）。其内容经 @Local 镜像（见 mini 字段注释）；
-        // 其上的手势 = 半屏拇指遥控：平直横滑切歌（最高频）/ 画 <> 换签
+        // 其上的手势 = 半屏拇指遥控：平直横滑切歌（最高频）/ 画 <> 换签。
+        // 占位态点按不开空播放页，改聚焦搜索直接选歌（真机走查）
         MiniPlayerBar({
           player: appStore.player,
           info: this.mini,
           bottomInset: appStore.safeBottomVp,
-          onTapOpen: () => this.pathStack.pushPathByName('player', null),
+          onTapOpen: () => this.onMiniBarTap(),
           onSwipeTab: (direction: number) => this.cycleTab(direction),
           onSwipeTrack: (direction: number) => this.swipeTrack(direction)
         })
@@ -952,6 +954,17 @@ struct Index {
       appStore.player.refreshSongs();
     }
     this.activeScroller().scrollToIndex(0);
+  }
+
+  /** 迷你条点按：有曲目进播放页；占位态（未在播放）聚焦搜索框直接
+   * 选歌——空播放页没有信息量（真机走查）。requestFocus 失败（罕见）
+   * 静默，退化为无操作 */
+  private onMiniBarTap(): void {
+    if (this.mini !== null) {
+      this.pathStack.pushPathByName('player', null);
+      return;
+    }
+    this.getUIContext().getFocusController().requestFocus('home_search');
   }
 
   /** 迷你条折返手势（画 > / <）：一级签相邻切换——> 下一个 / < 上一个，

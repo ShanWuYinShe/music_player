@@ -8,13 +8,6 @@ import { dayPhaseOverlay } from '../common/InkMood';
 /**
  * 设置页：曲库统计 / 在线音乐源配置 / 危险操作 / 应用信息
  */
-interface BundleVersionNameInfo {
-  versionName: string;
-}
-
-interface BundleVersionInfo {
-  versionInfo: BundleVersionNameInfo;
-}
 
 @ComponentV2
 export struct SettingsPage {
@@ -25,27 +18,35 @@ export struct SettingsPage {
    * 可能失败回退），以返回值校正 UI */
   @Local micOn: boolean = appStore.micOn;
   /** App 自身版本(bundleManager 读取)与服务端版本(/health 公开端点):
-   * 排障时用户可直接报出两端构建版本 */
+   * 排障时用户可直接报出两端构建版本。serverVersion 初值取上次缓存,
+   * 弱网重进不再停留「获取中…」 */
   @Local appVersion: string = '…';
-  @Local serverVersion: string = '获取中…';
+  @Local serverVersion: string = appStore.serverVersionCache || '获取中…';
 
   aboutToAppear(): void {
-    try {
-      // versionInfo 需 WITH_APPLICATION 标志才会填充(DEFAULT 下该字段缺失);
-      // 当前 SDK 类型定义未收录 versionInfo,按结构断言读取(运行时存在)。
-      const info = bundleManager.getBundleInfoForSelfSync(
-        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION) as object as BundleVersionInfo;
-      this.appVersion = info.versionInfo.versionName;
-    } catch (err) {
-      this.appVersion = '未知';
-    }
+    // 版本号直接在 BundleInfo 顶层（versionName, since 9）——旧代码读
+    // Android 风格的 versionInfo.versionInfo 嵌套，本 SDK 无此字段，
+    // 真机一直显示「v未知」（走查发现）
+    this.readAppVersion();
     appStore.onlineSource.fetchHealth()
       .then((info) => {
         this.serverVersion = info.version;
+        appStore.serverVersionCache = info.version;
       })
       .catch(() => {
-        this.serverVersion = '无法获取';
+        this.serverVersion = appStore.serverVersionCache !== ''
+          ? `${appStore.serverVersionCache}（上次缓存）` : '无法获取';
       });
+  }
+
+  private readAppVersion(): void {
+    try {
+      const info = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+      this.appVersion = info.versionName !== '' ? info.versionName : '未知';
+    } catch (err) {
+      this.appVersion = '未知';
+    }
   }
 
   aboutToDisappear(): void {
@@ -156,6 +157,16 @@ export struct SettingsPage {
         Text('地址会保存在本机，可随时修改。')
           .fontSize(11)
           .fontColor($r('app.color.ink_faint'))
+        // 测试连接与输入框同卡：配完即测，不用上下找底部按钮
+        Button('保存并测试连接')
+          .width('100%')
+          .constraintSize({ minHeight: 42 })
+          .fontSize(14)
+          .borderRadius(21)
+          .margin({ top: 4 })
+          .backgroundColor($r('app.color.accent'))
+          .fontColor($r('app.color.on_accent'))
+          .onClick(() => this.saveAndTest())
       }
       .width('100%')
       .padding(20)
@@ -177,6 +188,8 @@ export struct SettingsPage {
         .layoutWeight(1)
 
         Toggle({ type: ToggleType.Switch, isOn: this.micOn })
+          // 选中态用主题金：系统默认蓝与整包 accent 割裂（真机走查）
+          .selectedColor($r('app.color.accent'))
           .onClick(() => this.toggleMic())
       }
       .width('100%')
@@ -245,23 +258,7 @@ export struct SettingsPage {
       .padding(20)
       .borderRadius(16)
       .backgroundColor($r('app.color.surface'))
-
-        Blank()
-
-        // 保存并测试连接：落到拇指区 bottom。以往只靠失焦/离页隐式保存，
-        // 配错地址要回首页拉列表才知道；此处显式保存 + 即时测连反馈。
-        // 离页兜底保存保留（防丢输入），UI 入口只有这一个，不重复
-        Button('保存并测试连接')
-          .width('100%')
-          .constraintSize({ minHeight: 46 })
-          .fontSize(15)
-          .borderRadius(23)
-          .backgroundColor($r('app.color.accent'))
-          .fontColor($r('app.color.on_accent'))
-          .onClick(() => this.saveAndTest())
       }
-      .width('100%')
-      .height('100%')
       // 全局恒定全屏布局：前景内容按预读避让高度留白（背景层已延伸进系统栏）
       .padding({ left: 16, right: 16,
         top: appStore.safeTopVp + 16, bottom: appStore.safeBottomVp + 16 })

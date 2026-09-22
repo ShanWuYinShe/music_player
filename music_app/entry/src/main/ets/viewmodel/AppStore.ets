@@ -55,6 +55,9 @@ export class AppStore {
   @Trace safeBottomVp: number = 0;
   /** 网易云源是否已登录（未登录时付费曲仅试听：试听曲不进缓存、播放页标注试听） */
   @Trace neteaseLoggedIn: boolean = false;
+  /** 服务端版本号缓存（/health 成功时更新，内存级）：设置页弱网重进时
+   * 直接展示上次结果，不再停留「获取中…」 */
+  serverVersionCache: string = '';
   /** 麦克风律动开关（设置页控制；start 失败/权限被拒自动回退 false） */
   @Trace micOn: boolean = false;
   /** 麦克风频谱采集单例（VisualizerView 舞台激活时启停，见 MicSpectrum） */
