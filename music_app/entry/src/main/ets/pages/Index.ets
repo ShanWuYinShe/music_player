@@ -672,42 +672,30 @@ struct Index {
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
     } else if (this.onlineError !== '' && this.onlineSongs.length === 0) {
-      Column({ space: 14 }) {
-        SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
-          .fontSize(40)
-          .fontColor([$r('app.color.ink_faint')])
-        Text('在线曲库拉取失败')
-          .fontSize(15)
-          .fontColor($r('app.color.ink_soft'))
-        Text(this.onlineError)
-          .fontSize(12)
-          .fontColor($r('app.color.ink_faint'))
-        Button('重试')
-          // constraintSize 替代固定高度：热区达标，大字体不截断
-          .constraintSize({ minHeight: 40 })
-          .fontSize(14)
-          .borderRadius(19)
-          .buttonStyle(ButtonStyleMode.NORMAL)
-          .backgroundColor($r('app.color.surface_alt'))
-          .fontColor($r('app.color.ink'))
-          .onClick(() => this.enterOnline(this.searchText.trim(), true))
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
+      this.StatusColumn($r('sys.symbol.exclamationmark_circle'), '在线曲库拉取失败',
+        this.onlineError, true)
     } else if (this.searchText.trim() !== '') {
       this.NoResultView()
     } else {
-      Column({ space: 14 }) {
-        SymbolGlyph($r('sys.symbol.music_note_list'))
-          .fontSize(40)
-          .fontColor([$r('app.color.ink_faint')])
-        Text('在线曲库还没有内容')
-          .fontSize(15)
-          .fontColor($r('app.color.ink_soft'))
-        Text('稍后再来看看，也可以下拉重试')
-          .fontSize(12)
-          .fontColor($r('app.color.ink_faint'))
+      this.StatusColumn($r('sys.symbol.music_note_list'), '在线曲库还没有内容',
+        '稍后再来看看，也可以下拉重试', true)
+    }
+  }
+
+  /** 状态列（图标 + 标题 + 副标题 + 可选重试）：在线签错误/空库两态共用 */
+  @Builder
+  StatusColumn(icon: Resource, title: string, subtitle: string, showRetry: boolean) {
+    Column({ space: 14 }) {
+      SymbolGlyph(icon)
+        .fontSize(40)
+        .fontColor([$r('app.color.ink_faint')])
+      Text(title)
+        .fontSize(15)
+        .fontColor($r('app.color.ink_soft'))
+      Text(subtitle)
+        .fontSize(12)
+        .fontColor($r('app.color.ink_faint'))
+      if (showRetry) {
         Button('重试')
           // constraintSize 替代固定高度：热区达标，大字体不截断
           .constraintSize({ minHeight: 40 })
@@ -718,10 +706,10 @@ struct Index {
           .fontColor($r('app.color.ink'))
           .onClick(() => this.enterOnline(this.searchText.trim(), true))
       }
-      .width('100%')
-      .layoutWeight(1)
-      .justifyContent(FlexAlign.Center)
     }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
   }
 
   /** 长按歌曲菜单（歌曲操作的唯一入口，左滑已移除——每操作一条路径）：

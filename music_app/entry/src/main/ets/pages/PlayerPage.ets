@@ -513,121 +513,9 @@ export struct PlayerPage {
             this.isQueueOpen = true;
           })
 
-          // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
-          // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
-          Row({ space: 30 }) {
-          SymbolGlyph(playModeSymbol(this.playMode))
-            .fontSize(24)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(8)
-            .accessibilityText(`播放模式，当前${playModeLabel(this.playMode)}`)
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
-            .onClick(() => {
-              this.player.cyclePlayMode();
-              promptAction.showToast({ message: playModeLabel(this.playMode) });
-            })
+          this.MainControls()
 
-          SymbolGlyph($r('sys.symbol.backward_end_fill'))
-            .fontSize(32)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(6)
-            .accessibilityText('上一首')
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
-            .onClick(() => this.player.previous())
-
-          Stack({ alignContent: Alignment.Center }) {
-            SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
-              .fontSize(38)
-              // accent 底上的前景固定用 on_accent：深浅两模式均为深色、对比受控
-              .fontColor([$r('app.color.on_accent')])
-          }
-          .width(72)
-          .height(72)
-          .borderRadius(18)
-          .backgroundColor($r('app.color.accent'))
-          .accessibilityText(this.isPlaying ? '暂停' : '播放')
-          .shadow({ radius: 18, color: $r('app.color.viz_shadow'), offsetY: 3 })
-          .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
-          .onClick(() => this.player.togglePlay())
-
-          SymbolGlyph($r('sys.symbol.forward_end_fill'))
-            .fontSize(32)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(6)
-            .accessibilityText('下一首')
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
-            .onClick(() => this.player.next())
-
-          SymbolGlyph(this.isFavoriteNow ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
-            .fontSize(24)
-            .fontColor([this.isFavoriteNow ? $r('app.color.accent') : $r('app.color.viz_fg')])
-            .padding(8)
-            .accessibilityText(this.isFavoriteNow ? '取消喜欢' : '喜欢')
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
-            .onClick(() => this.toggleFavorite())
-        }
-        .justifyContent(FlexAlign.SpaceEvenly)
-        .width('100%')
-        .margin({ top: 14 })
-
-        // 副控制：音量 + 定时关闭
-        Row({ space: 10 }) {
-          SymbolGlyph(this.volumeIcon())
-            .fontSize(20)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(10)
-            .accessibilityText(this.volume > 0 ? '静音' : '恢复音量')
-            .margin({ left: -10 })
-            .onClick(() => this.toggleMute())
-
-          Slider({
-            value: this.volumePreview >= 0 ?
-              Math.round(this.volumePreview * 100) : Math.round(this.volume * 100),
-            min: 0,
-            max: 100,
-            style: SliderStyle.OutSet
-          })
-            .layoutWeight(1)
-            .showTips(false)
-            .selectedColor($r('app.color.accent'))
-            .trackColor($r('app.color.viz_line'))
-            .blockColor($r('app.color.accent'))
-            .onChange((value: number, mode: SliderChangeMode) => {
-              if (mode === SliderChangeMode.Moving) {
-                // 拖动中只写本地预览，不调 setVolume（避免每帧跨单例写 @Trace）
-                this.volumePreview = value / 100;
-              } else if (mode === SliderChangeMode.End) {
-                this.volumePreview = -1;
-                this.player.setVolume(value / 100);
-              }
-            })
-
-          Row({ space: 4 }) {
-            SymbolGlyph($r('sys.symbol.timer'))
-              .fontSize(16)
-              .fontColor([this.sleepRemainSec >= 0 ?
-                $r('app.color.accent') : $r('app.color.viz_fg_faint')])
-            if (this.sleepRemainSec >= 0) {
-              // 直读 player @Trace：每秒 tick 不 notify，倒计时走 Text 内容
-              // 插值（真机存活的唯一路径）；有无定时的启停切换有 notify，
-              // 上方 fontColor/if 分支用镜像才可靠
-              Text(formatTime(this.player.sleepRemainSec * 1000))
-                .fontSize(11)
-                .fontColor($r('app.color.accent'))
-            }
-          }
-          // minHeight 替代固定高度：触控热区达标（≥40vp），系统大字体时随内容撑高
-          .constraintSize({ minHeight: 40 })
-          .borderRadius(20)
-          .backgroundColor($r('app.color.viz_btn_bg_strong'))
-          .padding({ left: 12, right: 12 })
-          .accessibilityText('定时关闭')
-          .bindMenu(this.SleepMenu())
-        }
-        .width('100%')
-        .margin({ top: 12 })
-        // 两侧收窄：给音量 Slider 与波形条留出拇指拖动行程
-        .padding({ left: 16, right: 16 })
+          this.SubControls()
         }
         // 控制面板整体水平边距与底部收尾
         .padding({ left: 16, right: 16, bottom: 8 })
@@ -651,6 +539,131 @@ export struct PlayerPage {
         this.isQueueOpen = false;
       }
     })
+  }
+
+  /** 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
+   * 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp） */
+  @Builder
+  MainControls() {
+    // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
+    // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
+    Row({ space: 30 }) {
+    SymbolGlyph(playModeSymbol(this.playMode))
+      .fontSize(24)
+      .fontColor([$r('app.color.viz_fg')])
+      .padding(8)
+      .accessibilityText(`播放模式，当前${playModeLabel(this.playMode)}`)
+      .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
+      .onClick(() => {
+        this.player.cyclePlayMode();
+        promptAction.showToast({ message: playModeLabel(this.playMode) });
+      })
+
+    SymbolGlyph($r('sys.symbol.backward_end_fill'))
+      .fontSize(32)
+      .fontColor([$r('app.color.viz_fg')])
+      .padding(6)
+      .accessibilityText('上一首')
+      .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
+      .onClick(() => this.player.previous())
+
+    Stack({ alignContent: Alignment.Center }) {
+      SymbolGlyph(this.isPlaying ? $r('sys.symbol.pause_fill') : $r('sys.symbol.play_fill'))
+        .fontSize(38)
+        // accent 底上的前景固定用 on_accent：深浅两模式均为深色、对比受控
+        .fontColor([$r('app.color.on_accent')])
+    }
+    .width(72)
+    .height(72)
+    .borderRadius(18)
+    .backgroundColor($r('app.color.accent'))
+    .accessibilityText(this.isPlaying ? '暂停' : '播放')
+    .shadow({ radius: 18, color: $r('app.color.viz_shadow'), offsetY: 3 })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
+    .onClick(() => this.player.togglePlay())
+
+    SymbolGlyph($r('sys.symbol.forward_end_fill'))
+      .fontSize(32)
+      .fontColor([$r('app.color.viz_fg')])
+      .padding(6)
+      .accessibilityText('下一首')
+      .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
+      .onClick(() => this.player.next())
+
+    SymbolGlyph(this.isFavoriteNow ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
+      .fontSize(24)
+      .fontColor([this.isFavoriteNow ? $r('app.color.accent') : $r('app.color.viz_fg')])
+      .padding(8)
+      .accessibilityText(this.isFavoriteNow ? '取消喜欢' : '喜欢')
+      .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.88 })
+      .onClick(() => this.toggleFavorite())
+  }
+  .justifyContent(FlexAlign.SpaceEvenly)
+  .width('100%')
+  .margin({ top: 14 })
+  }
+
+  /** 副控制：音量 + 定时关闭。两侧收窄：给音量 Slider 与波形条留出拇指拖动行程 */
+  @Builder
+  SubControls() {
+  // 副控制：音量 + 定时关闭
+  Row({ space: 10 }) {
+    SymbolGlyph(this.volumeIcon())
+      .fontSize(20)
+      .fontColor([$r('app.color.viz_fg')])
+      .padding(10)
+      .accessibilityText(this.volume > 0 ? '静音' : '恢复音量')
+      .margin({ left: -10 })
+      .onClick(() => this.toggleMute())
+
+    Slider({
+      value: this.volumePreview >= 0 ?
+        Math.round(this.volumePreview * 100) : Math.round(this.volume * 100),
+      min: 0,
+      max: 100,
+      style: SliderStyle.OutSet
+    })
+      .layoutWeight(1)
+      .showTips(false)
+      .selectedColor($r('app.color.accent'))
+      .trackColor($r('app.color.viz_line'))
+      .blockColor($r('app.color.accent'))
+      .onChange((value: number, mode: SliderChangeMode) => {
+        if (mode === SliderChangeMode.Moving) {
+          // 拖动中只写本地预览，不调 setVolume（避免每帧跨单例写 @Trace）
+          this.volumePreview = value / 100;
+        } else if (mode === SliderChangeMode.End) {
+          this.volumePreview = -1;
+          this.player.setVolume(value / 100);
+        }
+      })
+
+    Row({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.timer'))
+        .fontSize(16)
+        .fontColor([this.sleepRemainSec >= 0 ?
+          $r('app.color.accent') : $r('app.color.viz_fg_faint')])
+      if (this.sleepRemainSec >= 0) {
+        // 直读 player @Trace：每秒 tick 不 notify，倒计时走 Text 内容
+        // 插值（真机存活的唯一路径）；有无定时的启停切换有 notify，
+        // 上方 fontColor/if 分支用镜像才可靠
+        Text(formatTime(this.player.sleepRemainSec * 1000))
+          .fontSize(11)
+          .fontColor($r('app.color.accent'))
+      }
+    }
+    // minHeight 替代固定高度：触控热区达标（≥40vp），系统大字体时随内容撑高
+    .constraintSize({ minHeight: 40 })
+    .borderRadius(20)
+    .backgroundColor($r('app.color.viz_btn_bg_strong'))
+    .padding({ left: 12, right: 12 })
+    .accessibilityText('定时关闭')
+    .bindMenu(this.SleepMenu())
+  }
+  .width('100%')
+  .margin({ top: 12 })
+  // 两侧收窄：给音量 Slider 与波形条留出拇指拖动行程
+  .padding({ left: 16, right: 16 })
   }
 
   /** 队列展示顺序：插播在前，其余按队列顺序。
