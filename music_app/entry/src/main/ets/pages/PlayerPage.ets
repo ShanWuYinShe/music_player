@@ -6,6 +6,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { appStore } from '../viewmodel/AppStore';
 import { PlayerController, CoverRef } from '../player/PlayerController';
+import { ReloadDataSource } from '../common/ReloadDataSource';
 import { SongRecord } from '../model/Song';
 import { PlayMode, playModeLabel, playModeSymbol } from '../model/PlayMode';
 import { formatTime } from '../common/TimeUtils';
@@ -20,42 +21,6 @@ import { VIZ_PRESET_NAMES, PRESET_COUNT } from '../common/VisualizerCore';
 interface QueueEntry {
   song: SongRecord;
   inserted: boolean;
-}
-
-/**
- * 队列数据源（LazyForEach 用）：在线签连播时队列可达数百首，ForEach
- * 全量建节点过重；列表总是整体替换（queueEntries @Computed 快照经
- * @Monitor reload），无增量增删场景。
- */
-class QueueDataSource implements IDataSource {
-  private listeners: DataChangeListener[] = [];
-  private list: QueueEntry[] = [];
-
-  reload(list: QueueEntry[]): void {
-    this.list = list;
-    this.listeners.forEach((listener) => listener.onDataReloaded());
-  }
-
-  totalCount(): number {
-    return this.list.length;
-  }
-
-  getData(index: number): QueueEntry {
-    return this.list[index];
-  }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (this.listeners.indexOf(listener) < 0) {
-      this.listeners.push(listener);
-    }
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const idx = this.listeners.indexOf(listener);
-    if (idx >= 0) {
-      this.listeners.splice(idx, 1);
-    }
-  }
 }
 
 /** 分享卡题款词句：按歌名哈希稳定选取——同一首歌恒定一句，分享图内容稳定 */
@@ -140,7 +105,8 @@ export struct PlayerPage {
   /** 分享卡片半模态开关（魔法棒菜单入口） */
   @Local shareShow: boolean = false;
   /** 队列数据源（LazyForEach）：queueEntries 变化经 @Monitor 整表 reload */
-  private queueSource: QueueDataSource = new QueueDataSource();
+  private queueSource: ReloadDataSource<QueueEntry> =
+    new ReloadDataSource<QueueEntry>((entry: QueueEntry) => `${entry.song.id}${entry.inserted ? '_q' : ''}`);
   private volumeBeforeMute: number = 1;
 
   @Monitor('queueEntries')

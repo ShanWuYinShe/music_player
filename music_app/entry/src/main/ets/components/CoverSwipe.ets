@@ -84,8 +84,6 @@ export struct CoverSwipe {
   private dragging: boolean = false;
   /** 吸附安全兜底定时器 */
   private settleTimer: number = -1;
-  /** 期望的新曲 id（落定核对：实际曲目不符则交叉淡化遮交接） */
-  private expectedSeed: string = '';
   /** 甩速采样（[位移, 时间戳]，松手前 120ms 窗口算平均速度；private 不触发重建） */
   private velPts: number[][] = [];
 
@@ -205,7 +203,6 @@ export struct CoverSwipe {
     }
     this.dragging = false;
     this.settling = true;
-    this.expectedSeed = result;
     this.rotateTrio(dir);
     // 内容旋转一格 → 位移反向补偿一格（左滑 +格距 / 右滑 -格距）：每首歌
     // 在屏幕上的位置原地不动（本次唯一"变化"是纯状态重排，无像素位移）
@@ -252,7 +249,6 @@ export struct CoverSwipe {
     this.settling = false;
     this.stripX = this.restX();
     this.syncTrio();
-    this.expectedSeed = '';
   }
 
   /** 未达阈值（且非甩动）/ 曲目未变：弹簧回中（取消语义；音频动作如回曲首已生效） */
@@ -280,7 +276,6 @@ export struct CoverSwipe {
     }
     this.clearSafety();
     this.settling = false;
-    this.expectedSeed = '';
     this.syncTrio();
   }
 

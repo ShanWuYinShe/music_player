@@ -301,6 +301,12 @@ export struct MiniPlayerBar {
           this.pathPts.push([e.offsetX, e.offsetY]);
           this.earlyClassify();
         })
+        .onActionCancel((): void => {
+          // 手势被系统打断（来电/父级抢手势）：轨迹与早认锁必须复位，
+          // 否则残留点会污染下一笔手势的早认与兜底分类
+          this.pathPts = [];
+          this.gestureFired = false;
+        })
         .onActionEnd((e: GestureEvent): void => {
           const pts = this.pathPts;
           this.pathPts = [];

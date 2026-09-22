@@ -5,6 +5,7 @@ import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { SongRecord } from '../model/Song';
 import { LibraryTab, SortMode, FilterOptions, filterAndSort, sortLabel } from '../common/LibraryFilter';
+import { ReloadDataSource } from '../common/ReloadDataSource';
 import { isOnlineId } from '../source/OnlineApi';
 import { SongItem } from '../components/SongItem';
 import { MiniPlayerBar, MiniInfo } from '../components/MiniPlayerBar';
@@ -32,51 +33,6 @@ const SEARCH_DEBOUNCE_MS = 600;
 const CLEAR_DEBOUNCE_MS = 150;
 /** 本地搜索微防抖：击键停顿该时长后触发过滤重算（毫秒） */
 const LOCAL_DEBOUNCE_MS = 120;
-
-/**
- * 歌曲列表数据源：包装过滤结果供 LazyForEach 按需创建列表项。
- * 列表总是整体替换（曲库刷新/筛选条件变化后 reload），无增量增删场景。
- */
-class SongListDataSource implements IDataSource {
-  private listeners: DataChangeListener[] = [];
-  private list: SongRecord[] = [];
-
-  reload(list: SongRecord[]): void {
-    this.list = list;
-    this.listeners.forEach((listener) => listener.onDataReloaded());
-  }
-
-  /** 精确刷新单个 id 所在行（行内 isPlaying/高亮状态变化）：只重建该 index
-   * 的列表项，避免全量 onDataReloaded（大曲库下每次播放/暂停都整列表重排） */
-  notifySongChanged(id: string): void {
-    const index = this.list.findIndex((song) => song.id === id);
-    if (index < 0) {
-      return;
-    }
-    this.listeners.forEach((listener) => listener.onDataChange(index));
-  }
-
-  totalCount(): number {
-    return this.list.length;
-  }
-
-  getData(index: number): SongRecord {
-    return this.list[index];
-  }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (this.listeners.indexOf(listener) < 0) {
-      this.listeners.push(listener);
-    }
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const idx = this.listeners.indexOf(listener);
-    if (idx >= 0) {
-      this.listeners.splice(idx, 1);
-    }
-  }
-}
 
 /**
  * 主页面：源切换（本地/在线）+ 搜索/分类/排序 + 歌曲列表 + 迷你播放条，
@@ -114,7 +70,8 @@ struct Index {
   /** 在线请求代际号：新查询使旧响应作废（latest-wins，慢网下不再丢新查询） */
   private onlineRequestId: number = 0;
   /** LazyForEach 数据源 */
-  private songSource: SongListDataSource = new SongListDataSource();
+  private songSource: ReloadDataSource<SongRecord> =
+    new ReloadDataSource<SongRecord>((song: SongRecord) => song.id);
   /** 最近签冻结快照：进签时按当时 MRU 顺序冻结，会话内切歌不再重排显示。
    * 最近列表按播放时间倒序，每次切歌 addRecent 都会把它顶到最前——若显示层
    * 直读 live recentIds，切一次歌整表重排一次，播放队列（点播瞬间快照）立刻
@@ -180,7 +137,7 @@ struct Index {
       if (reason === 'playing') {
         const id = appStore.player.currentSongId;
         if (id !== '') {
-          this.songSource.notifySongChanged(id);
+          this.songSource.notifyChanged(id);
         }
       } else if (reason !== 'prefs') {
         this.songSource.reload(this.filteredSongs);
@@ -287,7 +244,8 @@ struct Index {
             .height(122)
             .objectFit(ImageFit.Cover)
             .position({ x: '-7%', y: 0 })
-            .translate({ x: this.driftFar })
+            .translate({ x: this.driftFar, y: this.parallaxFar })
+            .hitTestBehavior(HitTestMode.None)
           Image($r('app.media.scroll_near'))
             .width('114%')
             .height(115)
