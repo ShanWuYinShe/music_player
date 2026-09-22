@@ -115,6 +115,13 @@ struct Index {
   private onlineRequestId: number = 0;
   /** LazyForEach 数据源 */
   private songSource: SongListDataSource = new SongListDataSource();
+  /** 最近签冻结快照：进签时按当时 MRU 顺序冻结，会话内切歌不再重排显示。
+   * 最近列表按播放时间倒序，每次切歌 addRecent 都会把它顶到最前——若显示层
+   * 直读 live recentIds，切一次歌整表重排一次，播放队列（点播瞬间快照）立刻
+   * 与屏幕对不上，第二次左滑右滑就乱跳（真机报障）。冻结后队列、迷你条、
+   * 播放页 pager、锁屏走同一快照，全部一致；MRU 真值仍经 addRecent 持久化，
+   * 下次进签重新冻结即最新。离签/导入/删歌时置空回 live。 */
+  @Local recentFrozen: SongRecord[] | null = null;
   /** 列表滚动控制器：四个一级签各持一个（Scroller 不可绑定多个滚动组件） */
   private localScroller: Scroller = new Scroller();
   private favScroller: Scroller = new Scroller();
@@ -206,6 +213,21 @@ struct Index {
   get filteredSongs(): SongRecord[] {
     if (this.homeTab === HomeTab.ONLINE) {
       return this.onlineSongs;
+    }
+    if (this.homeTab === HomeTab.RECENT && this.recentFrozen !== null) {
+      // 最近冻结会话：以进签快照为底，只做搜索过滤+排序，不再跟随 live
+      // recentIds（切歌 addRecent 会持续改写它，跟随即每次整表重排）。
+      // tab 取 ALL 绕开 LibraryFilter 的 MRU 重建，保留快照顺序。
+      const frozen: SongRecord[] = this.recentFrozen;
+      const snapOpts: FilterOptions = {
+        query: this.debouncedQuery,
+        tab: LibraryTab.ALL,
+        sort: this.sortMode,
+        favoriteIds: appStore.userData.favoriteIds,
+        recentIds: appStore.userData.recentIds,
+        onlineSongs: appStore.onlineStore.all()
+      };
+      return filterAndSort(frozen, snapOpts);
     }
     const opts: FilterOptions = {
       query: this.debouncedQuery,
@@ -628,8 +650,24 @@ struct Index {
     .bindMenu(this.SortMenu())
   }
 
+  /** 冻结最近快照：进最近签时按当前 MRU 顺序快照（与显示层 live 推导同源，
+   * 含在线歌注册表补位）。快照后显示与队列都走它，切歌 addRecent 只改持久化
+   * 真值不再重排屏幕——左滑右滑逐行走快照，与所见一致 */
+  private freezeRecent(): void {
+    const opts: FilterOptions = {
+      query: this.debouncedQuery,
+      tab: LibraryTab.RECENT,
+      sort: this.sortMode,
+      favoriteIds: appStore.userData.favoriteIds,
+      recentIds: appStore.userData.recentIds,
+      onlineSongs: appStore.onlineStore.all()
+    };
+    this.recentFrozen = filterAndSort(appStore.player.songs, opts);
+  }
+
   /** 列表点播：喜欢/最近两签先把队列替换为该签可见列表（跨源连播跟随
-   * 所见）；曲库签不替换——队列即本地曲库整库（filterAndSort 的筛选源），
+   * 所见；最近签可见列表即冻结快照，队列与屏幕同源，后续左滑右滑逐行
+   * 一致）；曲库签不替换——队列即本地曲库整库（filterAndSort 的筛选源），
    * 搜索中点播若按结果替换队列，清空搜索后曲库会剩残集（真机推演）。
    * 两签的队列污染由切签时 refreshSongs 自愈（见 switchTab）；在线签
    * 队列已是服务端列表，直接播 */
@@ -813,7 +851,11 @@ struct Index {
       secondaryButton: {
         value: '删除',
         fontColor: $r('app.color.danger'),
-        action: () => appStore.player.removeSong(song.id)
+        action: () => {
+          appStore.player.removeSong(song.id);
+          // 曲库条目删除：最近快照可能含已删引用，置空回 live 重建
+          this.recentFrozen = null;
+        }
       }
     });
   }
@@ -949,9 +991,16 @@ struct Index {
     this.cancelLocalFilter();
     this.debouncedQuery = this.searchText;
     if (tab === HomeTab.ONLINE) {
+      this.recentFrozen = null;
       this.enterOnline(this.searchText.trim(), forceOnline);
     } else {
       appStore.player.refreshSongs();
+      if (tab === HomeTab.RECENT) {
+        // 进最近即冻结：以当前 MRU 顺序快照，会话内显示与队列都走它
+        this.freezeRecent();
+      } else {
+        this.recentFrozen = null;
+      }
     }
     this.activeScroller().scrollToIndex(0);
   }
@@ -1142,6 +1191,7 @@ struct Index {
       if (uris.length > 0) {
         const result = await appStore.library.importFromUris(uris);
         appStore.player.refreshSongs();
+        this.recentFrozen = null; // 曲库新增：最近快照失效回 live
         // 分类提示：IO/URI 失败不得误报为"已在曲库"
         let message = '';
         if (result.added > 0 && result.failed === 0 && result.dup === 0) {
@@ -1180,6 +1230,7 @@ struct Index {
     try {
       const added = await appStore.library.importDemoTracks();
       appStore.player.refreshSongs();
+      this.recentFrozen = null; // 曲库新增：最近快照失效回 live
       promptAction.showToast({
         message: added > 0 ? `已载入 ${added} 首演示曲目` : '演示曲目已加载过'
       });

@@ -730,8 +730,12 @@ export class PlayerController {
           this.songs = this.songs.slice();
         } else {
           this.library.updateDuration(song.id, player.duration);
-          // 数组元素字段非 @Trace，需整体替换引用以刷新列表时长显示
-          this.songs = this.library.getAllSongs().slice();
+          // 保序刷新：队列可能是最近/喜欢快照或在线列表，直接换成曲库会
+          // 让切歌走到别的顺序（真机报障：最近签左滑右滑乱跳）。队列与曲库
+          // 共享 SongRecord 引用，updateDuration 已就地更新，只需替换数组
+          // 引用触发 @Trace（元素字段本身非 @Trace）；防御性再直写一次。
+          song.duration = player.duration;
+          this.songs = this.songs.slice();
         }
         if (firstDuration) {
           this.rebuildIndex(this.songs);
