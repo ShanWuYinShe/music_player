@@ -125,7 +125,9 @@ export struct PlayerPage {
   @Local playMode: PlayMode = PlayMode.SEQUENCE;
   /** 音量 @Local 镜像（0~1）：Slider 渲染读它，不直读 player */
   @Local volume: number = 1;
-  /** 定时剩余秒数 @Local 镜像（-1 无定时；每秒 tick 不通知，倒计时只在启停时刷新） */
+  /** 定时剩余秒数 @Local 镜像（-1 无定时）：只承担「有无定时」的属性态
+   * 判断（图标着色/if 分支——真机 @Trace 不驱动属性插值）；剩余时间的
+   * 数字显示直读 player @Trace（每秒 tick 不 notify，Text 内容插值存活） */
   @Local sleepRemainSec: number = -1;
   /** 音量拖动预览（-1 无拖动）：Moving 只写它不调 setVolume，End 才真正生效 */
   @Local volumePreview: number = -1;
@@ -640,7 +642,10 @@ export struct PlayerPage {
               .fontColor([this.sleepRemainSec >= 0 ?
                 $r('app.color.accent') : $r('app.color.viz_fg_faint')])
             if (this.sleepRemainSec >= 0) {
-              Text(formatTime(this.sleepRemainSec * 1000))
+              // 直读 player @Trace：每秒 tick 不 notify，倒计时走 Text 内容
+              // 插值（真机存活的唯一路径）；有无定时的启停切换有 notify，
+              // 上方 fontColor/if 分支用镜像才可靠
+              Text(formatTime(this.player.sleepRemainSec * 1000))
                 .fontSize(11)
                 .fontColor($r('app.color.accent'))
             }
@@ -848,9 +853,10 @@ export struct PlayerPage {
         MenuItem({ content: '60 分钟后停止' })
           .onClick((): void => this.applySleepTimer(60))
       }
-      if (this.sleepRemainSec >= 0) {
+      // 菜单打开瞬间构建，直读即时值——镜像只在启停 notify 时同步，会滞后
+      if (this.player.sleepRemainSec >= 0) {
         MenuItemGroup() {
-          MenuItem({ content: `取消定时（剩 ${formatTime(this.sleepRemainSec * 1000)}）` })
+          MenuItem({ content: `取消定时（剩 ${formatTime(this.player.sleepRemainSec * 1000)}）` })
             .onClick(() => {
               this.player.cancelSleepTimer();
               promptAction.showToast({ message: '已取消定时关闭' });
@@ -963,13 +969,16 @@ export struct PlayerPage {
     if (ctx === null) {
       return;
     }
+    // 快照与打包器都是 native 资源，成功/失败路径都必须释放
+    let pixelMap: image.PixelMap | null = null;
+    let packer: image.ImagePacker | null = null;
     try {
-      const pixelMap = await componentSnapshot.get('share_card');
+      pixelMap = await componentSnapshot.get('share_card');
       const helper = photoAccessHelper.getPhotoAccessHelper(ctx);
       const uri = await helper.createAsset(photoAccessHelper.PhotoType.IMAGE, 'png');
       const file = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
       try {
-        const packer = image.createImagePacker();
+        packer = image.createImagePacker();
         await packer.packToFile(pixelMap, file.fd, { format: 'image/png', quality: 100 });
       } finally {
         fs.closeSync(file);
@@ -979,6 +988,9 @@ export struct PlayerPage {
       hilog.warn(0x0004, 'PlayerPage', 'save share card failed: %{public}s',
         JSON.stringify(err));
       promptAction.showToast({ message: '保存失败' });
+    } finally {
+      packer?.release().catch(() => {});
+      pixelMap?.release().catch(() => {});
     }
   }
 
@@ -995,7 +1007,7 @@ export struct PlayerPage {
     // 统一收藏入口：在线歌经 AppStore 注册元数据并钉住缓存补下载
     const fav = appStore.toggleFavorite(song);
     this.isFavoriteNow = fav; // @Trace 插值在真机不可靠，图标刷新显式走镜像
-    promptAction.showToast({ message: fav ? '已添加到我喜欢的音乐' : '已取消喜欢' });
+    promptAction.showToast({ message: fav ? '已喜欢' : '已取消喜欢' });
     // 收藏动作触觉反馈：软震动一档（权限被拒/无马达时静默失败）
     const effect: vibrator.VibratePreset = {
       type: 'preset',

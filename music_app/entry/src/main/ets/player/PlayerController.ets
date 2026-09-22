@@ -426,8 +426,9 @@ export class PlayerController {
     }
   }
 
-  /** 启动定时关闭（分钟）：每秒 tick 只改内存不 notify，
-   * 倒计时 Text 插值在真机自存活，无需广播（播放页依赖启停 notify 刷新） */
+  /** 启动定时关闭（分钟）：每秒 tick 只自增 @Trace 不 notify——倒计时 Text
+   * 直读本字段走内容插值（真机存活的唯一路径，播放页属性态走镜像），
+   * 每秒 notify 会放大成全部订阅方重建；启停两处末尾 notify 供镜像对齐 */
   startSleepTimer(minutes: number): void {
     this.cancelSleepTimer();
     this.sleepRemainSec = Math.max(1, Math.round(minutes * 60));

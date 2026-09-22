@@ -104,7 +104,6 @@ export struct VisualizerView {
   private playClock = 0;
   private lastNow = 0;
   private fadeDeadline = 0;
-  private frameLog = 0;
 
   aboutToAppear(): void {
     this.ds = displaySync.create();
@@ -121,6 +120,10 @@ export struct VisualizerView {
       this.ds = null;
     }
     this.syncSensor();
+    // 麦克风律动开着退出播放页必须停采集：disposed=true 已让 syncMic 走
+    // stop 分支——漏掉这一步 AVAudioCapturer 会持续采到用户手动关闭为止
+    // （指示灯不灭、耗电、隐私）
+    this.syncMic();
   }
 
   @Monitor('isPlaying', 'songId')
