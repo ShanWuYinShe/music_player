@@ -56,6 +56,10 @@ server {
     proxy_read_timeout 600s;
     proxy_send_timeout 600s;
 
+    # 变量形式 upstream 在运行期解析,必须显式指定 resolver(127.0.0.11 =
+    # docker 内嵌 DNS,可解析服务名并转发外部域名)。
+    resolver 127.0.0.11 valid=30s;
+
     set $music_upstream music_server:8790;
 
     # 站内薄管理:/admin/ 静态页(htpasswd 基础认证)+ /admin/api/ 反代。
