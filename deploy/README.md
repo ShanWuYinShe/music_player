@@ -20,17 +20,26 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 为过渡期别�
      rsync 迁移；此后由薄管理端点或 scp 投放）；
    - `data/generated/`：网易云 cookie（`netease-cookie.txt`，可选，扫码登录
      会重新写入）。
-5. **启动**：`cp .env.example .env && $EDITOR .env && make build && make up netease_api music_server nginx`。
-6. **验证**：`curl -s https://music.chaoset.com/healthz`；App 侧以新基址
-   `https://music.chaoset.com/api/v1` 拉一次 songs。
+5. **管理入口**：生成基础认证文件
+   `mkdir -p htpasswd && htpasswd -nb <user> '<pass>' > htpasswd/.htpasswd`
+   （容器以 ro 挂载）；管理页 `https://music.chaoset.com/admin/`（曲库上传/
+   删除、网易云扫码登录），可选令牌兜底见 `.env` 的 `MUSIC_SERVER_ADMIN_TOKEN`。
+6. **启动**：`cp .env.example .env && $EDITOR .env && make build && make up netease_api music_server nginx`。
+7. **验证**：`curl -s https://music.chaoset.com/healthz`；App 侧以新基址
+   `https://music.chaoset.com/api/v1` 拉一次 songs；浏览器登录 /admin/ 试传一个
+   小文件并确认曲库列表出现。
 
 ## 运维
 
 - **版本升级**：改 `versions.env` → `make build` → `make up <svc...>`；
   镜像 tag 为 `git describe`（回滚 = `IMAGE_TAG=<旧tag> make up <svc...>`）。
-- **曲库投放**：薄管理端点（Phase 2b）上线前经 `scp` 到 `data/library/`；
-  文件名约定「歌手 - 歌名.ext」，music_server 自动扫描。
-- **网易云登录**：薄管理端点上线前经 `.env` 的 `NETEASE_MUSIC_COOKIE` 或
-  cookie 文件投放。
+- **曲库投放**：管理页 `/admin/` 批量上传（≤100MB/个）或大文件分片上传
+  （8MB/片可续传，绕过 CF 单请求 100MB 上限）；也可 `scp` 到 `data/library/`。
+  文件名约定「歌手 - 歌名.ext」，music_server 自动扫描（60s TTL 懒刷新）。
+- **网易云登录**：管理页扫码登录（cookie 热加载 30s 内生效）；也可经
+  `.env` 的 `NETEASE_MUSIC_COOKIE` 投放。
+- **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`
+  须可被 uid 1001 写入（容器 `user: "1001:1001"`），首次部署
+  `chown -R 1001 data`。
 - **过渡期别名**：`/api/*` 仅供 workwork nginx 过渡反代与存量 App，客户端
   全量切换后删除（nginx 模板注释 + music_server `apiV1Prefix` 归一化）。

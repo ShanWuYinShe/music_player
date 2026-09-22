@@ -2,6 +2,10 @@
 # ${MUSIC_DOMAIN} 由官方镜像 entrypoint envsubst 注入；nginx 运行时变量
 # （$remote_addr 等）不在环境变量列表中，不会被替换。
 
+# 管理面限速:10r/s + burst,压脚本化高频调用(本文件在 http 上下文内被
+# include,limit_req_zone 只允许出现在这里)。
+limit_req_zone $binary_remote_addr zone=admin_api:10m rate=10r/s;
+
 server {
     listen 127.0.0.1:8080;
     server_name localhost;
@@ -54,21 +58,28 @@ server {
 
     set $music_upstream music_server:8790;
 
-    # 薄管理入口（Phase 2b：/admin/api/v1/* 曲库分片上传与网易云扫码登录）。
-    # 上线前先静态 404，启用时取消注释并把 htpasswd 挂到 /etc/nginx/htpasswd。
-    location /admin/ {
-        return 404;
+    # 站内薄管理:/admin/ 静态页(htpasswd 基础认证)+ /admin/api/ 反代。
+    # htpasswd 由部署时生成(README):htpasswd -nb user pass > htpasswd/.htpasswd
+    location = /admin {
+        return 308 /admin/;
     }
-    #location /admin/ {
-    #    auth_basic "Restricted";
-    #    auth_basic_user_file /etc/nginx/htpasswd/.htpasswd;
-    #    access_log /var/log/nginx/admin-access.log;
-    #    limit_req zone=admin_api burst=20 nodelay;
-    #    limit_req_status 429;
-    #    proxy_pass http://$music_upstream;
-    #    client_max_body_size 16m;
-    #    proxy_read_timeout 120s;
-    #}
+    location /admin/api/ {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/htpasswd/.htpasswd;
+        access_log /var/log/nginx/admin-access.log;
+        limit_req zone=admin_api burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://$music_upstream;
+        client_max_body_size 16m;
+        proxy_read_timeout 300s;
+    }
+    location /admin/ {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/htpasswd/.htpasswd;
+        access_log /var/log/nginx/admin-access.log;
+        alias /srv/admin/;
+        try_files $uri /admin/index.html;
+    }
 
     # 业务 API：/api/v1/* 为规范前缀，/api/* 为过渡期旧别名（music_server
     # 内部归一化，行为一致）。不做路径改写，原样透传。

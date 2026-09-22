@@ -96,8 +96,9 @@ func TestParseSongName(t *testing.T) {
 func newTestServer(t *testing.T, dir string) *musicServer {
 	t.Helper()
 	server := &musicServer{
-		config:  AppConfig{LibraryDir: dir, RateLimitPerMinute: 1000},
-		limiter: newIPWindowLimiter(1000, time.Minute),
+		config:      AppConfig{LibraryDir: dir, RateLimitPerMinute: 1000},
+		limiter:     newIPWindowLimiter(1000, time.Minute),
+		uploadSlots: make(chan struct{}, maxUploadSlots),
 	}
 	if err := server.refreshLibrary(); err != nil {
 		t.Fatal(err)

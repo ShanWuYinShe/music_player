@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>music 站管理</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "PingFang SC", sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; line-height: 1.5; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-bottom: 8px; }
+  section { border: 1px solid #8884; border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+  button { padding: 4px 12px; margin: 2px 4px 2px 0; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid #8882; }
+  .muted { opacity: .65; font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #qr img { max-width: 200px; }
+  #log { font-size: 12px; white-space: pre-wrap; color: #c33; }
+  input[type=text], input[type=password] { padding: 4px 8px; }
+</style>
+</head>
+<body>
+<h1>music 站管理</h1>
+<div class="row muted">
+  <label>管理令牌(X-Admin-Token,未配置可留空) <input type="password" id="token" size="24"></label>
+  <button onclick="saveToken()">记住</button>
+</div>
+
+<section>
+  <h2>网易云音乐</h2>
+  <div id="neteaseState" class="muted">加载中…</div>
+  <div class="row" style="margin-top:8px">
+    <button onclick="qrStart()">生成登录二维码</button>
+    <button onclick="neteaseLogout()">登出</button>
+  </div>
+  <div id="qr"></div>
+</section>
+
+<section>
+  <h2>曲库(上传即入库,索引约 60s 内刷新)</h2>
+  <div class="row">
+    <input type="file" id="smallFiles" multiple accept=".mp3,.wav,.flac,.m4a,.ogg,.oga,.aac,.opus">
+    <button onclick="uploadSmall()">批量上传(每个 ≤100MB)</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <input type="file" id="bigFile" accept=".mp3,.wav,.flac,.m4a,.ogg,.oga,.aac,.opus">
+    <button onclick="uploadChunked()">大文件分片上传(8MB/片,可续传)</button>
+  </div>
+  <div id="uploadProgress" class="muted"></div>
+  <h2 style="margin-top:16px">文件列表</h2>
+  <table id="files"><tbody></tbody></table>
+</section>
+
+<pre id="log"></pre>
+<script>
+const $ = id => document.getElementById(id);
+const err = e => { $('log').textContent += (e.message || e) + '\n'; };
+const token = () => localStorage.getItem('adminToken') || '';
+function saveToken() { localStorage.setItem('adminToken', $('token').value.trim()); alert('已记住'); }
+function headers(extra = {}) { return { ...(token() ? { 'X-Admin-Token': token() } : {}), ...extra }; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: headers(), ...opts });
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function loadState() {
+  try {
+    const s = await api('/admin/api/v1/netease/login/state');
+    $('neteaseState').textContent = s.loggedIn
+      ? `已登录${s.nickname ? ':' + s.nickname : ''}(cookie 更新于 ${s.updatedAt || '?'})` : '未配置网易云 cookie';
+  } catch (e) { $('neteaseState').textContent = '状态获取失败'; err(e); }
+}
+
+let pollTimer = null;
+async function qrStart() {
+  try {
+    const s = await api('/admin/api/v1/netease/login/start');
+    $('qr').innerHTML = s.qrimg + '<div class="muted">用网易云音乐 App 扫码,保持本页打开</div>';
+    clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const c = await api('/admin/api/v1/netease/login/check?key=' + encodeURIComponent(s.key));
+        if (c.code === 803) { clearInterval(pollTimer); $('qr').textContent = '登录成功:' + (c.nickname || ''); loadState(); }
+      } catch (e) { clearInterval(pollTimer); err(e); }
+    }, 2000);
+  } catch (e) { err(e); }
+}
+async function neteaseLogout() { try { await api('/admin/api/v1/netease/login/logout', { method: 'POST' }); $('qr').textContent = ''; loadState(); } catch (e) { err(e); } }
+
+async function loadFiles() {
+  try {
+    const s = await api('/admin/api/v1/library?pageSize=500');
+    const tb = $('files').tBodies[0];
+    tb.innerHTML = '';
+    for (const f of s.files) {
+      const tr = tb.insertRow();
+      tr.insertCell().textContent = f.name;
+      tr.insertCell().textContent = (f.sizeBytes / 1048576).toFixed(1) + ' MB';
+      tr.insertCell().textContent = f.modTime;
+      const del = tr.insertCell();
+      const b = document.createElement('button');
+      b.textContent = '删除';
+      b.onclick = async () => {
+        if (!confirm('删除 ' + f.name + '?')) return;
+        try { await api('/admin/api/v1/library?name=' + encodeURIComponent(f.name), { method: 'DELETE' }); loadFiles(); } catch (e) { err(e); }
+      };
+      del.appendChild(b);
+    }
+    if (!s.files.length) tb.innerHTML = '<tr><td class="muted">曲库为空</td></tr>';
+  } catch (e) { err(e); }
+}
+
+async function uploadSmall() {
+  const files = $('smallFiles').files;
+  if (!files.length) return alert('先选择文件');
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.name);
+  $('uploadProgress').textContent = '批量上传中…';
+  try {
+    const s = await api('/admin/api/v1/library/upload', { method: 'POST', body: fd });
+    $('uploadProgress').textContent = `保存 ${s.saved.length} 个,跳过 ${s.skipped.length} 个` + (s.skipped.length ? ':' + s.skipped.join(';') : '');
+    loadFiles();
+  } catch (e) { $('uploadProgress').textContent = ''; err(e); }
+}
+
+// uploadId 从 文件名/大小/mtime/首 1MB 派生(SHA-256 hex64):跨会话稳定可续传。
+async function uploadIdFor(file) {
+  const head = new Uint8Array(await file.slice(0, 1 << 20).arrayBuffer());
+  const meta = new TextEncoder().encode(`${file.name}|${file.size}|${file.lastModified}|`);
+  const buf = await crypto.subtle.digest('SHA-256', await new Blob([meta, head]).arrayBuffer());
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function uploadChunked() {
+  const f = $('bigFile').files[0];
+  if (!f) return alert('先选择文件');
+  const CHUNK = 8 << 20;
+  const total = Math.ceil(f.size / CHUNK);
+  if (total > 32) return alert('超过 200MB 上限');
+  $('uploadProgress').textContent = '计算校验…';
+  try {
+    const uploadId = await uploadIdFor(f);
+    // 续传:查询已收分片,跳过。
+    const q = await api('/admin/api/v1/library/upload-chunk?uploadId=' + uploadId);
+    const done = new Set(q.received || []);
+    for (let i = 0; i < total; i++) {
+      if (done.has(i)) continue;
+      const data = await f.slice(i * CHUNK, (i + 1) * CHUNK).arrayBuffer();
+      const hash = await crypto.subtle.digest('SHA-256', data);
+      const sha = [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+      const fd = new FormData();
+      fd.append('uploadId', uploadId); fd.append('fileName', f.name);
+      fd.append('total', total); fd.append('index', i); fd.append('sha256', sha);
+      fd.append('chunk', new Blob([data]));
+      const s = await api('/admin/api/v1/library/upload-chunk', { method: 'POST', body: fd });
+      $('uploadProgress').textContent = `分片 ${s.received.length}/${total}`;
+      if (s.complete) { $('uploadProgress').textContent = `完成:${s.saved}`; loadFiles(); return; }
+    }
+    $('uploadProgress').textContent = '上传结束(未触发合并,请重试最后一步)';
+    loadFiles();
+  } catch (e) { err(e); }
+}
+
+$('token').value = token();
+loadState(); loadFiles();
+</script>
+</body>
+</html>

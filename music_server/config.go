@@ -26,6 +26,10 @@ type AppConfig struct {
 	// 与 media_server 的 MEDIA_SERVER_APP_API_TOKEN 同构。空 = 不鉴权,
 	// 保持既有行为(依赖边缘 CF mTLS);设置后作为边缘误配/内网横向的兜底。
 	AppToken string
+	// AdminToken 可选:/admin/api/v1/* 站内管理端点(曲库上传/网易云登录)
+	// 要求 X-Admin-Token 头。空 = 仅依赖边缘 nginx basic auth(个人站默认);
+	// 设置后作为边缘误配/内网横向的兜底。
+	AdminToken string
 }
 
 // Addr 返回监听地址。
@@ -44,6 +48,7 @@ func loadAppConfig() (AppConfig, error) {
 		NeteaseCookie:      getEnv("NETEASE_MUSIC_COOKIE", ""),
 		NeteaseCookieFile:  getEnv("NETEASE_COOKIE_FILE", ""),
 		AppToken:           strings.TrimSpace(getEnv("MUSIC_SERVER_APP_API_TOKEN", "")),
+		AdminToken:         strings.TrimSpace(getEnv("MUSIC_SERVER_ADMIN_TOKEN", "")),
 	}
 	if config.Port == "" {
 		return AppConfig{}, errors.New("PORT is required")

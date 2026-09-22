@@ -83,6 +83,8 @@ type musicServer struct {
 	library   []Song
 	byID      map[string]songFile
 	scannedAt time.Time
+	// uploadSlots 是 /admin/api/v1/* 上传端点的并发闸门(见 admin_api.go)。
+	uploadSlots chan struct{}
 	// refreshing 是后台刷新的单飞标记:过期分支同时最多起一个扫描协程。
 	refreshing atomic.Bool
 }
@@ -106,9 +108,10 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 	server := &musicServer{
-		config:  config,
-		limiter: newIPWindowLimiter(config.RateLimitPerMinute, time.Minute),
-		netease: newNeteaseClient(config.NeteaseAPIBase, config.NeteaseCookie, config.NeteaseCookieFile),
+		config:      config,
+		limiter:     newIPWindowLimiter(config.RateLimitPerMinute, time.Minute),
+		netease:     newNeteaseClient(config.NeteaseAPIBase, config.NeteaseCookie, config.NeteaseCookieFile),
+		uploadSlots: make(chan struct{}, maxUploadSlots),
 	}
 	if server.netease.enabled() {
 		log.Printf("netease source enabled, upstream=%s (cookie=%v)",
@@ -149,6 +152,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// 孤儿分片(上传中断)每小时清理,随进程退出终止。
+	go startChunkCleanupLoop(ctx)
+
 	go func() {
 		log.Printf("music_server %s listening on %s, library=%s", version, config.Addr(), config.LibraryDir)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -185,6 +191,18 @@ func (s *musicServer) routes() http.Handler {
 	mux.HandleFunc("GET /api/providers", s.requireAppToken(s.requireRateLimit(s.handleProviders)))
 	mux.HandleFunc("GET /api/songs", s.requireAppToken(s.requireRateLimit(s.handleSongs)))
 	mux.HandleFunc("GET /api/stream/{id}", s.requireAppToken(s.requireRateLimit(s.handleStream)))
+	// 站内薄管理(/admin/api/v1/*):曲库上传与网易云扫码登录,原 workwork
+	// admin 功能随站迁移;边缘 nginx basic auth 之外的可选令牌兜底见
+	// requireAdminToken。不走业务限流(管理面由边缘 limit_req 承载)。
+	mux.HandleFunc("GET /admin/api/v1/library", s.requireAdminToken(s.handleAdminLibraryList))
+	mux.HandleFunc("POST /admin/api/v1/library/upload", s.requireAdminToken(s.handleAdminLibraryUpload))
+	mux.HandleFunc("DELETE /admin/api/v1/library", s.requireAdminToken(s.handleAdminLibraryDelete))
+	mux.HandleFunc("GET /admin/api/v1/library/upload-chunk", s.requireAdminToken(s.handleAdminChunkQuery))
+	mux.HandleFunc("POST /admin/api/v1/library/upload-chunk", s.requireAdminToken(s.handleAdminChunkUpload))
+	mux.HandleFunc("GET /admin/api/v1/netease/login/start", s.requireAdminToken(s.handleAdminNeteaseStart))
+	mux.HandleFunc("GET /admin/api/v1/netease/login/check", s.requireAdminToken(s.handleAdminNeteasePoll))
+	mux.HandleFunc("GET /admin/api/v1/netease/login/state", s.requireAdminToken(s.handleAdminNeteaseState))
+	mux.HandleFunc("POST /admin/api/v1/netease/login/logout", s.requireAdminToken(s.handleAdminNeteaseLogout))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 归一化只改写路由用的 Path,Query 不受影响。
 		if rest, ok := strings.CutPrefix(r.URL.Path, apiV1Prefix); ok {

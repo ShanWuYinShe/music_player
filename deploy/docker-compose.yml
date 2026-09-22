@@ -43,6 +43,9 @@ services:
     volumes:
       - ./cert:/etc/nginx/certs:ro
       - ./cert/cloudflare-origin-pull.pem:/etc/nginx/cloudflare-origin-pull.pem:ro
+      # /admin/ 基础认证与静态管理页
+      - ./htpasswd:/etc/nginx/htpasswd:ro
+      - ./admin:/srv/admin:ro
     depends_on:
       music_server:
         condition: service_healthy
@@ -97,6 +100,8 @@ services:
       # 扫码登录写入的 cookie(热加载);宿主 data/generated 目录
       - NETEASE_COOKIE_FILE=/data/netease/netease-cookie.txt
       - MUSIC_SERVER_APP_API_TOKEN=${MUSIC_SERVER_APP_API_TOKEN:-}
+      # 站内管理端点(/admin/api/v1/*)可选令牌兜底(边缘 basic auth 之外)
+      - MUSIC_SERVER_ADMIN_TOKEN=${MUSIC_SERVER_ADMIN_TOKEN:-}
     volumes:
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       # 曲库：music_server 读写（薄管理上传端点写入；uid 1001）
