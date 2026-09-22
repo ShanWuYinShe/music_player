@@ -16,3 +16,6 @@
 # 操作系统
 .DS_Store
 .hvigor/
+
+# 独立站部署本地环境(含站点 IPv6 等运行时值,不入库)
+deploy/.env

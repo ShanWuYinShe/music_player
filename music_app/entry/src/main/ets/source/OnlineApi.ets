@@ -10,10 +10,11 @@ import { SongRecord } from '../model/Song';
 export const ONLINE_ID_PREFIX = 'online:';
 
 /**
- * 默认在线服务地址：线上 nginx 的 /api/music/ 前缀（与 media_center 客户端
- * 默认 https://yinghuoren.com/api/media 同域同 nginx）。用户未配置时使用。
+ * 默认在线服务地址：独立站 music.chaoset.com 的 /api/v1/ 规范前缀。
+ * 旧默认 https://yinghuoren.com/api/music（workwork 聚合栈）经过渡反代仍可用，
+ * 已安装的旧版本与用户手填地址不受影响。用户在设置页配置的地址优先生效。
  */
-export const DEFAULT_ONLINE_BASE_URL = 'https://yinghuoren.com/api/music';
+export const DEFAULT_ONLINE_BASE_URL = 'https://music.chaoset.com/api/v1';
 
 /** music_server GET /api/songs 响应中的单曲条目（album/source 服务端可省略） */
 export interface OnlineSongItem {

@@ -1,0 +1,80 @@
+# music 站边缘网关（music.chaoset.com）。
+# ${MUSIC_DOMAIN} 由官方镜像 entrypoint envsubst 注入；nginx 运行时变量
+# （$remote_addr 等）不在环境变量列表中，不会被替换。
+
+server {
+    listen 127.0.0.1:8080;
+    server_name localhost;
+    access_log off;
+
+    location = /nginx-health {
+        return 204;
+    }
+}
+
+server {
+    # 仅 IPv6 监听：公网入口链路是 Cloudflare → 本机 IPv6（ipvlan L3 直连）。
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${MUSIC_DOMAIN};
+
+    ssl_certificate /etc/nginx/certs/server_cert.pem;
+    ssl_certificate_key /etc/nginx/certs/server_cert.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    ssl_session_timeout 4h;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Cloudflare Authenticated Origin Pulls (mTLS)：
+    # 前提是 chaoset.com zone 已开启 Authenticated Origin Pulls（见 deploy/README.md）。
+    ssl_client_certificate /etc/nginx/cloudflare-origin-pull.pem;
+    ssl_verify_client on;
+
+    # real_ip：按 CF-Connecting-IP 还原真实客户端地址，music_server 的
+    # per-IP 限流与日志依赖 X-Real-IP 取到真实客户端。
+    include /etc/nginx/cloudflare-ips.conf;
+
+    # 音频 Range 流式逐段下发，不在 nginx 侧缓冲；曲库/列表为小 JSON，无碍。
+    proxy_buffering off;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+
+    set $music_upstream music_server:8790;
+
+    # 薄管理入口（Phase 2b：/admin/api/v1/* 曲库分片上传与网易云扫码登录）。
+    # 上线前先静态 404，启用时取消注释并把 htpasswd 挂到 /etc/nginx/htpasswd。
+    location /admin/ {
+        return 404;
+    }
+    #location /admin/ {
+    #    auth_basic "Restricted";
+    #    auth_basic_user_file /etc/nginx/htpasswd/.htpasswd;
+    #    access_log /var/log/nginx/admin-access.log;
+    #    limit_req zone=admin_api burst=20 nodelay;
+    #    limit_req_status 429;
+    #    proxy_pass http://$music_upstream;
+    #    client_max_body_size 16m;
+    #    proxy_read_timeout 120s;
+    #}
+
+    # 业务 API：/api/v1/* 为规范前缀，/api/* 为过渡期旧别名（music_server
+    # 内部归一化，行为一致）。不做路径改写，原样透传。
+    # client_max_body_size：业务 API 全 GET，16m 仅防滥用。
+    location / {
+        proxy_pass http://$music_upstream;
+        client_max_body_size 16m;
+    }
+}

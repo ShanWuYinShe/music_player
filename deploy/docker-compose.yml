@@ -1,0 +1,159 @@
+# music 站编排：music.chaoset.com 独立站（web-service-conventions）。
+# 三服务自洽：nginx（边缘，公网 IPv6 经 ipvlan 直连）+ music_server + netease_api。
+# netease_api 随 music 从 workwork 迁入本仓（music 专属上游）。
+# 前置（服务器，见 README.md）：ipvlan_docker 网络、cert/ 证书、数据目录就位。
+
+name: music_player
+
+services:
+  nginx:
+    image: music-nginx:${IMAGE_TAG:-latest}
+    build:
+      context: ./nginx
+      args:
+        NGINX_VERSION: ${NGINX_VERSION:?NGINX_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - MUSIC_DOMAIN=${MUSIC_DOMAIN:-music.chaoset.com}
+    init: true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      edge:
+      ipvlan_docker:
+        ipv6_address: "${MUSIC_IPV6}"
+    volumes:
+      - ./cert:/etc/nginx/certs:ro
+      - ./cert/cloudflare-origin-pull.pem:/etc/nginx/cloudflare-origin-pull.pem:ro
+    depends_on:
+      music_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/nginx-health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  music_server:
+    image: music-server:${IMAGE_TAG:-latest}
+    build:
+      context: ../music_server
+      dockerfile: Dockerfile
+      args:
+        GO_VERSION: ${GO_VERSION:?GO_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+        ALPINE_VERSION: ${ALPINE_VERSION:?ALPINE_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+        GIT_VERSION: ${GIT_VERSION:-dev}
+    restart: unless-stopped
+    init: true
+    # 以 uid 1001(workuser)运行:曲库音频与网易云 cookie 文件(0600)仅属主可读;
+    # 镜像默认 appuser(10001)读两者都会 permission denied——表现为曲库能列出
+    # 但播放 404。宿主侧 data/library、data/generated 需 chown 1001 或放写权限。
+    user: "1001:1001"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
+      - backend
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    environment:
+      - TZ=Asia/Shanghai
+      - HOST=0.0.0.0
+      - PORT=8790
+      - LIBRARY_DIR=/data/library
+      - NETEASE_API_BASE=http://netease_api:3000
+      - NETEASE_MUSIC_COOKIE=${NETEASE_MUSIC_COOKIE:-}
+      # 扫码登录写入的 cookie(热加载);宿主 data/generated 目录
+      - NETEASE_COOKIE_FILE=/data/netease/netease-cookie.txt
+      - MUSIC_SERVER_APP_API_TOKEN=${MUSIC_SERVER_APP_API_TOKEN:-}
+    volumes:
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+      # 曲库：music_server 读写（薄管理上传端点写入；uid 1001）
+      - ./data/library:/data/library
+      # 网易云 cookie：扫码登录端点写入（Phase 2b）
+      - ./data/generated:/data/netease
+    depends_on:
+      # netease_api 镜像自带 HEALTHCHECK(容器内 :3000),以此门控启动,
+      # 上游未就绪时不再先起一轮 5xx。
+      netease_api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8790/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 网易云 API 上游(NeteaseCloudMusicApi Enhanced):仅 backend 内网,
+  # 供 music_server 聚合搜索与流解析、扫码登录;不对外暴露端口。
+  netease_api:
+    image: music-netease-api:${IMAGE_TAG:-latest}
+    build:
+      context: ../netease_api
+      dockerfile: Dockerfile
+      args:
+        BUN_VERSION: ${BUN_VERSION:?BUN_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+    restart: unless-stopped
+    init: true
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    environment:
+      - TZ=Asia/Shanghai
+
+networks:
+  # 边缘：nginx ↔ music_server（bridge NAT，IPv4 出站）
+  edge:
+    driver: bridge
+  # 后端：music_server ↔ netease_api（nginx 不可直达）
+  backend:
+    driver: bridge
+  # 宿主 IPv6 L3 直连网络（external，与 workwork/media 站共用寻址池）
+  ipvlan_docker:
+    external: true

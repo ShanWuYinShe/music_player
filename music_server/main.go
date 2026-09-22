@@ -165,19 +165,33 @@ func main() {
 	}
 }
 
+// apiV1Prefix 是独立站(music.chaoset.com)部署的对外规范业务前缀
+// (web-service-conventions)。内部路由仍以 /api 书写,入口把 /api/v1/x 归一为
+// /api/x;旧 /api/* 为过渡期废弃别名(workwork nginx 反代与存量 App 在用),
+// 客户端全量切换后一并移除。
+const apiV1Prefix = "/api/v1"
+
 // routes 注册全部路由。抽成方法供 main 与单元测试共用:
 // PathValue 只有在请求经 ServeMux 路由后才有值,测试必须走完整 mux。
-func (s *musicServer) routes() *http.ServeMux {
+// 返回值经 /api/v1 归一化包装,健康探针按独立站约定补 /healthz(无版本前缀)。
+func (s *musicServer) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
-	// /api/health 别名:nginx 以 /api/music/ 前缀反代并重写为 /api/health,
-	// 与 media_server(/health 与 /api/health 双注册)对齐,公网排障可直接
-	// curl https://<域名>/api/music/health 拿到版本号。
+	// /healthz:独立站约定的无鉴权存活探针(nginx /healthz 直达,不带 /api 前缀)。
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	// /api/health 别名:workwork 过渡反代重写为 /api/health,与 media_server
+	// 对齐,公网排障可直接 curl https://<域名>/api/v1/health 拿到版本号。
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/providers", s.requireAppToken(s.requireRateLimit(s.handleProviders)))
 	mux.HandleFunc("GET /api/songs", s.requireAppToken(s.requireRateLimit(s.handleSongs)))
 	mux.HandleFunc("GET /api/stream/{id}", s.requireAppToken(s.requireRateLimit(s.handleStream)))
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 归一化只改写路由用的 Path,Query 不受影响。
+		if rest, ok := strings.CutPrefix(r.URL.Path, apiV1Prefix); ok {
+			r.URL.Path = "/api" + rest
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // handleHealth 供编排层 healthcheck 探测,不做限流。

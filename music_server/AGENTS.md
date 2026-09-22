@@ -13,12 +13,18 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 - 本地曲库文件名约定由 `fillFromFileName` 解析；改解析逻辑前先加载该 skill。
 - 曲目 id 分本地/网络两个空间，勿混。
 
-## API(nginx 去前缀后,外部路径为 /api/music/<path>)
+## API(下表按内部路由书写)
+
+对外规范前缀是 `/api/v1`(独立站约定,`main.go` 的 routes() 把 `/api/v1/x`
+归一为 `/api/x`);旧 `/api/*` 为过渡期废弃别名,行为与 `/api/v1/*` 完全一致。
+独立站部署下经 nginx 原样透传;workwork 过渡反代期间旧路径
+`/api/music/<path>` 由其重写后到达。
 
 | 端点 | 说明 |
 |------|------|
 | `GET /health` | healthcheck,无限流 |
-| `GET /api/health` | `/health` 的别名,公网经 `/api/music/health` 排障可直接拿版本号,无限流 |
+| `GET /healthz` | 存活探针(独立站约定,无鉴权,nginx /healthz 直达),无限流 |
+| `GET /api/health` | `/health` 的别名,公网排障可直接拿版本号,无限流 |
 | `GET /api/providers` | 源列表(library + 启用的 netease);netease 源带 `loggedIn`(是否已配置账号 cookie) |
 | `GET /api/songs?q=&limit=` | q 空:本地曲库全量 + 网易「新歌速递」推荐追加(在线页开箱即有内容);q 非空:本地匹配在前、网易搜索(≤30 条)追加;limit 默认 200 上限 500 |
 | `GET /api/stream/{id}` | 音频流,Range 支持(本地 ServeContent / 网络源代理透传);无版权网络曲目返回 404 |
