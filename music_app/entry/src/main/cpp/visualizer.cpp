@@ -3,7 +3,8 @@
  *
  * 架构：ArkTS 侧 XComponent(SURFACE) 挂载原生表面，本模块在
  * OnSurfaceCreated 创建 EGL 上下文与 GLES 3.0 管线；每次 displaySync
- * 回调经 NAPI 调 renderFrame(t, seed, playing) 同步渲染一帧。
+ * 回调经 NAPI 调 renderFrame(t, seed, beat, bass, treble, presetLock,
+ * transition, tiltX, tiltY, spin, kick) 同步渲染一帧。
  *
  * 渲染方式：全屏三角形（3 顶点覆盖视口），顶点阶段只做全屏覆盖——
  * 所有视觉在 fragment shader 逐像素解算，运算量只与像素数相关。
@@ -23,7 +24,9 @@
  * tools/gen_shader_header.py 转成 GLES3 头文件 shader_src.h（生成到构建目录，
  * 不进源码树）。每个场景一个 program，按 presetLock 切换。
  *
- * 参数：t(有效播放时钟 ms)、seed(曲目 id 派生)、playing(暂停分支)、
+ * 参数：t(有效播放时钟 ms)、seed(曲目 id 派生)、
+ *       beat/bass/treble(音频律动量，uniform 驱动画面律动)、
+ *       presetLock(场景号)/transition(场景过渡进度 0..1)、
  *       tiltX/tiltY(设备姿态归一化倾斜，uniform uTilt——全场景相机视差)、
  *       spin(面内旋转归一化，uniform uSpin——全场景滚转，只进几何)、
  *       kick(抛甩激励包络，uniform uKick——只进亮度/尺寸，不进色相)。

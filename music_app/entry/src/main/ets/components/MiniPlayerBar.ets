@@ -1,6 +1,7 @@
 import { PlayerController } from '../player/PlayerController';
 import displaySync from '@ohos.graphics.displaySync';
 import { CoverArt } from './CoverArt';
+import { classifyStrokeEnd, earlyClassifyStroke } from '../common/GesturePath';
 
 const BAR_HEIGHT = 62;
 
@@ -147,42 +148,16 @@ export struct MiniPlayerBar {
   /** 本次触摸已触发过动作（早认锁定）：后半段笔画不再判定，抬手只复位 */
   private gestureFired: boolean = false;
 
-  /** 折返早认：`>`/`<` 的本质特征是 x 方向反转（顶点）——向一侧走出
-   * OUT_VP 后折回 BACK_VP 即触发，不等抬手（抬手分类只做兜底）。顶点在
-   * 右（先右后左，`>`）= 下一个签，顶点在左（`<`）= 上一个签。
-   * 直线横滑故意不等抬手早认——它是折返的前半段，早认必误杀 `>`/`<`。
-   * 一次触摸只触发一次，触发后锁定到抬手 */
+  /** 折返早认：分类逻辑在 common/GesturePath（纯函数，可单测），这里只
+   * 喂轨迹点、按结果锁定并派发 */
   private earlyClassify(): void {
-    const pts = this.pathPts;
-    if (this.gestureFired || pts.length < 2) {
+    if (this.gestureFired || this.pathPts.length < 2) {
       return;
     }
-    const first = pts[0];
-    const cur = pts[pts.length - 1];
-    const ex = cur[0] - first[0];
-    const ey = cur[1] - first[1];
-    let minX = 0;
-    let maxX = 0;
-    for (const p of pts) {
-      const rx = p[0] - first[0];
-      minX = Math.min(minX, rx);
-      maxX = Math.max(maxX, rx);
-    }
-    // 折返顶点：走出 45vp + 折回 25vp；纵向漂移 <50vp 才认（大对角下滑
-    // 走抬手兜底通道，不在这里抢）
-    if (Math.abs(ey) < 50) {
-      // 右顶点（`>`：向右走出 maxX，从顶点折回 maxX-ex）
-      if (maxX >= 45 && maxX - ex >= 25) {
-        this.gestureFired = true;
-        this.onSwipeTab(1);
-        return;
-      }
-      // 左顶点（`<`：向左走出 -minX，从顶点折回 ex-minX）
-      if (-minX >= 45 && ex - minX >= 25) {
-        this.gestureFired = true;
-        this.onSwipeTab(-1);
-        return;
-      }
+    const act = earlyClassifyStroke(this.pathPts);
+    if (act !== null) {
+      this.gestureFired = true;
+      this.onSwipeTab(act.dir);
     }
   }
 
@@ -315,36 +290,15 @@ export struct MiniPlayerBar {
             this.gestureFired = false;
             return;
           }
-          if (pts.length < 2) {
+          // 兜底分类在 common/GesturePath（纯函数，可单测），这里只派发
+          const act = classifyStrokeEnd(pts);
+          if (act === null) {
             return;
           }
-          const first = pts[0];
-          const lastPt = pts[pts.length - 1];
-          const dxNet = lastPt[0] - first[0];
-          const dyNet = lastPt[1] - first[1];
-          let minX = 0;
-          let maxX = 0;
-          for (const p of pts) {
-            minX = Math.min(minX, p[0] - first[0]);
-            maxX = Math.max(maxX, p[0] - first[0]);
-          }
-          const xSpan = maxX - minX;
-          const ady = Math.abs(dyNet);
-          const adx = Math.abs(dxNet);
-          // 折返笔画（不要求标准 < / > 形，任何「横向走出去又折回来」的
-          // 笔画都算——用户决策）：横向跨度达标 + 有明确折回量（跨度−净移，
-          // 平直横滑虽跨度大但无折回，靠它区分，不再要求纵向大推进——压平
-          // 的 </> 也认）；纵向只要求轻微推进（15vp），过滤手指抖动。
-          // 折返侧定方向：向左折返（顶点在左）= 上一个签，向右折返 = 下一个签
-          if (xSpan >= 70 && (xSpan - adx) >= 30 && ady >= 15) {
-            const apexLeft = -minX > maxX - dxNet;
-            this.onSwipeTab(apexLeft ? -1 : 1);
-            return;
-          }
-          // 平直横滑：播放控制（无折返倾向：跨度 ≈ |净移|）——
-          // 左滑 = 下一首、右滑 = 上一首（与播放页纸带同向）
-          if (ady < 40 && adx >= 40) {
-            this.onSwipeTrack(dxNet < 0 ? -1 : 1);
+          if (act.kind === 'tab') {
+            this.onSwipeTab(act.dir);
+          } else {
+            this.onSwipeTrack(act.dir);
           }
         })
     )

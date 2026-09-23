@@ -352,8 +352,8 @@ export function parseOnlineSongs(baseUrl: string, body: string): SongRecord[] {
     const record: SongRecord = {
       id: `${ONLINE_ID_PREFIX}${item.id}`,
       title: typeof item.title === 'string' ? item.title : item.id,
-      artist: item.artist ?? '',
-      album: item.album ?? '',
+      artist: typeof item.artist === 'string' ? item.artist : '',
+      album: typeof item.album === 'string' ? item.album : '',
       duration: item.durationMs && item.durationMs > 0 ? item.durationMs : 0,
       fileName: `${base}/stream/${item.id}`,
       coverPath: ''

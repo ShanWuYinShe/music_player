@@ -1,3 +1,8 @@
+> **[历史方案,已回退]** 本文描述的迷你条 shader 集成方案未最终落地
+> (mini.frag 未进 SHADER_SCENES 构建;迷你条频谱 UI 已于 2026-09 移除;
+> renderFrame 签名也已变更为不含 playing 的 11 参形态)。仅供对照阅读,
+> 勿按本文实施。
+
 # mini.frag 端侧集成方案 —— 迷你条从 Canvas 2D 迁移到 shader 管线
 
 ## 背景

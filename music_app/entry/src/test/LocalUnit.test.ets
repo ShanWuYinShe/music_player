@@ -2,15 +2,18 @@ import { describe, it, expect } from '@ohos/hypium';
 import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMode';
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
-import { LibraryTab, SortMode, filterAndSort, splitHighlight, TextSegment } from '../main/ets/common/LibraryFilter';
+import { LibraryTab, SortMode, filterAndSort, sortLabel, splitHighlight, TextSegment } from '../main/ets/common/LibraryFilter';
 import {
   ONLINE_ID_PREFIX, normalizeBaseUrl, effectiveBaseUrl, DEFAULT_ONLINE_BASE_URL,
   songsUrl, providersUrl, parseOnlineSongs, parseOnlineProviders,
   OnlineSongItem, OnlineSongsResponse,
   OnlineCacheEntry, isCacheFresh, serializeOnlineCache, parseOnlineCache,
   isOnlineId, onlineItemId, rebuildStreamUrl,
-  serializeOnlineSongStore, parseOnlineSongStore, evictOrder, CacheEntryLike
+  serializeOnlineSongStore, parseOnlineSongStore, evictOrder, CacheEntryLike,
+  parseOnlineHealth, healthUrl
 } from '../main/ets/source/OnlineApi';
+import { firstGlyph } from '../main/ets/common/TextFormat';
+import { classifyStrokeEnd, earlyClassifyStroke } from '../main/ets/common/GesturePath';
 import {
   PRESET_COUNT, VIZ_PRESET_NAMES, seedFromId, synthSpectrum,
   beatEnvelope, bpmFromSeed, hslToRgb, normalizeTilt,
@@ -744,6 +747,174 @@ export default function LocalUnitSuite() {
       const brokenSong: SongRecord = { id: 'online:1', title: 'x', artist: '', album: '', duration: 0, fileName: '', coverPath: '' };
       const brokenEntry: OnlineCacheEntry = { baseUrl: base, savedAt: 1700000000000, songs: [brokenSong] };
       expect(parseOnlineCache(serializeOnlineCache(brokenEntry), base)).assertNull();
+    });
+  });
+
+  describe('GesturePathTest', () => {
+    it('earlyNeedsTwoPoints', 0, () => {
+      expect(earlyClassifyStroke([[10, 10]])).assertNull();
+    });
+    it('earlyRightApexNextTab', 0, () => {
+      // 向右走出 50 后折回 30:右顶点 `>` = 下一个签
+      const act = earlyClassifyStroke([[0, 0], [50, 2], [20, 4]]);
+      expect(act !== null).assertTrue();
+      expect(act!.kind === 'tab').assertTrue();
+      expect(act!.dir).assertEqual(1);
+    });
+    it('earlyLeftApexPrevTab', 0, () => {
+      const act = earlyClassifyStroke([[0, 0], [-50, 2], [-20, 4]]);
+      expect(act !== null).assertTrue();
+      expect(act!.kind === 'tab').assertTrue();
+      expect(act!.dir).assertEqual(-1);
+    });
+    it('earlyStraightSlideDoesNotFire', 0, () => {
+      // 平直横滑走出 50 但无折回:折返前半段,早认不得开枪(否则误杀切歌)
+      expect(earlyClassifyStroke([[0, 0], [30, 0], [50, 0], [80, 0]])).assertNull();
+    });
+    it('earlyVerticalDriftIgnored', 0, () => {
+      // 纵向漂移 >=50vp 的大对角不早认(走抬手兜底通道)
+      const act = earlyClassifyStroke([[0, 0], [60, 30], [60, 70]]);
+      expect(act).assertNull();
+    });
+    it('earlyApexBoundariesInclusive', 0, () => {
+      // 走出恰好 45 + 折回恰好 25:阈值含边界
+      const act = earlyClassifyStroke([[0, 0], [45, 0], [20, 0]]);
+      expect(act !== null).assertTrue();
+      expect(act!.dir).assertEqual(1);
+    });
+    it('endFoldedApexIsTab', 0, () => {
+      // 折返:跨度 80、折回 40、纵向推进 20
+      const act = classifyStrokeEnd([[0, 0], [80, 5], [40, 20]]);
+      expect(act !== null).assertTrue();
+      expect(act!.kind === 'tab').assertTrue();
+      expect(act!.dir).assertEqual(1);
+    });
+    it('endFlatFoldFallsThroughToTrack', 0, () => {
+      // 压平的 </>(跨度达标、折回达标、纵向 <15):现有行为按平直横滑
+      // 分类为切歌——钉住该现状,阈值调整时此处会显式失败提醒
+      const act = classifyStrokeEnd([[0, 0], [80, 2], [40, 4]]);
+      expect(act !== null).assertTrue();
+      expect(act!.kind === 'track').assertTrue();
+    });
+    it('endStraightSwipeLeftIsNextTrack', 0, () => {
+      const act = classifyStrokeEnd([[0, 0], [-60, 1], [-120, 2]]);
+      expect(act !== null).assertTrue();
+      expect(act!.kind === 'track').assertTrue();
+      expect(act!.dir).assertEqual(-1);
+    });
+    it('endTrackTravelBoundary', 0, () => {
+      // 横向恰好 40vp:含边界;纵向恰好 40vp:严格不触发
+      expect(classifyStrokeEnd([[0, 0], [-40, 0]]) !== null).assertTrue();
+      expect(classifyStrokeEnd([[0, 0], [0, -40]])).assertNull();
+    });
+    it('endSmallMoveIgnored', 0, () => {
+      expect(classifyStrokeEnd([[0, 0], [20, 3], [30, 6]])).assertNull();
+    });
+  });
+
+  describe('FirstGlyphTest', () => {
+    it('emptyReturnsEmpty', 0, () => {
+      expect(firstGlyph('')).assertEqual('');
+    });
+    it('bmpCharReturnedAsIs', 0, () => {
+      expect(firstGlyph('晨光')).assertEqual('晨');
+    });
+    it('astralCharNotSplit', 0, () => {
+      // 增补平面字符按 code point 取,不被代理对劈半(substring(0,1) 会碎)
+      expect(firstGlyph('🎵音乐')).assertEqual('🎵');
+    });
+    it('singleCharPassthrough', 0, () => {
+      expect(firstGlyph('A')).assertEqual('A');
+    });
+  });
+
+  describe('TimeUtilsEdgeTest', () => {
+    it('formatTimeNaNFallsBackToZero', 0, () => {
+      expect(formatTime(NaN)).assertEqual('00:00');
+    });
+    it('formatTimeOverHundredMinutesNoPadding', 0, () => {
+      expect(formatTime(6000000)).assertEqual('100:00');
+    });
+    it('formatTotalDurationNonFiniteIsZero', 0, () => {
+      expect(formatTotalDuration(NaN)).assertEqual('0 分钟');
+      expect(formatTotalDuration(Infinity)).assertEqual('0 分钟');
+    });
+  });
+
+  describe('OnlineHealthTest', () => {
+    it('healthUrlTrimsTrailingSlash', 0, () => {
+      expect(healthUrl('https://h.example/api/v1/')).assertEqual('https://h.example/api/v1/health');
+    });
+    it('parseRejectsEmptyBrokenOrMissingVersion', 0, () => {
+      expect(parseOnlineHealth('')).assertNull();
+      expect(parseOnlineHealth('   ')).assertNull();
+      expect(parseOnlineHealth('not-json')).assertNull();
+      expect(parseOnlineHealth('{}')).assertNull();
+      expect(parseOnlineHealth('{"version":""}')).assertNull();
+      expect(parseOnlineHealth('{"version":123}')).assertNull();
+    });
+    it('parseAcceptsVersionString', 0, () => {
+      const info = parseOnlineHealth('{"version":"1.2.0"}');
+      expect(info !== null).assertTrue();
+      expect(info!.version).assertEqual('1.2.0');
+    });
+  });
+
+  describe('LibraryFilterExtraTest', () => {
+    it('sortTitleAsc', 0, () => {
+      const songs = [mk('1', 'banana', 'a', 1000), mk('2', 'apple', 'a', 1000), mk('3', 'cherry', 'a', 1000)];
+      const out = filterAndSort(songs, {
+        query: '', tab: LibraryTab.ALL, sort: SortMode.TITLE,
+        favoriteIds: [], recentIds: [], onlineSongs: []
+      });
+      expect(out[0].title).assertEqual('apple');
+      expect(out[2].title).assertEqual('cherry');
+    });
+    it('sortLabelCoversAllModes', 0, () => {
+      expect(sortLabel(SortMode.DEFAULT)).assertEqual('默认排序');
+      expect(sortLabel(SortMode.TITLE)).assertEqual('按歌名');
+      expect(sortLabel(SortMode.ARTIST)).assertEqual('按歌手');
+      expect(sortLabel(SortMode.DURATION)).assertEqual('按时长');
+    });
+  });
+
+  describe('OnlineApiExtraTest', () => {
+    const base = 'https://music.example/api/v1';
+    it('parseOnlineSongsSkipsBadEntries', 0, () => {
+      // 手工拼畸形 JSON(混 null 条目/缺 id/类型错误的字段)——服务端异常
+      // 响应的真实形态,ArkTS 对象字面量无法表达这种混合结构
+      const body = '{"songs":[null,{"title":"no id"},{"id":"","title":"empty id"},' +
+        '{"id":"vip1","title":42,"artist":123,"album":null,"durationMs":0},' +
+        '{"id":"ok1","title":"好歌","artist":"人","album":"专辑","durationMs":21000,"vip":true}]}';
+      const songs = parseOnlineSongs(base, body);
+      expect(songs.length).assertEqual(2);
+      // title 非 string 回落为原始 id;artist 非 string 回落空串
+      expect(songs[0].title).assertEqual('vip1');
+      expect(songs[0].artist).assertEqual('');
+      expect(songs[0].duration).assertEqual(0);
+      // 合法条目完整映射
+      expect(songs[1].title).assertEqual('好歌');
+      expect(songs[1].artist).assertEqual('人');
+      expect(songs[1].duration).assertEqual(21000);
+      expect(songs[1].vip).assertTrue();
+    });
+    it('parseOnlineCacheRejectsWrongVersionOrMeta', 0, () => {
+      const songs: SongRecord[] = [mkOnline('1', 'x')];
+      const entry: OnlineCacheEntry = { baseUrl: base, savedAt: 1700000000000, songs: songs };
+      const patch = (patchObj: Record<string, Object>): string => {
+        const raw = JSON.parse(serializeOnlineCache(entry)) as Record<string, Object>;
+        const keys = Object.keys(patchObj);
+        for (const k of keys) {
+          raw[k] = patchObj[k];
+        }
+        return JSON.stringify(raw);
+      };
+      // 版本号不符(旧版本文件)
+      expect(parseOnlineCache(patch({ 'version': 999 }), base)).assertNull();
+      // savedAt 非 number
+      expect(parseOnlineCache(patch({ 'savedAt': 'yesterday' }), base)).assertNull();
+      // songs 非数组
+      expect(parseOnlineCache(patch({ 'songs': 'all' }), base)).assertNull();
     });
   });
 }

@@ -7,14 +7,17 @@
 - **本地音乐导入**：通过系统音频选择器（`AudioViewPicker`）批量导入设备音频（mp3/wav/flac/m4a/aac/ogg），复制入应用沙盒并建立曲库索引
 - **元数据解析**：mp3 自动读取 ID3v2 标签（歌名/歌手/专辑/封面），其余格式按「歌手 - 歌名」文件名解析
 - **完整播放控制**：播放/暂停/上一首/下一首、进度条拖拽、三种播放模式（顺序/单曲循环/随机）
-- **曲库管理**：搜索（歌名/歌手）、分类（全部/喜欢/最近播放）、四种排序、长按菜单、左滑「下一首播放/删除」
-- **喜欢与最近播放**：收藏歌曲、自动记录最近播放，均本地持久化
+- **曲库管理**：一级四签（曲库/喜欢/最近/在线，可滑动切换）、搜索（歌名/歌手）、排序（仅曲库/喜欢两签；最近签固定按播放时间倒序）、长按菜单（下一首播放/从曲库删除）
+- **喜欢与最近播放**：收藏歌曲（在线歌同享）、自动记录最近播放（最近签进签冻结快照，横滑切歌沿快照逐行），均本地持久化
 - **播放增强**：音量调节（含静音）、定时关闭（15/30/60 分钟）、插播队列、退出续播（记住上次曲目与进度）
 - **播放队列**：播放页半模态队列视图，展示插播标记，点按即切歌
 - **后台播放**：`audioPlayback` 长驻任务，退到后台持续播放
 - **媒体控制**：AVSession 接入系统媒体中心，支持通知栏与锁屏播控（播放/暂停/切歌/进度）
 - **演示曲目**：内置 3 段合成演示音频，「载入演示曲目」一键入库，开箱可听
-- **在线音乐**：首页「本地 / 在线」源切换；默认对接线上服务（`https://yinghuoren.com/api/music`，设置页可改、留空用默认）。在线列表来自服务器曲库，搜索由服务端完成并聚合网易云网络源（输入停顿自动触发），流式播放支持 HTTP Range（AVPlayer 网络直连）
+- **在线音乐**：默认对接独立站服务（`https://music.chaoset.com/api/v1`，设置页可改、留空用默认）。在线列表来自服务器曲库，搜索由服务端完成并聚合网易云网络源（输入停顿自动触发），流式播放支持 HTTP Range；在线歌可收藏/进最近播放（跨源混排）
+- **迷你条手势**：底部迷你播放条上横滑切歌（左滑下一首/右滑上一首）、折返画 `>`/`<` 切一级签
+- **桌面服务卡片**：2x2/2x4 两规格,显示歌名/封面/进度,支持播放/切歌按钮与二维码扫码登录入口
+- **音乐可视化**：播放页舞台双态(封面/全屏 shader),四种场景(GPU 逐像素渲染)+体感三通道(倾斜/旋转/抛甩)+麦克风律动
 - **深浅色**：全部颜色使用系统分层资源，自动跟随系统深浅色模式
 
 ## 工程结构
@@ -24,17 +27,19 @@ AppScope/                          应用级配置与资源
 build-profile.json5                工程构建配置（签名/SDK 版本）
 hvigor/hvigor-config.json5         hvigor 版本配置
 entry/src/main/
-├── module.json5                   模块配置（后台模式、权限声明）
+├── module.json5                   模块配置（后台模式、权限声明、卡片入口）
 ├── ets/
 │   ├── entryability/              UIAbility 入口
 │   ├── pages/                     Index(首页)/PlayerPage(播放页)/SettingsPage(设置页)
-│   ├── components/                SongItem、MiniPlayerBar、MenuItemRow
-│   ├── player/                    PlayerController(AVPlayer内核)、SessionController(媒体会话)
-│   ├── library/                   MusicLibrary(曲库)、Id3Parser(ID3v2解析)
-│   ├── source/                    MusicSource 抽象、OnlineApi(在线响应解析)
+│   ├── components/                SongItem、MiniPlayerBar、CoverArt、VisualizerView、CoverSwipe
+│   ├── player/                    PlayerController(AVPlayer内核)、SessionController、OnlineCache、MicSpectrum
+│   ├── library/                   MusicLibrary(曲库)、Id3Parser/Id3ParserCore(ID3v2解析)
+│   ├── source/                    MusicSource 抽象、OnlineApi(在线契约解析)、OnlineSource(SWR客户端)、OnlineSongStore
 │   ├── viewmodel/                 AppStore 全局状态、UserData(喜欢/最近播放)
 │   ├── model/                     Song、PlayMode
-│   └── common/                    TimeUtils、LibraryFilter(筛选排序纯逻辑)
+│   ├── common/                    TimeUtils、LibraryFilter、GesturePath、VisualizerCore、Fft、TextFormat、InkMood、FormStateFile、ReloadDataSource
+│   └── form/                      桌面服务卡片(FormAbility + 2x2/2x4 卡片页)
+├── cpp/                           音乐可视化原生管线(EGL/GLES3 + GLSL shader)
 ├── resources/                     base/dark/zh_CN 资源 + rawfile 演示音频
 └── src/test/                      本地单元测试（hypium LocalUnit）
 ```
@@ -110,5 +115,5 @@ HarmonyOS（API 24）已移除 `READ_MEDIA_AUDIO` 权限，应用无法静默扫
 
 ## 后续计划
 
-- 在线源升级：在线歌单、喜欢/最近跨源聚合（服务端关键词搜索 `/songs?q=` 已实现）
-- 歌词显示、桌面卡片、自建歌单
+- 在线歌单、自建歌单
+- 歌词显示
