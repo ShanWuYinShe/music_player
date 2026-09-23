@@ -29,7 +29,7 @@ if(NOT Python3_Interpreter_FOUND)
     set(Python3_EXECUTABLE ${PYTHON3_BIN})
 endif()
 
-file(GLOB SHADER_SOURCES ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.glsl)
+file(GLOB CONFIGURE_DEPENDS SHADER_SOURCES ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.glsl)
 add_custom_command(
     OUTPUT ${SHADER_GEN_HEADER}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_GEN_DIR}

@@ -1,3 +1,5 @@
+// [状态注记] 本文件不在 CMake SHADER_SCENES 构建内(playground/实验专用),
+// 且对应 UI(迷你条频谱)已于 2026-09 从产品移除——勿当现行实现引用。
 // mini.frag：迷你条金色频谱柱（GPU shader 版，替代原 Canvas 2D 双离屏实现）。
 //
 // 背景：VisualizerView mini 变体原来用 CanvasRenderingContext2D 逐帧画

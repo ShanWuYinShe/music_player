@@ -342,7 +342,7 @@ export struct VisualizerView {
         this.kick = 0;
       }
     }
-    const drew: boolean = entry.renderFrame(t, this.seed, playing, beat, bass, treble,
+    const drew: boolean = entry.renderFrame(t, this.seed, beat, bass, treble,
       this.presetLock, this.presetTrans, this.tiltX, this.tiltY, this.spin, this.kick);
     // 占位柔光呼吸：正弦涨落 0.35~0.6（周期 ~1.6s，只动亮度，防闪烁合规）
     if (!this.vizReady) {

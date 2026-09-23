@@ -531,7 +531,7 @@ void ResizeFeedbackTextures(int newW, int newH) {
     gTexH = newH;
 }
 
-bool VizRenderFrame(double t, double seed, bool playing, double beat, double bass, double treble,
+bool VizRenderFrame(double t, double seed, double beat, double bass, double treble,
                      double presetLock, double transition, double tiltX, double tiltY,
                      double spin, double kick) {
     if (!gReady || gWidth <= 0 || gHeight <= 0) {
@@ -578,6 +578,11 @@ bool VizRenderFrame(double t, double seed, bool playing, double beat, double bas
         glUniform1f(loc.spin, static_cast<float>(spin));
         glUniform1f(loc.kick, static_cast<float>(kick));
         glUniform1f(loc.stateMode, 1.0f);
+        // uState(unit1)还挂着本 pass 的写目标 gTexState:不解绑即「纹理同时
+        // 作为帧缓冲附件与采样器」的规范明文 UB,部分驱动直接丢 draw。状态
+        // 写入分支不采样 uState,解绑成无绑定即可;pass A 会重新绑定
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, gTex[1 - gFlip]);
         glUniform1i(loc.prev, 0);

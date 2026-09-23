@@ -3,16 +3,16 @@
  *
  * registerXComponent(nativeObject):
  *   解包 XComponent 的 OH_NativeXComponent 句柄并注册表面生命周期回调。
- * renderFrame(t, seed, playing, beat, bass, treble, presetLock, transition,
+ * renderFrame(t, seed, beat, bass, treble, presetLock, transition,
  *             tiltX, tiltY, spin, kick):
- *   同步渲染一帧（由 ArkTS displaySync 回调驱动）。
- * destroy():
- *   释放渲染资源（组件销毁时）。
+ *   同步渲染一帧（由 ArkTS displaySync 回调驱动）；非有限参数（NaN/Inf）
+ *   拒帧返回 false。
  */
 
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <hilog/log.h>
 #include <cstdint>
+#include <cmath>
 #include <string>
 
 #include <napi/native_api.h>
@@ -85,30 +85,38 @@ napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
 }
 
 napi_value RenderFrame(napi_env env, napi_callback_info info) {
-    size_t argc = 12;
-    napi_value args[12] = {nullptr};
+    size_t argc = 11;
+    napi_value args[11] = {nullptr};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 12) {
+    if (argc < 11) {
         napi_value no = nullptr;
         napi_get_boolean(env, false, &no);
         return no;
     }
     double t = 0, seed = 0, beat = 0, bass = 0, treble = 0, presetLock = -1, transition = 1;
     double tiltX = 0, tiltY = 0, spin = 0, kick = 0;
-    bool playing = false;
     napi_get_value_double(env, args[0], &t);
     napi_get_value_double(env, args[1], &seed);
-    napi_get_value_bool(env, args[2], &playing);
-    napi_get_value_double(env, args[3], &beat);
-    napi_get_value_double(env, args[4], &bass);
-    napi_get_value_double(env, args[5], &treble);
-    napi_get_value_double(env, args[6], &presetLock);
-    napi_get_value_double(env, args[7], &transition);
-    napi_get_value_double(env, args[8], &tiltX);
-    napi_get_value_double(env, args[9], &tiltY);
-    napi_get_value_double(env, args[10], &spin);
-    napi_get_value_double(env, args[11], &kick);
-    bool drew = VizRenderFrame(t, seed, playing, beat, bass, treble, presetLock, transition,
+    napi_get_value_double(env, args[2], &beat);
+    napi_get_value_double(env, args[3], &bass);
+    napi_get_value_double(env, args[4], &treble);
+    napi_get_value_double(env, args[5], &presetLock);
+    napi_get_value_double(env, args[6], &transition);
+    napi_get_value_double(env, args[7], &tiltX);
+    napi_get_value_double(env, args[8], &tiltY);
+    napi_get_value_double(env, args[9], &spin);
+    napi_get_value_double(env, args[10], &kick);
+    // NaN/Inf 直灌 uniform 会全帧 NaN 黑屏(传感器脏数据等):非有限值拒帧
+    double vals[] = {t, seed, beat, bass, treble, presetLock, transition,
+        tiltX, tiltY, spin, kick};
+    for (double v : vals) {
+        if (!std::isfinite(v)) {
+            napi_value no = nullptr;
+            napi_get_boolean(env, false, &no);
+            return no;
+        }
+    }
+    bool drew = VizRenderFrame(t, seed, beat, bass, treble, presetLock, transition,
                                tiltX, tiltY, spin, kick);
     // 返回是否真的绘制：未就绪（场景 program 后台编译中）时 false，ArkTS
     // 侧据此显示编译中占位过渡，避免切到可视化时的空屏
@@ -117,18 +125,11 @@ napi_value RenderFrame(napi_env env, napi_callback_info info) {
     return out;
 }
 
-napi_value Destroy(napi_env env, napi_callback_info info) {
-    VizOnSurfaceDestroyed(nullptr, nullptr);
-    return nullptr;
-}
-
 napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
         {"registerXComponent", nullptr, RegisterXComponent, nullptr,
             nullptr, nullptr, napi_default, nullptr},
         {"renderFrame", nullptr, RenderFrame, nullptr,
-            nullptr, nullptr, napi_default, nullptr},
-        {"destroy", nullptr, Destroy, nullptr,
             nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);

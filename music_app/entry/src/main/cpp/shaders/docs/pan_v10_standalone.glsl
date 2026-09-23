@@ -1,3 +1,5 @@
+// [历史存档] pan v10 旧版快照,与现行 pan.frag(v17)已严重漂移——仅供
+// 对照阅读,勿编译、勿当现行实现。
 // pan_v10_standalone.glsl — 热炒菜锅水滴动力学 v10 独立可移植版
 // = pan.frag + common.glsl 必要函数 inline 合并版
 //
