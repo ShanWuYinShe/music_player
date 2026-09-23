@@ -164,3 +164,39 @@ func TestDurationGarbageInput(t *testing.T) {
 
 // 真实服务器曲库样本(如有):周杰伦-你听得到.mp3 无法离线构造,时长解析
 // 覆盖由上面合成结构保证;线上验证在部署后做。
+
+// TestProbeAudioDurationMalformed 对抗性用例:畸形/截断的 MP3 头(含 Xing
+// 帧字段越界的历史 panic 形态)不得击穿解析——返回 >=0 的值即可(0=时长未知)。
+func TestProbeAudioDurationMalformed(t *testing.T) {
+	// MPEG1 Layer3 44.1kHz 立体声帧头,后接 Xing tag + flags(frames 置位),
+	// 以 4..48 字节各种截断长度喂入——修复前 frames 字段越界直接 panic
+	base := []byte{0xFF, 0xFB, 0x90, 0xC4,
+		'X', 'i', 'n', 'g',
+		0x00, 0x00, 0x00, 0x07,
+		0x00, 0x00, 0x27, 0x10,
+	}
+	for size := 4; size <= len(base)+32; size++ {
+		content := make([]byte, size)
+		copy(content, base)
+		for i := size; i < len(content); i++ {
+			content[i] = 0x00
+		}
+		f, err := os.CreateTemp(t.TempDir(), "bad*.mp3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(content); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		rf, err := os.Open(f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := probeAudioDuration(rf, ".mp3", int64(size))
+		rf.Close()
+		if d < 0 {
+			t.Fatalf("size=%d: negative duration %d", size, d)
+		}
+	}
+}

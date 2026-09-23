@@ -311,6 +311,11 @@ func (s *musicServer) handleSongs(w http.ResponseWriter, r *http.Request) {
 		matched = append(append([]Song(nil), matched...), s.netease.discover(ctx)...)
 		cancel()
 	}
+	if matched == nil {
+		// 冷启动扫描失败等路径返回 nil slice:序列化成 null 会破坏严格
+		// 客户端的数组反序列化,统一兜底空数组
+		matched = []Song{}
+	}
 	total := len(matched)
 	if len(matched) > limit {
 		matched = matched[:limit]

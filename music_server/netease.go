@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -110,6 +111,11 @@ func newNeteaseClient(base, cookie, cookieFile string) *neteaseClient {
 		// 流代理不设整体超时(长音频),仅限制上游响应头等待时间防挂死;
 		// 连接池复用上游 keep-alive 连接,无行为变化。
 		stream: &http.Client{Transport: &http.Transport{
+			// 上游地址黑洞时拨号挂到 OS 级超时会让连接久占:补齐标准拨号/
+			// 握手死线(响应头等待另有 15s)
+			DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
 			ResponseHeaderTimeout: 15 * time.Second,
 			MaxIdleConns:          32,
 			MaxIdleConnsPerHost:   8,

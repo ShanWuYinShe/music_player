@@ -242,3 +242,18 @@ func multipartBody(t *testing.T, rec *httptest.ResponseRecorder, s *musicServer,
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	s.routes().ServeHTTP(rec, req)
 }
+
+// TestAdminLibraryPaginationOverflow 对抗性用例:超大 page 触发
+// (page-1)*pageSize 整型溢出为负,切片负索引曾直接 panic(远程可达)。
+func TestAdminLibraryPaginationOverflow(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServer(t, dir)
+	for _, page := range []string{"92233720368547760", "4294967296", "-1", "0"} {
+		rec := httptest.NewRecorder()
+		s.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+			"/admin/api/v1/library?page="+page, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("page=%s: status %d, want 200", page, rec.Code)
+		}
+	}
+}

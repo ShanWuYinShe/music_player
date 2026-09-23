@@ -20,7 +20,14 @@ import (
 
 // probeAudioDuration 返回音频文件时长（毫秒）；解析失败返回 0。
 // f 由调用方打开并负责关闭，实现内部只做 Read/Seek。
-func probeAudioDuration(f *os.File, ext string, size int64) int64 {
+func probeAudioDuration(f *os.File, ext string, size int64) (d int64) {
+	// 畸形文件的解析路径以越界读取为主:兜底 recover 返回 0(时长未知),
+	// 不让单个坏文件击穿无 recover 的后台扫描协程
+	defer func() {
+		if recover() != nil {
+			d = 0
+		}
+	}()
 	switch ext {
 	case ".mp3":
 		return mp3Duration(f, size)
@@ -126,12 +133,11 @@ func mp3Duration(f *os.File, size int64) int64 {
 	xingOff := 21
 	if ver == 3 && channelMode != 3 {
 		xingOff = 36
-	} else if ver != 3 && channelMode != 3 {
-		xingOff = 21
 	} else if ver != 3 {
 		xingOff = 13
 	}
-	if int(frameOff)+xingOff+8 < len(head) {
+	// 边界按最远读取点算:tag 4B + flags 4B + frames 4B = xingOff+12
+	if int(frameOff)+xingOff+12 <= len(head) {
 		tag := head[frameOff+int64(xingOff) : frameOff+int64(xingOff)+4]
 		if string(tag) == "Xing" || string(tag) == "Info" {
 			flags := binary.BigEndian.Uint32(head[frameOff+int64(xingOff)+4:])

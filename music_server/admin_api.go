@@ -130,13 +130,17 @@ func (s *musicServer) handleAdminLibraryList(w http.ResponseWriter, r *http.Requ
 	// 分页:page 从 1,pageSize 默认 100 上限 500(全量曲库列表由业务 /api/v1/songs 承载)。
 	page, pageSize := 1, 100
 	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		const maxPage = 1_000_000 // 上限防 (page-1)*pageSize 整型溢出为负
+		if p > maxPage {
+			p = maxPage
+		}
 		page = p
 	}
 	if ps, err := strconv.Atoi(r.URL.Query().Get("pageSize")); err == nil && ps > 0 && ps <= 500 {
 		pageSize = ps
 	}
 	start := (page - 1) * pageSize
-	if start > len(files) {
+	if start < 0 || start > len(files) {
 		start = len(files)
 	}
 	end := start + pageSize
@@ -148,6 +152,9 @@ func (s *musicServer) handleAdminLibraryList(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// 一次性上传(上限 408MB)受 Server ReadTimeout 30s 约束:按 Go 语义该
+// 死线覆盖整个 body,慢速链路(<约110Mbps 持续)传大文件会被掐断——大文件
+// 一律走 upload-chunk 分片路径(10MB/片不受此限)。
 func (s *musicServer) handleAdminLibraryUpload(w http.ResponseWriter, r *http.Request) {
 	release, ok := acquireUploadSlot(s.uploadSlots)
 	if !ok {
@@ -739,6 +746,10 @@ func (s *musicServer) handleAdminNeteaseStart(w http.ResponseWriter, r *http.Req
 }
 
 func (s *musicServer) handleAdminNeteasePoll(w http.ResponseWriter, r *http.Request) {
+	if !s.netease.enabled() {
+		writeError(w, "netease_api 上游未配置", http.StatusServiceUnavailable)
+		return
+	}
 	if s.config.NeteaseCookieFile == "" {
 		writeError(w, "未配置 cookie 文件路径", http.StatusServiceUnavailable)
 		return
@@ -804,6 +815,10 @@ func (s *musicServer) handleAdminNeteasePoll(w http.ResponseWriter, r *http.Requ
 // handleAdminNeteaseState 返回当前登录态:cookie 文件存在即视为已配置,并经
 // 上游 login/status 取昵称(上游失败不影响已配置状态的展示)。
 func (s *musicServer) handleAdminNeteaseState(w http.ResponseWriter, r *http.Request) {
+	if !s.netease.enabled() {
+		writeError(w, "netease_api 上游未配置", http.StatusServiceUnavailable)
+		return
+	}
 	info, err := os.Stat(s.config.NeteaseCookieFile)
 	if err != nil {
 		if os.IsNotExist(err) {

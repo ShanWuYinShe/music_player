@@ -194,7 +194,7 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-// health 端点走完整 mux:/health 与 /api/health 双注册均返回 200、JSON
+// health 端点走完整 mux:/health、/healthz 与 /api/v1/health 注册均返回 200、JSON
 // Content-Type 与 {"status":"ok","version":...} 结构;version 是构建期注入
 // 的包级变量,测试内临时改写以锁定结构,退出时还原(包内测试串行执行,无竞争)。
 func TestHandleHealthRoutes(t *testing.T) {

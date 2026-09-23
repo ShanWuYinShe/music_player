@@ -3,8 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAPIV1Prefix 锁定 /api/v1 规范前缀:业务路由只存在于 /api/v1/*,
@@ -48,5 +50,26 @@ func TestAPIV1Prefix(t *testing.T) {
 	}
 	if rec := get("/api/v1/healthz"); rec.Code != http.StatusNotFound {
 		t.Fatalf("/api/v1/healthz: status %d, want 404", rec.Code)
+	}
+}
+
+// TestSongsNeverNull 对抗性用例:冷启动扫描失败(曲库目录不存在)时 songs
+// 字段必须是 [] 而非 null(严格客户端数组反序列化会炸)。
+func TestSongsNeverNull(t *testing.T) {
+	s := &musicServer{
+		config:      AppConfig{LibraryDir: filepath.Join(t.TempDir(), "missing")},
+		limiter:     newIPWindowLimiter(1000, time.Minute),
+		uploadSlots: make(chan struct{}, maxUploadSlots),
+	}
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/songs", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), `"songs":null`) {
+		t.Fatalf("songs serialized as null: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"songs":[]`) {
+		t.Fatalf("songs not an empty array: %s", rec.Body.String())
 	}
 }
