@@ -13,6 +13,9 @@ concurrency:
 permissions:
   contents: read
 
+# 覆盖范围说明:music_app(HarmonyOS/hvigor)不在 CI 内——hvigor 构建依赖
+# DevEco CLI 与本机签名材料,GitHub runner 不可得,构建/单测在本地按
+# music_app/AGENTS.md 的命令执行;CI 仅覆盖 music_server 与 shader playground。
 jobs:
   music-server:
     name: Music Server (Go)
@@ -29,7 +32,10 @@ jobs:
           cache: false
 
       - name: gofmt
-        run: test -z "$(gofmt -l music_server/)"
+        run: |
+          files="$(gofmt -l music_server/)"
+          echo "$files"
+          test -z "$files"
       - name: go vet
         run: go vet ./...
         working-directory: music_server

@@ -133,6 +133,8 @@ services:
       dockerfile: Dockerfile
       args:
         BUN_VERSION: ${BUN_VERSION:?BUN_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+        API_VERSION: ${NETEASE_API_VERSION:?NETEASE_API_VERSION 未设置——版本唯一来源是 versions.env,请用 make build(自动注入)或 docker compose --env-file versions.env}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
     restart: unless-stopped
     init: true
     deploy:

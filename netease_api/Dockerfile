@@ -5,11 +5,12 @@
 # 兼容性已实测)。
 ARG BUN_VERSION=1.3.14
 ARG API_VERSION=4.29.11
+ARG APK_MIRROR=mirrors.aliyun.com
 
 FROM oven/bun:${BUN_VERSION}-alpine
 
 # 固定版本全局安装;BUN_INSTALL=/usr/local 使 bin 链接进 PATH(app.js)。
-RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
+RUN sed -i "s#dl-cdn.alpinelinux.org#${APK_MIRROR}#g" /etc/apk/repositories \
     && apk add --no-cache wget \
     && BUN_INSTALL=/usr/local bun add -g @neteasecloudmusicapienhanced/api@${API_VERSION} \
         --registry=https://registry.npmmirror.com \

@@ -60,7 +60,7 @@ function saveToken() { localStorage.setItem('adminToken', $('token').value.trim(
 function headers(extra = {}) { return { ...(token() ? { 'X-Admin-Token': token() } : {}), ...extra }; }
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: headers(), ...opts });
+  const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
   if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
   return res.json();
 }
@@ -77,7 +77,20 @@ let pollTimer = null;
 async function qrStart() {
   try {
     const s = await api('/admin/api/v1/netease/login/start');
-    $('qr').innerHTML = s.qrimg + '<div class="muted">用网易云音乐 App 扫码,保持本页打开</div>';
+    // qrimg 来自上游转发,不得 innerHTML 直注(污染即管理页 XSS):按
+    // data:image 前缀校验后以 img 元素 src 注入
+    const qr = $('qr');
+    qr.textContent = '';
+    if (typeof s.qrimg === 'string' && s.qrimg.startsWith('data:image/')) {
+      const img = document.createElement('img');
+      img.src = s.qrimg;
+      img.alt = '登录二维码';
+      qr.appendChild(img);
+    }
+    const tip = document.createElement('div');
+    tip.className = 'muted';
+    tip.textContent = '用网易云音乐 App 扫码,保持本页打开';
+    qr.appendChild(tip);
     clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
@@ -138,7 +151,7 @@ async function uploadChunked() {
   if (!f) return alert('先选择文件');
   const CHUNK = 8 << 20;
   const total = Math.ceil(f.size / CHUNK);
-  if (total > 32) return alert('超过 200MB 上限');
+  if (total > 25) return alert('超过 200MB 上限');
   $('uploadProgress').textContent = '计算校验…';
   try {
     const uploadId = await uploadIdFor(f);

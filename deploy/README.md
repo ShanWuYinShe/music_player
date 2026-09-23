@@ -21,7 +21,7 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 别名已移除�
    - `data/generated/`：网易云 cookie（`netease-cookie.txt`，可选，扫码登录
      会重新写入）。
 5. **管理入口**：生成基础认证文件
-   `mkdir -p htpasswd && htpasswd -nb <user> '<pass>' > htpasswd/.htpasswd`
+   `mkdir -p htpasswd && htpasswd -nB <user> '<pass>' > htpasswd/.htpasswd（-nB 用 bcrypt,默认 apr1/MD5 已不建议）`
    （容器以 ro 挂载）；管理页 `https://music.chaoset.com/admin/`（曲库上传/
    删除、网易云扫码登录），可选令牌兜底见 `.env` 的 `MUSIC_SERVER_ADMIN_TOKEN`。
 6. **启动**：`cp .env.example .env && $EDITOR .env && make build && make up netease_api music_server nginx`。
@@ -44,7 +44,7 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 别名已移除�
   文件名约定「歌手 - 歌名.ext」，music_server 自动扫描（60s TTL 懒刷新）。
 - **网易云登录**：管理页扫码登录（cookie 热加载 30s 内生效）；也可经
   `.env` 的 `NETEASE_MUSIC_COOKIE` 投放。
-- **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`
+- **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`（注:当前 compose 未挂载该目录,分片落在容器可写层——容器重建后续传会丢,重新上传即可
   须可被 uid 1001 写入（容器 `user: "1001:1001"`），首次部署
   `chown -R 1001 data`。
 - **旧别名已移除**：`/api/*` 一律 404；存量旧版 App（默认 `yinghuoren.com/api/music`）需在设置页手填新地址

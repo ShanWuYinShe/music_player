@@ -74,7 +74,9 @@ server {
         limit_req zone=admin_api burst=20 nodelay;
         limit_req_status 429;
         proxy_pass http://$music_upstream;
-        client_max_body_size 16m;
+        # 批量上传 multipart 合计可达数百 MB(后端单请求上限 408MB):
+        # 上限须大于后端校验值,否则合法上传在边缘就被 413 掐断
+        client_max_body_size 420m;
         proxy_read_timeout 300s;
     }
     location /admin/ {
