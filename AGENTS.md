@@ -6,7 +6,6 @@
 组织方式与 media_center 一致；独立站部署配置在本仓 `deploy/`
 （music.chaoset.com：nginx + music_server + netease_api 三服务自洽，
 netease_api 已从 workwork 迁入本仓，版本唯一来源 `deploy/versions.env`）。
-过渡期仍可由 workwork 聚合栈从 submodule 构建。
 
 ## 架构事实
 
@@ -30,3 +29,4 @@ netease_api 已从 workwork 迁入本仓，版本唯一来源 `deploy/versions.e
 | `music-app-shader-pipeline` | 改 GLSL shader、增删可视化场景、调帧驱动、接入传感器体感、排查可视化黑屏/闪烁 |
 | `music-app-service-card` | 改 form/ 卡片或 FormAbility、卡片进度/按钮异常、卡片配色、麦克风律动、分享卡片图 |
 | `music-server-library` | 改曲库扫描/文件名解析、排查曲目 id 与来源判定、跑运维自检 |
+| `music-app-device-debug` | 装到真机/模拟器、无线调试排障、查设备地址、uitest 布局/点击/截图验证 |
