@@ -320,16 +320,21 @@ export struct PlayerPage {
                 this.shareShow = false;
               }
             })
-          SymbolGlyph(this.coverMode ? $r('sys.symbol.waveform') : $r('sys.symbol.picture'))
-            .fontSize(20)
-            .fontColor([$r('app.color.viz_fg')])
-            .padding(12)
-            .accessibilityText(this.coverMode ? '切换到可视化视图' : '切换到封面视图')
-            .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
-            .onClick(() => {
-              this.coverMode = !this.coverMode;
-            })
-          if (!this.coverMode) {
+          // 魔法棒常驻、语义随模式连续(特效域统一入口):
+          // 封面模式 = 进入可视化舞台;可视化模式 = 弹出风格选择菜单。
+          // 回封面不再设按钮——可视化舞台点任意画面即回(既有手势),
+          // 原 waveform「~」双态按钮与冗余 picture 按钮一并移除。
+          if (this.coverMode) {
+            SymbolGlyph($r('sys.symbol.wand_and_stars'))
+              .fontSize(22)
+              .fontColor([$r('app.color.viz_fg')])
+              .padding(12)
+              .accessibilityText('进入可视化舞台')
+              .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
+              .onClick(() => {
+                this.coverMode = false;
+              })
+          } else {
             SymbolGlyph($r('sys.symbol.wand_and_stars'))
               .fontSize(22)
               .fontColor([$r('app.color.viz_fg')])
@@ -386,6 +391,8 @@ export struct PlayerPage {
             .layoutWeight(1)
             .width('100%')
             .backgroundColor(Color.Transparent)
+            // 读屏用户没有「点画面」的视觉提示：把整块交互层的语义说出来
+            .accessibilityText('可视化舞台。轻点返回封面视图，左右滑动切换歌曲')
             .onClick(() => {
               // 同一笔触刚做过滑动：这次 click 是滑动收尾的副作用，忽略
               // （否则一滑就误判成点击跳回封面——用户报障的现象）
