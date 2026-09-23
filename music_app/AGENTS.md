@@ -37,13 +37,3 @@
 - 系统资源引用（`sys.symbol.*`/`sys.color.*`）先在 `/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/id_defined.json` 中核实名称存在性再用
 - rawfile 演示曲目文件名约定 `demoXX_歌手 - 歌名.wav`，由 `MusicLibrary.fillFromFileName` 解析；重新生成见 git 历史（python3 合成脚本）
 
-## 主题索引（按需加载 skill）
-
-| skill | 何时加载 |
-|---|---|
-| `music-app-platform-ui` | 改 ArkTS 页面/组件、播放内核、媒体会话、主题与颜色资源、播放页手势与舞台、在线源与缓存、排查真机渲染不更新或白屏 |
-| `music-app-shader-pipeline` | 改 `entry/src/main/cpp/shaders` 下 GLSL、增删可视化场景、调帧驱动/displaySync、接入传感器体感、排查可视化黑屏/闪烁/掉帧、改 shader_playground |
-| `music-app-service-card` | 改 `form/` 下卡片页面或 FormAbility、卡片进度不刷新或按钮无响应、卡片配色与 form_config.json、麦克风律动、分享卡片图 |
-| `music-app-device-debug` | 装到真机/模拟器、无线调试连不上或端口变化、hdc tconn 超时、查设备地址、uitest 布局/点击/截图验证 |
-
-> 新增主题优先建 skill 并在此登记，不要继续往本文件堆长内容。

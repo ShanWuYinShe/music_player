@@ -19,14 +19,3 @@ netease_api 已从 workwork 迁入本仓，版本唯一来源 `deploy/versions.e
 - Go 侧：构建/检查/测试/运维自检命令以 [music_server/AGENTS.md](music_server/AGENTS.md) 为唯一维护处，此处不重复。
 - HarmonyOS 侧：`music_app/` 目录内执行 hvigor/ohpm 命令（工具链与签名约束见 music_app/AGENTS.md 的「本地命令」）。
 
-## 主题索引（按需加载 skill）
-
-本仓库约定按主题拆为 skill，改对应模块前先加载：
-
-| skill | 何时加载 |
-|---|---|
-| `music-app-platform-ui` | 改 music_app 的 ArkTS 页面/组件、播放内核、媒体会话、主题资源、播放页手势与舞台、在线源与缓存 |
-| `music-app-shader-pipeline` | 改 GLSL shader、增删可视化场景、调帧驱动、接入传感器体感、排查可视化黑屏/闪烁 |
-| `music-app-service-card` | 改 form/ 卡片或 FormAbility、卡片进度/按钮异常、卡片配色、麦克风律动、分享卡片图 |
-| `music-server-library` | 改曲库扫描/文件名解析、排查曲目 id 与来源判定、跑运维自检 |
-| `music-app-device-debug` | 装到真机/模拟器、无线调试排障、查设备地址、uitest 布局/点击/截图验证 |
