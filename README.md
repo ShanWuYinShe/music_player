@@ -5,13 +5,13 @@
 - `music_app`：HarmonyOS 音乐播放器客户端（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖。支持本地曲库导入（系统音频选择器 + ID3v2 解析）、完整播放控制、后台播放与系统媒体中心接入；支持「本地 / 在线」源切换，默认对接线上服务，在线搜索与流式播放 `music_server` 曲库。
 - `music_server`：Go 实现的在线音乐服务，聚合本地曲库目录（扫描、搜索、Range 流式播放）与网易云网络源（经私有部署的 NeteaseCloudMusicApi Enhanced 上游聚合搜索、服务端代理播放）。纯标准库实现、零第三方 Go 依赖；本地曲库音频经管理面板上传或手动投放，网络源上游失败自动降级为仅本地。
 
-客户端默认使用线上服务 `https://yinghuoren.com/api/music`（设置页可改，留空即用默认），外部统一经 nginx 以 `/api/music/` 前缀访问（去前缀转发）。代理 / 部署基础设施（nginx、xray、admin 面板等）在 [workwork](https://github.com/ShanWuYinShe/workwork) 仓库，并通过 git submodule 引用本仓库来构建 `music_server`。服务端发布前须在仓库打 git tag（SemVer，如 v1.0.0）：镜像版本 GIT_VERSION 取 `git describe`，无 tag 时版本号退化为 commit/dev。
+客户端默认使用线上服务 `https://music.chaoset.com/api/v1`（设置页可改，留空即用默认；业务接口规范前缀 `/api/v1`）。部署为本仓库内自洽编排：`deploy/`（nginx + music_server + netease_api 三服务 compose，独立 bridge 与数据目录，与 workwork 聚合栈零互通）——**本仓库不再是 workwork 的 submodule**。服务端发布前须在仓库打 git tag（SemVer，如 v1.0.0）：`deploy/Makefile` 取 `git describe` 作 build arg，无 tag 时版本号退化为 commit/dev。
 
 ## 目录结构
 
 ```
 music_app/          HarmonyOS 客户端工程（DevEco Studio 打开此目录）
-music_server/       Go 服务端（Dockerfile + 单元测试；由 workwork 仓库 submodule 构建）
+music_server/       Go 服务端（Dockerfile + 单元测试；由本仓库 deploy/ 编排构建）
 shader_playground/  GLSL 着色器实验场（Vite + TS，pnpm 管理）
 tools/              music_app 签名脚本（auto_sign.sh 等按脚本自身位置解析仓库根，任意目录可执行）
 ```

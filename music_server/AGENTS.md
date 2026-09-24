@@ -53,12 +53,17 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 
 ## 部署
 
-部署编排(nginx、netease_api、compose 等)在 workwork 仓库,本仓库
-music_server 作为其 submodule 被构建。本地曲库音频经管理面板「音乐曲库」
-页上传(写宿主机 workwork 仓库根 `.wework/music-library/`,compose 挂载),或手动
-投放;发布构建在 workwork 仓库执行 `make build music_server && make up
-music_server`(直接 `docker compose build` 不经 make 时镜像版本烙为 "dev",
-仅限本地验证,不得用于发布)。发布前必须打 git tag(SemVer,如 v1.0.0):
-Dockerfile 的 GIT_VERSION 由编排层 `git describe` 取得并烙进二进制(/health
-与启动日志可见),无 tag 时版本号退化为 commit/dev。新增音频无需重启服务,
-等待扫描 TTL 即可。
+**部署编排已在本仓库内自洽**：`deploy/` 是 nginx + music_server + netease_api
+三服务 compose，独立 bridge 与独立数据目录，与 workwork 聚合栈零互通；
+`netease_api` 也已从 workwork 迁入本仓。**不再是 workwork 的 submodule**——
+workwork 已无本仓库检出，不要再按 submodule 理解，也不要再去该仓库找部署入口。
+
+本地曲库音频经管理面板「音乐曲库」页上传（写服务器宿主 `deploy/data/library/`，
+compose 挂载；首次部署需从旧位置迁移快照，见 `deploy/README.md`），或手动投放。
+
+发布构建在本仓库 `deploy/` 目录执行：`make build music_server && make up music_server`
+（直接 `docker compose build` 不经 make 时镜像版本烙为 "dev"，仅限本地验证，不得用于发布）。
+发布前必须打 git tag（SemVer，如 `v1.0.0`）：`deploy/Makefile` 以
+`git -C .. describe --always --tags --dirty` 取版本并作为 build arg 传入，
+Dockerfile 烙进二进制（`/health` 与启动日志可见），无 tag 时退化为 commit/dev。
+新增音频无需重启服务，等待扫描 TTL 即可。
