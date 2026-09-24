@@ -1,6 +1,6 @@
 ---
 name: music-app-platform-ui
-description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSession 元数据规则、API 24 移除项与导入坑、V2 状态管理红线与真机渲染大坑、HarmonyOS Design UI 规范 ①-⑯、播放页舞台双态与手势、在线源 SWR 缓存、双主题与原生菜单约定。触发：改 music_app 的 ArkTS 页面或组件；动播放内核/媒体会话；改主题与颜色资源；改播放页手势或舞台；改在线源与缓存；排查真机渲染不更新/白屏。
+description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSession 元数据规则、API 24 移除项与导入坑、V2 状态管理红线与真机渲染大坑、本项目 UI 细则、播放页舞台双态与手势、在线源 SWR 缓存、双主题与原生菜单约定。触发：改 music_app 的 ArkTS 页面或组件；动播放内核/媒体会话；改主题与颜色资源；改播放页手势或舞台；改在线源与缓存；排查真机渲染不更新/白屏。
 ---
 
 # music_app 平台架构与 UI 规范
@@ -17,12 +17,7 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
 - UI 状态管理统一 V2 体系：`@ObservedV2`/`@Trace`（PlayerController）+ `@ComponentV2`/`@Param`/`@Local`；modelVersion 6.0.2 起 V2 组件**普通成员禁止父组件初始化**（回调用 `@Event`、入参用 `@Param`）；对象字面量必须对应 interface/class，回调集合用具名类实现；`@Trace` 数组元素字段变化不触发 UI，需整体替换数组引用
 - **真机 V2 渲染依赖大坑（Mate 60 Pro/API24 实测）**：全局单例 `appStore.player`（@ObservedV2）的 @Trace/@Computed 对 **if 分支条件与属性插值（fontColor/visibility 等）均不触发 UI 更新**，仅 Text 内容插值存活——表现为切歌后 mini bar 不出现、当前行高亮/EQ 不刷新、播放页歌名不跟随。**对策（现行架构）**：PlayerController 提供 `addStateListener/removeStateListener` 多播订阅（切歌/启停时 `notifyState()`），页面在 aboutToAppear 订阅并维护 **@Local 镜像**（Index 的 `mini: MiniInfo`、PlayerPage 的 `song`/`isPlaying`）驱动渲染；列表当前行高亮靠回调里 `songSource.reload` 强制重建 LazyForEach 项。**不要**在渲染层直接依赖 player 的响应式状态（进度时间等 Text 插值除外）
 
-- **UI 规范（HarmonyOS Design 对齐，2026-09 审查后确立）**：①触控热区 ≥40vp
-  （官方底线，推荐 46）——图标按钮用 padding 补足，固定高度 pill 用
-  `constraintSize({ minHeight })`；②纯图标可点元素必须 `accessibilityText`
-  （读屏），动态状态（播放/暂停、喜欢/取消）文案随状态变化；③固定高度容器
-  （搜索框/菜单行/pill）改 `constraintSize({ minHeight })`，系统大字体时随内容
-  撑高不截断；④重 IO（曲库索引全量落盘）走 taskpool `@Concurrent` 顶层函数，
+- **UI 规范**：通用约束（触控热区 ≥40vp、纯图标可点元素必须 `accessibilityText` 且动态状态文案随状态变化、固定高度容器改 `constraintSize({ minHeight })` 以适配系统大字体、原生菜单优先且不要自绘、文本与开关必须显式指定前景/选中色）见用户级 skill `mobile-ui-conventions`，本文件不复述。以下为本项目特有：④重 IO（曲库索引全量落盘）走 taskpool `@Concurrent` 顶层函数，
   主线程只做序列化，taskpool 失败回退同步写；⑤prepared 时长回填仅在
   「原时长为 0（首次）」时才整体替换 songs 数组并广播刷新——时长已知曲目
   整刷会让大曲库每次切歌全量重建列表；⑥`deviceTypes` 收敛为 phone（布局
