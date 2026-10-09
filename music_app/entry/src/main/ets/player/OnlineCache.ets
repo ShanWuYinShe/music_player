@@ -2,9 +2,14 @@ import { common } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 import { evictOrder } from '../source/OnlineApi';
 
 const TAG = 'OnlineCache';
+// 索引 JSON 解码用 TextDecoder：String.fromCharCode(...spread) 会把整个
+// 字节序列摊成变长参数，条目多时超引擎参数上限抛 RangeError → catch 清空
+// 索引 → reconcile 把全部缓存音频当孤儿删除（与 MusicLibrary.load 同款写法）
+const utf8Decoder = util.TextDecoder.create('utf-8');
 const DOMAIN = 0x0003;
 
 /** 在线音频整曲缓存上限（字节）：约容纳上百首常听曲目，超限按末次访问淘汰 */
@@ -276,7 +281,7 @@ export class OnlineCache {
       const buf = new ArrayBuffer(stat.size);
       const read = fs.readSync(file.fd, buf);
       fs.closeSync(file);
-      const text = String.fromCharCode(...new Uint8Array(buf.slice(0, read)));
+      const text = utf8Decoder.decodeWithStream(new Uint8Array(buf.slice(0, read)));
       const parsed = JSON.parse(text) as Record<string, CacheEntry>;
       if (parsed && typeof parsed === 'object') {
         const restored = new Map<string, CacheEntry>();

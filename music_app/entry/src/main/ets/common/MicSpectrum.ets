@@ -133,9 +133,15 @@ export class MicSpectrum {
     if (cap !== null) {
       try {
         await cap.stop();
-        await cap.release();
       } catch (err) {
         hilog.warn(DOMAIN, TAG, 'mic capturer stop failed: %{public}s', JSON.stringify(err));
+      }
+      // release 不放 stop 的成功路径：stop 抛错时跳过 release 会泄漏采集器
+      // 与 readData 监听（麦克风指示灯不灭），二者必须独立兜底
+      try {
+        await cap.release();
+      } catch (err) {
+        hilog.warn(DOMAIN, TAG, 'mic capturer release failed: %{public}s', JSON.stringify(err));
       }
     }
   }

@@ -316,8 +316,10 @@ export class PlayerController {
       this.playSong(this.songs[0].id);
       return;
     }
-    if (this.currentTime > 5000) {
-      // 播放超 5 秒时上一首回到曲首（符合常见交互习惯）
+    if (this.currentTime > 5000 && this.player !== null && this.isPrepared) {
+      // 播放超 5 秒时上一首回到曲首（符合常见交互习惯）。须确有已加载的
+      // player：冷启动续播态（仅展示断点、player 未建）seek 是空操作，
+      // 按钮会完全无响应，此时退化为直接切上一首
       this.seek(0);
       return;
     }

@@ -52,7 +52,7 @@ struct MusicCardWide {
           .objectFit(ImageFit.Cover)
       } else {
         Stack() {
-          Text(this.title !== '' ? firstGlyph(this.title) : '♪')
+          Text(this.title !== '' ? firstGlyph(this.title) : '音')
             .fontSize(40)
             .fontWeight(FontWeight.Bold)
             .fontColor('#8E8878')

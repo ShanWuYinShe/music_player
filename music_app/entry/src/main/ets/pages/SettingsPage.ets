@@ -1,4 +1,5 @@
 import { bundleManager } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 import { appStore } from '../viewmodel/AppStore';
 import { formatTotalDuration } from '../common/TimeUtils';
@@ -288,8 +289,12 @@ export struct SettingsPage {
       await appStore.onlineSource.fetchProviders();
       promptAction.showToast({ message: '服务连接正常' });
     } catch (err) {
+      // http 错误是 {code,message} 形态而非 Error 实例（DNS 失败等）：统一按
+      // 字段提取，与 Index 在线拉取失败的提示同款，避免显示成「未知错误」
+      const be = err as BusinessError;
+      const detail = be.message !== undefined && be.message !== '' ? be.message : '未知错误';
       promptAction.showToast({
-        message: `连接失败：${err instanceof Error ? err.message : '未知错误'}`
+        message: `连接失败：${detail}`
       });
     }
   }

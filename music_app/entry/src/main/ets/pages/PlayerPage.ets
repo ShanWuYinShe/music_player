@@ -374,6 +374,8 @@ export struct PlayerPage {
             })
             .aspectRatio(1)
             .width('84%')
+            // 读屏语义与可视化舞台交互层对齐：点按/滑动手势无视觉提示
+            .accessibilityText('大封面。轻点进入可视化舞台，左右滑动切换歌曲')
           }
           .layoutWeight(1)
           .width('100%')
@@ -553,8 +555,6 @@ export struct PlayerPage {
    * 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp） */
   @Builder
   MainControls() {
-    // 主控制：模式 / 上一首 / 播放暂停 / 下一首 / 喜欢（Poweramp 排布，
-    // 全部带按压回弹 clickEffect；padding 保证热区 ≥40vp）
     Row({ space: 30 }) {
     SymbolGlyph(playModeSymbol(this.playMode))
       .fontSize(24)
@@ -614,7 +614,6 @@ export struct PlayerPage {
   /** 副控制：音量 + 定时关闭。两侧收窄：给音量 Slider 与波形条留出拇指拖动行程 */
   @Builder
   SubControls() {
-  // 副控制：音量 + 定时关闭
   Row({ space: 10 }) {
     SymbolGlyph(this.volumeIcon())
       .fontSize(20)
@@ -888,9 +887,16 @@ export struct PlayerPage {
             .objectFit(ImageFit.Cover)
         } else {
           Stack() {
-            Text(this.song !== null ? firstGlyph(this.song.title) : '♪')
-              .fontSize(72)
-              .fontColor($r('app.color.viz_fg_faint'))
+            if (this.song !== null) {
+              Text(firstGlyph(this.song.title))
+                .fontSize(72)
+                .fontColor($r('app.color.viz_fg_faint'))
+            } else {
+              // 无曲目占位用系统符号，不用 Unicode 字符当图标（项目 UI 约定）
+              SymbolGlyph($r('sys.symbol.waveform'))
+                .fontSize(72)
+                .fontColor([$r('app.color.viz_fg_faint')])
+            }
           }
           .width('100%')
           .aspectRatio(1)

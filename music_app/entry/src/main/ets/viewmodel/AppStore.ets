@@ -411,13 +411,17 @@ export class AppStore {
     if (ctx === null) {
       return;
     }
+    // 舞台深底/浅字同样经资源 token 取色（viz_stage_grad_mid / viz_fg），
+    // 不写死色值——与上方非舞台分支同款 getColorSync 路径
+    const bg = ctx.resourceManager.getColorSync($r('app.color.viz_stage_grad_mid').id);
+    const ink = ctx.resourceManager.getColorSync($r('app.color.viz_fg').id);
     window.getLastWindow(ctx).then((win) => {
-      win.setWindowBackgroundColor('#0C0B0A');
+      win.setWindowBackgroundColor(toArgb(bg));
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         navigationBarColor: '#00000000',
-        statusBarContentColor: '#EFEBDE',
-        navigationBarContentColor: '#EFEBDE'
+        statusBarContentColor: toArgb(ink),
+        navigationBarContentColor: toArgb(ink)
       });
     }).catch((err: Object) => {
       hilog.warn(DOMAIN, TAG, 'apply stage chrome failed: %{public}s', JSON.stringify(err));
