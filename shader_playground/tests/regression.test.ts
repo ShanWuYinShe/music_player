@@ -70,7 +70,7 @@ describe('aurora v7.1 底边下方帘体断崖（回归保护）', () => {
 		// 宽光晕（0.55）等更慢的衰减是允许的，那一层比 body 平缓是对的。
 		const matches = aurora.match(/exp\(\s*dneg\s*\/\s*\(\s*H\s*\*\s*([\d.]+)\s*\)/g) ?? [];
 		expect(matches.length).toBeGreaterThanOrEqual(2);
-		const coefs = matches.map((m) => Number(m.match(/([\d.]+)\s*\)/)![1]));
+		const coefs = matches.map((m) => Number(m.match(/([\d.]+)\s*\)/)?.[1]));
 		// 至少一项 ≤ 0.4（body 的快速断崖）；其它项允许更大（宽光晕）
 		expect(Math.min(...coefs)).toBeLessThanOrEqual(0.4);
 	});
@@ -80,7 +80,7 @@ describe('aurora v7.1 底边下方帘体断崖（回归保护）', () => {
 		// 项——这正是 v7.1 之前"亮布"的几何根源。
 		const bodyBlock = aurora.match(/float\s+body\s*=\s*[^;]+;/);
 		expect(bodyBlock).not.toBeNull();
-		expect(bodyBlock![0]).toContain('dneg');
+		expect(bodyBlock?.[0]).toContain('dneg');
 	});
 
 	test('窗光白化阈值不把整片帘体打成白糊（emL 起点 ≥ 0.5）', () => {
@@ -89,7 +89,7 @@ describe('aurora v7.1 底边下方帘体断崖（回归保护）', () => {
 		// 当前实现 0.75 处于合理区间；断言底线是 ≥ 0.5，防止回退到全屏白化。
 		const m = aurora.match(/smoothstep\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*eL\s*\)/);
 		expect(m).not.toBeNull();
-		const lo = Number(m![1]);
+		const lo = Number(m?.[1]);
 		expect(lo).toBeGreaterThanOrEqual(0.5);
 	});
 });
@@ -118,7 +118,7 @@ describe('pan v15 真 3D 锅几何（回归保护）', () => {
 		const rsExpr = pan.match(/PAN_SPHERE_R\s*=\s*\([^;]+;/);
 		expect(rsExpr).not.toBeNull();
 		// 公式必须是 (1+D²)/(2D)
-		expect(rsExpr![0]).toMatch(
+		expect(rsExpr?.[0]).toMatch(
 			/\(1\.0\s*\+\s*PAN_DEPTH\s*\*\s*PAN_DEPTH\)\s*\/\s*\(2\.0\s*\*\s*PAN_DEPTH\)/,
 		);
 		// 由 D 反算 Rs，校验球冠自洽（锅心 z=0、锅口 z=D）
@@ -163,7 +163,7 @@ describe('pan v15 真 3D 锅几何（回归保护）', () => {
 		// 即可——只要开口面半径参与 src 计算，就是 v8 行为。
 		const srcDecl = pan.match(/float\s+src\s*=\s*[^;]+;/);
 		expect(srcDecl).not.toBeNull();
-		expect(srcDecl![0]).toMatch(/smoothstep\([^)]*openR/);
+		expect(srcDecl?.[0]).toMatch(/smoothstep\([^)]*openR/);
 		// 反向断言：v7 的位置错是"src 仅在远侧 p.y 起"，应不存在这种坏 pattern
 		expect(pan).not.toMatch(/src\s*=\s*clamp\(\s*p\.y/);
 	});
