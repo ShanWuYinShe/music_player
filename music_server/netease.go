@@ -65,6 +65,10 @@ type neteaseClient struct {
 	discoverAt     time.Time
 	discoverCached bool
 	discoverFailAt time.Time
+	// discoverInflight 是抓取中的单飞调用:discoverMu 只护状态读写,
+	// 不覆盖上游抓取期;没有它,TTL/冷却过期瞬间并发的空 q 请求会各自
+	// 打一次上游热歌榜(与 searchInflight 同款手写单飞,不引依赖)。
+	discoverInflight *searchCall
 
 	// searchCache 是网易搜索的短 TTL 缓存(key=query|limit);searchFail 为
 	// 同 key 的失败冷却;searchInflight 为同 query 并发单飞(手写,不引依赖)。
@@ -303,32 +307,48 @@ func (c *neteaseClient) discover(ctx context.Context) []Song {
 		return c.discoverCache
 	}
 	failCooling := time.Since(c.discoverFailAt) < scanTTL
-	c.discoverMu.Unlock()
 	if failCooling {
+		c.discoverMu.Unlock()
 		return nil
 	}
+	if call := c.discoverInflight; call != nil {
+		c.discoverMu.Unlock()
+		select {
+		case <-call.done:
+			return call.songs
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	call := &searchCall{done: make(chan struct{})}
+	c.discoverInflight = call
+	c.discoverMu.Unlock()
 
 	path := fmt.Sprintf("/playlist/track/all?id=%d&limit=%d",
 		neteaseHotPlaylistID, neteaseDiscoverLimit)
 	var resp playlistTrackAllResp
 	// 脱离请求取消（同 search）：客户端断开不该让整份热歌榜进入失败冷却。
+	var songs []Song
 	if err := c.getJSON(context.WithoutCancel(ctx), path, &resp); err != nil {
 		log.Printf("netease discover: %v", err)
 		c.discoverMu.Lock()
 		c.discoverFailAt = time.Now()
+		c.discoverInflight = nil
 		c.discoverMu.Unlock()
-		return nil
+	} else {
+		songs = make([]Song, 0, len(resp.Songs))
+		for _, item := range resp.Songs {
+			songs = append(songs, toExternalSong(item))
+		}
+		c.discoverMu.Lock()
+		c.discoverCache = songs
+		c.discoverAt = time.Now()
+		c.discoverCached = true
+		c.discoverInflight = nil
+		c.discoverMu.Unlock()
 	}
-	songs := make([]Song, 0, len(resp.Songs))
-	for _, item := range resp.Songs {
-		songs = append(songs, toExternalSong(item))
-	}
-
-	c.discoverMu.Lock()
-	c.discoverCache = songs
-	c.discoverAt = time.Now()
-	c.discoverCached = true
-	c.discoverMu.Unlock()
+	call.songs, call.err = songs, nil
+	close(call.done)
 	return songs
 }
 

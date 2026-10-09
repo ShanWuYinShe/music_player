@@ -846,7 +846,17 @@ func (s *musicServer) handleAdminNeteaseState(w http.ResponseWriter, r *http.Req
 }
 
 // handleAdminNeteaseLogout 删除 cookie 文件(neteaseClient 检测到文件消失即回匿名)。
+// 与 poll/state 同款前置守卫:未启用上游或未配置 cookie 文件时登出无意义,
+// 明确报 503 而非对 os.Remove("") 的 ENOENT 静默假成功。
 func (s *musicServer) handleAdminNeteaseLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.netease.enabled() {
+		writeError(w, "netease_api 上游未配置", http.StatusServiceUnavailable)
+		return
+	}
+	if s.config.NeteaseCookieFile == "" {
+		writeError(w, "未配置 cookie 文件路径", http.StatusServiceUnavailable)
+		return
+	}
 	if err := os.Remove(s.config.NeteaseCookieFile); err != nil && !os.IsNotExist(err) {
 		writeError(w, "登出失败", http.StatusInternalServerError)
 		return
