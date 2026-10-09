@@ -2,7 +2,7 @@
 
 Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫描)与网易云
 网络源(经私有部署的 [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)
-上游,workwork 编排的 netease_api 容器)。零第三方 Go 依赖(纯标准库);
+上游,本仓 deploy/ 编排的 netease_api 容器,原由 workwork 编排、已迁入本仓,见「部署」节)。零第三方 Go 依赖(纯标准库);
 网络源失败自动降级为仅本地曲库。
 
 ## 曲库约定（指针）
