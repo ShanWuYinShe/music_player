@@ -31,6 +31,7 @@
 - 模拟器可安装未签名 HAP，但运行时页面白屏；已配置 DevEco 自动签名（build-profile.json5 的 signingConfigs，密码为本机加密串，仅本机可用），命令行构建自动产出 `entry-default-signed.hap`
 - **一键签名构建安装**：`tools/auto_sign.sh`（仓库根下）——校验签名材料存在/有效期/设备绑定后，命令行构建 signed HAP，`install` 参数再安装+启动到已连接设备；签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名生成、有效期一年，材料有效期内全程无需打开 IDE；材料缺失/过期/新设备未绑定时脚本会打印指引，只需去 IDE 点一次「Automatically generate signature」重新生成；签名材料是否存在以 `tools/auto_sign.sh` 的校验结果为准（2026-09 曾核实本机材料缺失过一轮，勿凭本记录断定现状）
 - UI 自动化验证：`hdc shell uitest dumpLayout` 取 UI 树（应用 root 在 children[0]，检查 children 是否为空判断页面是否渲染）、`hdc shell uinput -T -c <x> <y>` 模拟点击、`snapshot_display` 截图
+- **git worktree 内构建的三个前提**（2026-10 实测，主检出不需要）：① worktree 无 `oh_modules`（gitignore 不入库），先 `ohpm install`；② 沙盒拦 `~/.hvigor` 写入时用 `HVIGOR_USER_HOME` 重定向到工作区目录，并把主检出 `~/.hvigor/wrapper` 复制过去（避免 pnpm 重新拉引擎）；③ 本地单测命令 `hvigorw --mode module -p module=entry@default -p isLocalTest=true test --no-daemon`，结果在 `entry/.test/default/intermediates/test/coverage_data/test_result.txt`（末行 Tests run 汇总）
 
 ## 约束
 

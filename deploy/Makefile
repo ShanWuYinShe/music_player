@@ -12,7 +12,7 @@ export IMAGE_TAG ?= $(GIT_VERSION)
 SERVICES := nginx music_server netease_api
 
 .DEFAULT_GOAL := help
-.PHONY: help $(SERVICES) build up restart logs ps
+.PHONY: help $(SERVICES) build up restart logs ps verify-versions
 
 KNOWN_TARGETS := help build up restart logs ps
 
@@ -42,3 +42,19 @@ logs: ## 跟踪指定服务日志: make logs nginx
 
 ps: ## 查看服务状态
 	$(COMPOSE) ps
+
+verify-versions: ## 核对 versions.env 与各 Dockerfile 钉死的同名字段一致(防漂移)
+	@fail=0; \
+	for f in ../music_server/Dockerfile nginx/Dockerfile; do \
+		for v in GO_VERSION ALPINE_VERSION BUN_VERSION NETEASE_API_VERSION NGINX_VERSION; do \
+			env_v=$$(grep -E "^$$v=" versions.env | cut -d= -f2); \
+			docker_v=$$(grep -oE "$$v=[^\" ]+" $$f 2>/dev/null | head -1 | cut -d= -f2); \
+			[ -z "$$docker_v" ] && continue; \
+			if [ "$$env_v" != "$$docker_v" ]; then echo "MISMATCH: $$f $$v env=$$env_v dockerfile=$$docker_v"; fail=1; \
+			else echo "OK: $$f $$v=$$env_v"; fi; \
+		done; \
+	done; \
+	for v in BUN_VERSION NETEASE_API_VERSION NGINX_VERSION; do \
+		grep -q "$$v" docker-compose.yml || { echo "MISSING: $$v 未出现在 docker-compose.yml(build args 断链)"; fail=1; }; \
+	done; \
+	exit $$fail
