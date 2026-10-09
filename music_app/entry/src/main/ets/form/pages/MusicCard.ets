@@ -68,11 +68,14 @@ struct MusicCard {
       .width('100%')
 
       Row({ space: 8 }) {
+        // 2x2 卡片空间紧,不放图形尺寸:用 responseRegion 把 26px 图标的
+        // 命中区扩到 40vp(触控热区下限),视觉零变化
         Image($r('app.media.ic_card_prev'))
           .width(26)
           .height(26)
           .onClick(() => cardPlayAction(this, 'previous'))
           .padding(4)
+          .responseRegion({ x: -7, y: -7, width: 40, height: 40 })
         Image(this.playing ? $r('app.media.ic_card_pause') : $r('app.media.ic_card_play'))
           .width(40)
           .height(40)
@@ -83,6 +86,7 @@ struct MusicCard {
           .height(26)
           .onClick(() => cardPlayAction(this, 'next'))
           .padding(4)
+          .responseRegion({ x: -7, y: -7, width: 40, height: 40 })
       }
       .justifyContent(FlexAlign.Center)
       .height(48)

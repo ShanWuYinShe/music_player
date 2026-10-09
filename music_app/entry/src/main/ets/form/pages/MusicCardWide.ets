@@ -117,17 +117,21 @@ struct MusicCardWide {
           .height(34)
           .padding(4)
           .onClick(() => cardPlayAction(this, 'toggle'))
+          .responseRegion({ x: -3, y: -3, width: 40, height: 40 })
         Row({ space: 16 }) {
+          // 24px 图标命中区扩到 40vp(触控热区下限),视觉零变化
           Image($r('app.media.ic_card_prev'))
             .width(24)
             .height(24)
             .padding(3)
             .onClick(() => cardPlayAction(this, 'previous'))
+            .responseRegion({ x: -8, y: -8, width: 40, height: 40 })
           Image($r('app.media.ic_card_next'))
             .width(24)
             .height(24)
             .padding(3)
             .onClick(() => cardPlayAction(this, 'next'))
+            .responseRegion({ x: -8, y: -8, width: 40, height: 40 })
         }
       }
       .justifyContent(FlexAlign.Center)

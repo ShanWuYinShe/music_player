@@ -128,11 +128,12 @@ describe('shader 管线跨端配置一致性', () => {
 		const tsHeaderLines = Number((patch.match(/FRAG_HEADER_LINES\s*=\s*(\d+)/) ?? [])[1] ?? NaN);
 		expect(tsHeaderLines).toBe(15);
 		expect(generator).toContain('frag_injected = 15 +');
-		// NAPI 与 ArkTS 传参对齐（renderFrame 12 参：…tiltX, tiltY, spin, kick）
+		// NAPI 与 ArkTS 传参对齐（renderFrame 11 参：…tiltX, tiltY, spin, kick；
+		// 2019467 死代码清理由 12 减为 11，勿回调）
 		const view = readRepoFile('music_app/entry/src/main/ets/components/VisualizerView.ets');
 		expect(view).toContain('this.tiltX, this.tiltY, this.spin, this.kick');
 		const napi = readRepoFile('music_app/entry/src/main/cpp/napi_init.cpp');
-		expect(napi).toContain('size_t argc = 12;');
+		expect(napi).toContain('size_t argc = 11;');
 	});
 });
 
