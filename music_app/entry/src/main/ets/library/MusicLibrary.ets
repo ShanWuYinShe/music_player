@@ -5,6 +5,7 @@ import { taskpool, util } from '@kit.ArkTS';
 import { SongRecord } from '../model/Song';
 import { parseId3Async } from './Id3Parser';
 import { parseFileNameMeta } from './FileNameMeta';
+import { normalizeImportName, uniqueImportName, songIdFor } from './ImportNaming';
 
 const TAG = 'MusicLibrary';
 const DOMAIN = 0x0001;
@@ -242,7 +243,7 @@ export class MusicLibrary {
     }
     // 拷贝前按「规范化文件名_大小」查重：直接重复导入同一 URI 时 uniqueName
     // 会因同名冲突改出新文件名（id 随之不同），仅靠拷贝后比对 id 永远不命中。
-    if (size > 0 && this.songs.some((item) => item.id === `${normalized}_${size}`)) {
+    if (size > 0 && this.songs.some((item) => item.id === songIdFor(normalized, size))) {
       return null;
     }
     // 保留原文件名便于用户识别；同名不同内容靠 id（名称+大小）去重
@@ -304,25 +305,30 @@ export class MusicLibrary {
     }
   }
 
-  /** 规范化显示名为沙盒文件名基础形态（去非法字符，确保带扩展名） */
+  /** 规范化显示名为沙盒文件名基础形态（纯函数见 ImportNaming） */
   private normalizedFileName(displayName: string, ext: string): string {
-    let base = displayName.replace(/[\/\\:*?"<>|]/g, '_');
-    if (!base.includes('.')) {
-      base = `${base}.${ext}`;
-    }
-    return base;
+    return normalizeImportName(displayName, ext);
   }
 
-  /** 在规范化文件名基础上生成沙盒内不冲突的文件名 */
+  /** 在规范化文件名基础上生成沙盒内不冲突的文件名：冲突集由调用方查目录
+   * 得到，纯函数只算候选名（见 ImportNaming.uniqueImportName） */
   private uniqueName(base: string): string {
-    let candidate = base;
-    let counter = 1;
-    while (fs.accessSync(`${this.musicDir()}/${candidate}`)) {
-      const dotIdx = base.lastIndexOf('.');
-      candidate = `${base.substring(0, dotIdx)}_${counter}${base.substring(dotIdx)}`;
-      counter++;
+    return uniqueImportName(base, this.takenNames());
+  }
+
+  /** 当前沙盒内已占用的文件名集合 */
+  private takenNames(): Set<string> {
+    const names = new Set<string>();
+    try {
+      if (fs.accessSync(this.musicDir())) {
+        for (const name of fs.listFileSync(this.musicDir())) {
+          names.add(name);
+        }
+      }
+    } catch (err) {
+      // 列目录失败按无冲突处理：uniqueName 返回原名，落盘时由后续 IO 报错
     }
-    return candidate;
+    return names;
   }
 
   /** 由沙盒文件生成歌曲记录：mp3 走 ID3（taskpool 子线程解析），其余按文件名解析「歌手 - 歌名」 */
@@ -330,7 +336,7 @@ export class MusicLibrary {
     const fileName = path.substring(path.lastIndexOf('/') + 1);
     const size = fs.statSync(path).size;
     const record: SongRecord = {
-      id: `${fileName}_${size}`,
+      id: songIdFor(fileName, size),
       title: '',
       artist: '',
       album: '',

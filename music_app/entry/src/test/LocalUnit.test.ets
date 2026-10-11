@@ -22,6 +22,7 @@ import {
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 import { parseFileNameMeta, LOCAL_ARTIST_FALLBACK } from '../main/ets/library/FileNameMeta';
 import { cacheFileName, CACHE_FILE_SUFFIX, CACHE_INDEX_FILE } from '../main/ets/player/CacheFileName';
+import { normalizeImportName, uniqueImportName, songIdFor } from '../main/ets/library/ImportNaming';
 import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
@@ -1003,6 +1004,59 @@ export default function LocalUnitSuite() {
       // 常量被索引读写/对账共用,值漂移会让旧缓存全部对不上
       expect(CACHE_FILE_SUFFIX).assertEqual('.audio');
       expect(CACHE_INDEX_FILE).assertEqual('index.json');
+    });
+  });
+
+  // 导入命名派生（MusicLibrary.normalizedFileName/uniqueName 的纯函数形态）：
+  // 文件名是曲目 id 的组成部分,命名规则若变会让存量索引 id 全部失配
+  // (收藏/最近播放丢引用)。
+  describe('ImportNamingTest', () => {
+    it('normalizeKeepsLegalName', 0, () => {
+      expect(normalizeImportName('晴天.mp3', 'mp3')).assertEqual('晴天.mp3');
+    });
+    it('normalizeReplacesIllegalChars', 0, () => {
+      // 路径分隔符与保留字符一律替换为 _,防穿越与跨平台失败
+      expect(normalizeImportName('a/b' + String.fromCharCode(92) + 'c.mp3', 'mp3')).assertEqual('a_b_c.mp3');
+      expect(normalizeImportName('x:y?z*.mp3', 'mp3')).assertEqual('x_y_z_.mp3');
+    });
+    it('normalizeAppendsExtWhenMissing', 0, () => {
+      // picker 可能给出无扩展名的 URI:补兜底扩展名(确保 supportedExt 可判)
+      expect(normalizeImportName('noext', 'mp3')).assertEqual('noext.mp3');
+      // 已含任意点则不补(哪怕不是音频扩展名)
+      expect(normalizeImportName('v1.2', 'mp3')).assertEqual('v1.2');
+    });
+    it('uniqueReturnsBaseWhenFree', 0, () => {
+      // 无冲突原样返回:已导入文件的命名稳定(不改写存量 id)
+      const taken = new Set<string>(['other.mp3']);
+      expect(uniqueImportName('a.mp3', taken)).assertEqual('a.mp3');
+    });
+    it('uniqueAppendsCounterOnConflict', 0, () => {
+      // 同名冲突按 _N 递增,插入点在扩展名前
+      const taken = new Set<string>(['a.mp3']);
+      expect(uniqueImportName('a.mp3', taken)).assertEqual('a_1.mp3');
+      taken.add('a_1.mp3');
+      expect(uniqueImportName('a.mp3', taken)).assertEqual('a_2.mp3');
+    });
+    it('uniqueSkipsTakenCounters', 0, () => {
+      // 中间序号也占用时逐个跳过,不重复产出已占用的名字
+      const taken = new Set<string>(['a.mp3', 'a_1.mp3', 'a_2.mp3']);
+      expect(uniqueImportName('a.mp3', taken)).assertEqual('a_3.mp3');
+    });
+    it('uniqueHandlesMultiDotName', 0, () => {
+      // 多点文件名:插入点取最后一个点
+      const taken = new Set<string>(['song.v1.mp3']);
+      expect(uniqueImportName('song.v1.mp3', taken)).assertEqual('song.v1_1.mp3');
+    });
+    it('uniqueHandlesNoExtension', 0, () => {
+      // 无扩展名:直接末尾追加
+      const taken = new Set<string>(['noext']);
+      expect(uniqueImportName('noext', taken)).assertEqual('noext_1');
+    });
+    it('songIdDistinguishesBySize', 0, () => {
+      // 同名不同内容靠大小区分;同内容重复导入 id 相同(判重依据)
+      expect(songIdFor('a.mp3', 100)).assertEqual('a.mp3_100');
+      expect(songIdFor('a.mp3', 200)).assertEqual('a.mp3_200');
+      expect(songIdFor('a.mp3', 100) === songIdFor('a.mp3', 100)).assertTrue();
     });
   });
 
