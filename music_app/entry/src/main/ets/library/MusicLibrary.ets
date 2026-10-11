@@ -429,14 +429,26 @@ export class MusicLibrary {
       const file = fs.openSync(this.libraryPath(), fs.OpenMode.READ_ONLY);
       const stat = fs.statSync(this.libraryPath());
       const buffer = new ArrayBuffer(stat.size);
-      fs.readSync(file.fd, buffer);
+      // 按实际读取字节切片：readSync 可能少于 stat.size（与 OnlineCache
+      // .loadIndex 同款写法），整 buffer 解码会把尾部零字节喂给 JSON.parse
+      // 而抛错、清空整个曲库索引。
+      const read = fs.readSync(file.fd, buffer);
       fs.closeSync(file);
-      const text = utf8Decoder.decodeWithStream(new Uint8Array(buffer));
-      const parsed: SongRecord[] = JSON.parse(text) as SongRecord[];
+      const text = utf8Decoder.decodeWithStream(new Uint8Array(buffer.slice(0, read)));
+      const parsed = JSON.parse(text) as SongRecord[];
+      // 形态校验：索引文件可能是旧版本或残留的非数组内容，直接 .filter 会抛
+      // "is not a function" 并被 catch 清空整个曲库（静默丢全部曲目）。
+      if (!Array.isArray(parsed)) {
+        hilog.error(DOMAIN, TAG, 'library index is not an array, start empty');
+        this.songs = [];
+        return;
+      }
       // 过滤已丢失文件的记录：一次列目录建文件名集合，替代逐记录 accessSync
       // （启动主线程 N 次系统调用，大曲库下明显拖慢冷启动）
       const existing = new Set<string>(fs.listFileSync(this.musicDir()));
-      this.songs = parsed.filter((song) => existing.has(song.fileName));
+      this.songs = parsed.filter((song) => song !== null && song !== undefined &&
+        typeof song.id === 'string' && typeof song.fileName === 'string' &&
+        existing.has(song.fileName));
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'load library failed: %{public}s', JSON.stringify(err));
       this.songs = [];

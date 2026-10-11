@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@ohos/hypium';
-import { PlayMode, nextPlayMode, playModeLabel } from '../main/ets/model/PlayMode';
+import { PlayMode, nextPlayMode, playModeLabel, shouldRestartAtHead, RESTART_AT_HEAD_MS } from '../main/ets/model/PlayMode';
 import { formatTime, formatTotalDuration } from '../main/ets/common/TimeUtils';
 import { SongRecord } from '../main/ets/model/Song';
 import { LibraryTab, SortMode, filterAndSort, sortLabel, splitHighlight, TextSegment } from '../main/ets/common/LibraryFilter';
@@ -78,6 +78,20 @@ export default function LocalUnitSuite() {
       expect(playModeLabel(PlayMode.SEQUENCE)).assertEqual('顺序播放');
       expect(playModeLabel(PlayMode.SINGLE)).assertEqual('单曲循环');
       expect(playModeLabel(PlayMode.SHUFFLE)).assertEqual('随机播放');
+    });
+    // 「上一首只回曲首」判据：previous()(执行) 与 peekPrevCover()(预览) 共用。
+    // 预览若少看 hasLoadedPlayer 条件,冷启动续播态会「实际切了歌却回弹」。
+    it('restartAtHeadRequiresLoadedPlayer', 0, () => {
+      expect(RESTART_AT_HEAD_MS).assertEqual(5000);
+      // 播超 5 秒 + 已加载 → 回曲首
+      expect(shouldRestartAtHead(5001, true)).assertTrue();
+      expect(shouldRestartAtHead(60000, true)).assertTrue();
+      // 未过 5 秒 → 切上一首(与 player 是否已加载无关)
+      expect(shouldRestartAtHead(5000, true)).assertFalse();
+      expect(shouldRestartAtHead(0, true)).assertFalse();
+      // 关键:播超 5 秒但 player 未建(冷启动续播态)→ 必须切上一首,不能回曲首
+      expect(shouldRestartAtHead(60000, false)).assertFalse();
+      expect(shouldRestartAtHead(5001, false)).assertFalse();
     });
   });
 

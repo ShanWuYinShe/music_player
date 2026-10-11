@@ -4,7 +4,7 @@ import { preferences } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { SongRecord } from '../model/Song';
-import { PlayMode, nextPlayMode } from '../model/PlayMode';
+import { PlayMode, nextPlayMode, shouldRestartAtHead } from '../model/PlayMode';
 import { MusicLibrary } from '../library/MusicLibrary';
 import { UserData } from '../viewmodel/UserData';
 import { SessionController, SessionHandlers } from './SessionController';
@@ -316,10 +316,11 @@ export class PlayerController {
       this.playSong(this.songs[0].id);
       return;
     }
-    if (this.currentTime > 5000 && this.player !== null && this.isPrepared) {
-      // 播放超 5 秒时上一首回到曲首（符合常见交互习惯）。须确有已加载的
-      // player：冷启动续播态（仅展示断点、player 未建）seek 是空操作，
-      // 按钮会完全无响应，此时退化为直接切上一首
+    // 播放超 5 秒时上一首回到曲首（符合常见交互习惯）。须确有已加载的
+    // player：冷启动续播态（仅展示断点、player 未建）seek 是空操作，
+    // 按钮会完全无响应，此时退化为直接切上一首。判据与 peekPrevCover 共用
+    // （shouldRestartAtHead），两处不许各自漂移
+    if (shouldRestartAtHead(this.currentTime, this.player !== null && this.isPrepared)) {
       this.seek(0);
       return;
     }
@@ -358,7 +359,11 @@ export class PlayerController {
 
   /** 上一首预览（previous 不消费插播队列，纯按索引；随机给 null）。
    * 含 5 秒回曲首规则：播放超 5 秒右滑只回曲首不换轨，此时无预览
-   * （与 previous() 语义对齐，释放后 'same' 回弹才不显得 preview 在骗人） */
+   * ——但「回曲首」的成立条件必须与 previous() 的三条件**严格同形**：
+   * previous() 要求确有已加载的 player（player !== null && isPrepared），
+   * 冷启动续播态（仅展示断点、player 未建）会退化为直接切上一首。此处若
+   * 只看 currentTime > 5000 就返回 null，子组件拿 null 按「不换轨」回弹、
+   * 实际却已切歌——正是本设计要防的「preview 在骗人」。 */
   peekPrevCover(): CoverRef | null {
     if (this.songs.length === 0) {
       return null;
@@ -370,7 +375,7 @@ export class PlayerController {
     if (this.playMode === PlayMode.SHUFFLE) {
       return null;
     }
-    if (this.currentTime > 5000) {
+    if (shouldRestartAtHead(this.currentTime, this.player !== null && this.isPrepared)) {
       return null;
     }
     return coverRefOf(this.songs[(index - 1 + this.songs.length) % this.songs.length]);
