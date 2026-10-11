@@ -25,3 +25,29 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - 构建必须先起模拟器或连上真机（签名/安装阶段需要设备）
 - UI 相关改动在真机上验证时，注意 V2 状态不驱动渲染的已知坑（见 skill `music-app-platform-ui`）——**界面没更新不一定是没装上**
 - 手机息屏会断开无线调试：重连成功后立刻跑安装，并提醒用户装机期间别锁屏
+
+## worktree 内构建：HVIGOR_USER_HOME 的致命坑（2026-10-12 实测）
+
+**worktree 无 `oh_modules`/`.hvigor`（均被 gitignore），先 `ohpm install`。**
+沙盒拦 `~/.hvigor` 写入时用 `HVIGOR_USER_HOME` 重定向，**并把该目录指向
+`.workwork/`（workspace 中间产物区），不要指向 worktree 自身目录**：
+
+```bash
+export HVIGOR_USER_HOME=/path/to/repo/.workwork/hvigor-home
+mkdir -p "$HVIGOR_USER_HOME"
+cp -R ~/.hvigor/wrapper "$HVIGOR_USER_HOME"/   # 避免 pnpm 重新拉引擎
+```
+
+**坑**：把 `HVIGOR_USER_HOME` 设成 `worktree 内的目录`（如 `$PWD/.hvigor-home`）时，
+hvigor 会**把工程级 `music_app/hvigor/hvigor-config.json5` 整个移进该 HOME**，
+导致该入库文件从磁盘消失。症状极具误导性：
+
+```
+Error Message: Hvigor config file .../music_app/hvigor/hvigor-config.json5 does not exist.
+```
+
+而 `git status` **干干净净**——文件明明在 git 树里，却不在磁盘上，容易误判为
+git 损坏而去查 `git fsck`/重新 clone。**解法：`git checkout HEAD --
+music_app/hvigor/hvigor-config.json5` 恢复，并把 `HVIGOR_USER_HOME` 改到
+`.workwork/`**（`.workwork/` 已被 gitignore、按工作树隔离，既是中间产物该待的
+地方，也不会被误删入库文件）。
