@@ -44,8 +44,9 @@ API 约定：业务接口规范前缀 `/api/v1/`，旧 `/api/*` 别名已移除�
   文件名约定「歌手 - 歌名.ext」，music_server 自动扫描（60s TTL 懒刷新）。
 - **网易云登录**：管理页扫码登录（cookie 热加载 30s 内生效）；也可经
   `.env` 的 `NETEASE_MUSIC_COOKIE` 投放。
-- **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`（注:当前 compose 未挂载该目录,分片落在容器可写层——容器重建后续传会丢,重新上传即可
+- **宿主目录属主**：`data/library`、`data/upload-chunks`、`data/generated`
   须可被 uid 1001 写入（容器 `user: "1001:1001"`），首次部署
-  `chown -R 1001 data`。
+  `chown -R 1001 data`。`data/upload-chunks` 已挂载为宿主卷（分片续传态跨
+  容器重建保留）。
 - **旧别名已移除**：`/api/*` 一律 404；存量旧版 App（默认 `yinghuoren.com/api/music`）需在设置页手填新地址
   全量切换后删除（nginx 模板注释 + music_server `apiV1Prefix` 归一化）。

@@ -30,8 +30,11 @@ WORKDIR /app
 RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories \
     && apk add --no-cache ca-certificates wget \
     && adduser -D -u 10001 appuser \
-    && mkdir -p /data/library \
-    && chown -R appuser:appuser /app /data
+    && mkdir -p /data/library /data/upload-chunks \
+    && chown -R appuser:appuser /app /data \
+    # 运行时以 uid 1001 运行(见 deploy/docker-compose.yml):分片暂存目录须对
+    # 1001 可写,否则大文件分片上传在首片即 500、续传态随之丢弃。
+    && chown -R 1001:1001 /data/upload-chunks
 
 ENV HOST=0.0.0.0 \
     PORT=8790 \

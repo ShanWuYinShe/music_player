@@ -86,6 +86,9 @@ func acquireUploadSlot(slots chan struct{}) (func(), bool) {
 // ---------- 曲库:列表 / 一次性上传 / 删除 ----------
 
 // musicLibraryFile 是列表条目。
+// Name 是相对曲库根目录的路径(slash 形式,如「专辑/歌.mp3」;根目录文件
+// 即文件名)——曲库是递归扫描的(scanLibrary),列表必须同构,否则子目录
+// 投放的音频在管理页既不可见也不可删。
 type musicLibraryFile struct {
 	Name      string `json:"name"`
 	SizeBytes int64  `json:"sizeBytes"`
@@ -93,6 +96,7 @@ type musicLibraryFile struct {
 }
 
 // validMusicName 校验落盘文件名:拒绝路径分隔符与相对路径,扩展名须在白名单。
+// 仅用于上传(上传一律落在曲库根目录,不接受子目录)。
 func validMusicName(name string) bool {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return false
@@ -100,8 +104,68 @@ func validMusicName(name string) bool {
 	return supportedExt[strings.ToLower(filepath.Ext(name))]
 }
 
+// validMusicRelPath 校验曲库内的相对路径(删除端点):接受「专辑/歌.mp3」
+// 形态的斜杠分隔相对路径,拒绝绝对路径、反斜杠、空段与 .. 逃逸段——删除
+// 不可恢复,路径校验必须比上传更严。
+func validMusicRelPath(rel string) bool {
+	if rel == "" || strings.Contains(rel, `\`) || filepath.IsAbs(rel) {
+		return false
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return supportedExt[strings.ToLower(filepath.Ext(rel))]
+}
+
+// listLibraryFiles 递归列出曲库内全部音频(与 scanLibrary 同构),返回按
+// 相对路径排序的条目。一级子目录名即专辑(scanLibrary 语义),非递归列表
+// 会漏掉全部子目录文件。
+func listLibraryFiles(dir string) ([]musicLibraryFile, error) {
+	files := make([]musicLibraryFile, 0, 64)
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if path == dir {
+				return err
+			}
+			log.Printf("admin library walk %s: %v", path, err)
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !supportedExt[strings.ToLower(filepath.Ext(path))] {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		if !validMusicRelPath(relSlash) {
+			return nil
+		}
+		files = append(files, musicLibraryFile{
+			Name:      relSlash,
+			SizeBytes: info.Size(),
+			ModTime:   info.ModTime().Format(time.RFC3339),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	return files, nil
+}
+
 func (s *musicServer) handleAdminLibraryList(w http.ResponseWriter, r *http.Request) {
-	entries, err := os.ReadDir(s.config.LibraryDir)
+	files, err := listLibraryFiles(s.config.LibraryDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, map[string]any{"files": []musicLibraryFile{}})
@@ -111,22 +175,6 @@ func (s *musicServer) handleAdminLibraryList(w http.ResponseWriter, r *http.Requ
 		log.Printf("admin library list: %v", err)
 		return
 	}
-	files := make([]musicLibraryFile, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !supportedExt[strings.ToLower(filepath.Ext(e.Name()))] {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, musicLibraryFile{
-			Name:      e.Name(),
-			SizeBytes: info.Size(),
-			ModTime:   info.ModTime().Format(time.RFC3339),
-		})
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 	// 分页:page 从 1,pageSize 默认 100 上限 500(全量曲库列表由业务 /api/v1/songs 承载)。
 	page, pageSize := 1, 100
 	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
@@ -242,8 +290,11 @@ func (s *musicServer) saveMusicUpload(header *multipart.FileHeader) (string, err
 }
 
 func (s *musicServer) handleAdminLibraryDelete(w http.ResponseWriter, r *http.Request) {
-	name := filepath.Base(strings.TrimSpace(r.URL.Query().Get("name")))
-	if !validMusicName(name) {
+	// name 是相对曲库根目录的路径(slash 形式,与列表端点同构):曲库按子目录
+	// 分组(一级子目录即专辑),删除必须能寻址子目录内的文件。路径经
+	// validMusicRelPath 校验,无穿越面;old 客户端只传文件名时行为不变。
+	name := filepath.FromSlash(strings.TrimSpace(r.URL.Query().Get("name")))
+	if !validMusicRelPath(filepath.ToSlash(name)) {
 		writeError(w, "文件名不合法", http.StatusBadRequest)
 		return
 	}

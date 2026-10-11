@@ -33,7 +33,7 @@ go test -C music_server ./...             # 单元测试
 
 ```bash
 LIBRARY_DIR=/tmp/music-library PORT=8790 go run -C music_server .
-curl 'http://127.0.0.1:8790/api/songs?q=关键词'
+curl 'http://127.0.0.1:8790/api/v1/songs?q=关键词'
 ```
 
 API 字段、文件名约定与部署说明见 [music_server/AGENTS.md](music_server/AGENTS.md)。

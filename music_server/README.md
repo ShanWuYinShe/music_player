@@ -17,19 +17,21 @@ music_player 仓库的在线音乐服务:为同仓库的 HarmonyOS 客户端
 mkdir -p /tmp/music-library
 # 按「歌手 - 歌名.ext」命名放入音频文件
 LIBRARY_DIR=/tmp/music-library PORT=8790 go run .
-curl 'http://127.0.0.1:8790/api/songs?q=关键词'
-# 启用网络源(需自行运行 netease_api 上游,见 workwork 编排):
+curl 'http://127.0.0.1:8790/api/v1/songs?q=关键词'
+# 启用网络源(需自行运行 netease_api 上游,见 deploy/ 编排):
 # NETEASE_API_BASE=http://127.0.0.1:3000 LIBRARY_DIR=... go run .
 ```
 
 ## API
 
-外部统一经 nginx 以 `/api/music/` 前缀访问(去前缀转发到服务):
+服务内路由即最终形态(nginx 原样透传,不做路径改写);规范前缀 `/api/v1`,
+旧 `/api/*` 别名已移除(404):
 
 ```
-GET /api/music/providers          # 源列表
-GET /api/music/songs?q=&limit=    # 列表/搜索(q 非空时聚合网络源结果)
-GET /api/music/stream/<id>        # 音频流(支持 Range;网络源为服务端代理)
+GET /api/v1/providers          # 源列表
+GET /api/v1/songs?q=&limit=    # 列表/搜索(q 非空时聚合网络源结果)
+GET /api/v1/stream/<id>        # 音频流(支持 Range;网络源为服务端代理)
+GET /healthz                   # 存活探针(无鉴权)
 ```
 
 ## 鉴权（可选）

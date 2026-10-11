@@ -110,6 +110,9 @@ services:
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       # 曲库：music_server 读写（薄管理上传端点写入；uid 1001）
       - ./data/library:/data/library
+      # 大文件分片暂存（8MB/片）：不挂卷则落在容器可写层，容器重建后续传态
+      # 全丢；宿主目录须可被 uid 1001 写入（与 data/generated 同 chown）。
+      - ./data/upload-chunks:/data/upload-chunks
       # 网易云 cookie：扫码登录端点写入（Phase 2b）
       - ./data/generated:/data/netease
     depends_on:

@@ -33,6 +33,10 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 
 - 本地曲库 id 不暴露磁盘路径,无路径穿越面;网络源直链域名仅允许 http(s)
 - 曲库索引 60s TTL 懒刷新,文件增删最迟一个 TTL 生效
+- 曲库按子目录递归扫描(一级子目录名即专辑):管理端点 `/admin/api/v1/library`
+  的 `name` 是**相对曲库根目录的 slash 路径**(如 `专辑/歌.mp3`),与
+  `/api/v1/songs` 同构;删除据此寻址子目录文件,路径经 `validMusicRelPath`
+  拒绝绝对路径/`..`/空段。上传一律落根目录(仅认文件名)
 - per-IP 限流(默认 120 req/min,env `RATE_LIMIT_PER_MINUTE`),取 IP 顺序与
   media_server 一致(X-Real-IP → X-Forwarded-For 首段 → RemoteAddr 兜底);
   转发头仅当直连方为内网/回环(即 nginx 所在 Docker bridge)时才采信,

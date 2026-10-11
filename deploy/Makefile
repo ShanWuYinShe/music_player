@@ -43,9 +43,12 @@ logs: ## 跟踪指定服务日志: make logs nginx
 ps: ## 查看服务状态
 	$(COMPOSE) ps
 
+# 核对 versions.env 与各 Dockerfile 钉死的同名字段一致(防漂移)。
+# 末段另做变量名不同形的显式映射:netease_api/Dockerfile 的 ARG 名是
+# API_VERSION,而 versions.env 叫 NETEASE_API_VERSION——同名扫描天然漏检它。
 verify-versions: ## 核对 versions.env 与各 Dockerfile 钉死的同名字段一致(防漂移)
 	@fail=0; \
-	for f in ../music_server/Dockerfile nginx/Dockerfile; do \
+	for f in ../music_server/Dockerfile nginx/Dockerfile ../netease_api/Dockerfile; do \
 		for v in GO_VERSION ALPINE_VERSION BUN_VERSION NETEASE_API_VERSION NGINX_VERSION; do \
 			env_v=$$(grep -E "^$$v=" versions.env | cut -d= -f2); \
 			docker_v=$$(grep -oE "$$v=[^\" ]+" $$f 2>/dev/null | head -1 | cut -d= -f2); \
@@ -57,4 +60,8 @@ verify-versions: ## 核对 versions.env 与各 Dockerfile 钉死的同名字段�
 	for v in BUN_VERSION NETEASE_API_VERSION NGINX_VERSION; do \
 		grep -q "$$v" docker-compose.yml || { echo "MISSING: $$v 未出现在 docker-compose.yml(build args 断链)"; fail=1; }; \
 	done; \
+	api_env=$$(grep -E "^NETEASE_API_VERSION=" versions.env | cut -d= -f2); \
+	api_docker=$$(grep -oE "API_VERSION=[^\" ]+" ../netease_api/Dockerfile | head -1 | cut -d= -f2); \
+	if [ "$$api_env" != "$$api_docker" ]; then echo "MISMATCH: netease_api API_VERSION env=$$api_env dockerfile=$$api_docker"; fail=1; \
+	else echo "OK: ../netease_api/Dockerfile API_VERSION=$$api_env"; fi; \
 	exit $$fail
