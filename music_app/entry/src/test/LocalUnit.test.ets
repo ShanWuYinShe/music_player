@@ -20,6 +20,7 @@ import {
   normalizeSpin, wrapAngleDelta, accelKickLevel
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
+import { parseFileNameMeta, LOCAL_ARTIST_FALLBACK } from '../main/ets/library/FileNameMeta';
 import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
@@ -889,6 +890,65 @@ export default function LocalUnitSuite() {
       expect(sortLabel(SortMode.TITLE)).assertEqual('按歌名');
       expect(sortLabel(SortMode.ARTIST)).assertEqual('按歌手');
       expect(sortLabel(SortMode.DURATION)).assertEqual('按时长');
+    });
+  });
+
+  // 曲库文件名元数据解析（MusicLibrary.fillFromFileName 的纯函数形态）：
+  // 无 ID3 标签时的唯一元数据来源,约定跨客户端与服务端(music_server 的
+  // parseSongName/stripSerialPrefix 同源),零测试覆盖多年。
+  describe('FileNameMetaTest', () => {
+    it('parsesArtistAndTitle', 0, () => {
+      const m = parseFileNameMeta('周杰伦 - 晴天.mp3');
+      expect(m.artist).assertEqual('周杰伦');
+      expect(m.title).assertEqual('晴天');
+    });
+    it('stripsDemoSerialPrefix', 0, () => {
+      // rawfile 演示曲目命名「demoXX_歌手 - 歌名.ext」
+      const m = parseFileNameMeta('demo03_拾光者 - 温柔节拍.wav');
+      expect(m.artist).assertEqual('拾光者');
+      expect(m.title).assertEqual('温柔节拍');
+    });
+    it('noSeparatorFallsBackTitleOnly', 0, () => {
+      const m = parseFileNameMeta('未命名曲目.flac');
+      expect(m.title).assertEqual('未命名曲目');
+      expect(m.artist).assertEqual(LOCAL_ARTIST_FALLBACK);
+      expect(LOCAL_ARTIST_FALLBACK).assertEqual('本地音乐');
+    });
+    it('trimsWhitespaceAroundParts', 0, () => {
+      const m = parseFileNameMeta('  歌手  -   歌名  .mp3');
+      expect(m.artist).assertEqual('歌手');
+      expect(m.title).assertEqual('歌名');
+    });
+    it('splitsOnFirstSeparatorOnly', 0, () => {
+      // 歌名本身含「 - 」时只按第一个分割,后续留给歌名
+      const m = parseFileNameMeta('A - B - C.mp3');
+      expect(m.artist).assertEqual('A');
+      expect(m.title).assertEqual('B - C');
+    });
+    it('keepsDotsInTitleWithoutExtConfusion', 0, () => {
+      // 文件名带多点:只剥最后一个扩展名,其余留给歌名
+      const m = parseFileNameMeta('歌手 - v1.2.3.mp3');
+      expect(m.artist).assertEqual('歌手');
+      expect(m.title).assertEqual('v1.2.3');
+    });
+    it('handlesMissingExtension', 0, () => {
+      // 无扩展名:整体参与解析,不去名
+      const m = parseFileNameMeta('歌手 - 无扩展名');
+      expect(m.artist).assertEqual('歌手');
+      expect(m.title).assertEqual('无扩展名');
+    });
+    it('emptyAndEdgeInputs', 0, () => {
+      expect(parseFileNameMeta('').title).assertEqual('');
+      expect(parseFileNameMeta('').artist).assertEqual(LOCAL_ARTIST_FALLBACK);
+      // 前导点(隐藏文件形态)不去名
+      const m = parseFileNameMeta('.mp3');
+      expect(m.title).assertEqual('.mp3');
+    });
+    it('doesNotStripNonSerialPrefix', 0, () => {
+      // 前缀不含数字不剥离(与 music_server 的 stripSerialPrefix 同口径)
+      const m = parseFileNameMeta('Love_Story.mp3');
+      expect(m.title).assertEqual('Love_Story');
+      expect(m.artist).assertEqual(LOCAL_ARTIST_FALLBACK);
     });
   });
 

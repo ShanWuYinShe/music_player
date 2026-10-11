@@ -4,6 +4,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { taskpool, util } from '@kit.ArkTS';
 import { SongRecord } from '../model/Song';
 import { parseId3Async } from './Id3Parser';
+import { parseFileNameMeta } from './FileNameMeta';
 
 const TAG = 'MusicLibrary';
 const DOMAIN = 0x0001;
@@ -355,24 +356,9 @@ export class MusicLibrary {
 
   /** 文件名解析：优先「歌手 - 歌名」，否则整名做歌名 */
   private fillFromFileName(record: SongRecord, fileName: string): void {
-    let name = fileName;
-    const dot = name.lastIndexOf('.');
-    if (dot > 0) {
-      name = name.substring(0, dot);
-    }
-    // 去掉演示曲目前缀 demoXX_
-    const demoPrefix = /^demo\d+_/.exec(name);
-    if (demoPrefix) {
-      name = name.substring(demoPrefix[0].length);
-    }
-    const sep = name.indexOf(' - ');
-    if (sep > 0) {
-      record.artist = name.substring(0, sep).trim();
-      record.title = name.substring(sep + 3).trim();
-    } else {
-      record.title = name.trim();
-      record.artist = '本地音乐';
-    }
+    const parsed = parseFileNameMeta(fileName);
+    record.artist = parsed.artist;
+    record.title = parsed.title;
   }
 
   private saveCover(id: string, data: Uint8Array): string {
