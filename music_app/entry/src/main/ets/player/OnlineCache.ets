@@ -4,6 +4,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import { evictOrder } from '../source/OnlineApi';
+import { cacheFileName, CACHE_INDEX_FILE as INDEX_FILE } from './CacheFileName';
 
 const TAG = 'OnlineCache';
 // 索引 JSON 解码用 TextDecoder：String.fromCharCode(...spread) 会把整个
@@ -21,8 +22,6 @@ const READ_TIMEOUT_MS = 60000;
 const PERSIST_DIRTY_LIMIT = 20;
 /** 索引落盘节流：距上次落盘超该时长（毫秒）也落盘（低频命中不丢 lastAccess） */
 const PERSIST_INTERVAL_MS = 30000;
-/** 索引文件名（存于缓存目录内） */
-const INDEX_FILE = 'index.json';
 /** 同时进行的整曲下载上限：播放伴随下载 + 收藏批量补下载共用此队列 */
 const MAX_ACTIVE_DOWNLOADS = 2;
 
@@ -252,19 +251,10 @@ export class OnlineCache {
     }
   }
 
-  /** 缓存文件名：id 含 online:/斜杠等非法字符时转义——折叠有理论碰撞
-   *（不同 id 折出同名），转义过的名字追加短 hash 兜底；干净 id 名字不变，
-   * 已缓存文件零迁移 */
+  /** 缓存文件绝对路径：文件名派生规则见 CacheFileName.cacheFileName
+   * （纯函数、已单测——映射错一度意味着缓存 miss 重下或孤儿被对账清掉） */
   private filePath(songId: string): string {
-    const safe = songId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    if (safe === songId) {
-      return `${this.dir}/${safe}.audio`;
-    }
-    let hash = 5381;
-    for (let i = 0; i < songId.length; i++) {
-      hash = ((hash * 33) ^ songId.charCodeAt(i)) & 0x7fffffff;
-    }
-    return `${this.dir}/${safe}.${hash.toString(36)}.audio`;
+    return `${this.dir}/${cacheFileName(songId)}`;
   }
 
   private indexPath(): string {

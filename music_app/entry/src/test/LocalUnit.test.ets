@@ -21,6 +21,7 @@ import {
 } from '../main/ets/common/VisualizerCore';
 import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 import { parseFileNameMeta, LOCAL_ARTIST_FALLBACK } from '../main/ets/library/FileNameMeta';
+import { cacheFileName, CACHE_FILE_SUFFIX, CACHE_INDEX_FILE } from '../main/ets/player/CacheFileName';
 import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
@@ -949,6 +950,59 @@ export default function LocalUnitSuite() {
       const m = parseFileNameMeta('Love_Story.mp3');
       expect(m.title).assertEqual('Love_Story');
       expect(m.artist).assertEqual(LOCAL_ARTIST_FALLBACK);
+    });
+  });
+
+  // 缓存文件名派生（OnlineCache.filePath 的纯函数形态）：决定「缓存文件 ↔
+  // 索引 key」映射,错一度意味着缓存 miss 重下(流量)或孤儿被对账清掉(已下
+  // 音频丢失),且含 hash 兜底的碰撞规避逻辑。
+  describe('CacheFileNameTest', () => {
+    it('cleanIdKeepsStableName', 0, () => {
+      // 干净 id(仅 [a-zA-Z0-9_-])不加 hash,已缓存文件零迁移
+      expect(cacheFileName('abc123')).assertEqual('abc123.audio');
+      expect(cacheFileName('a-b_c')).assertEqual('a-b_c.audio');
+    });
+    it('escapedIdAppendsHashSuffix', 0, () => {
+      // online: 前缀含冒号 → 转义为 _ 并追加 hash 短串
+      const name = cacheFileName('online:ne_12345');
+      expect(name.startsWith('online_ne_12345.')).assertTrue();
+      expect(name.endsWith('.audio')).assertTrue();
+      // hash 段存在且非空
+      const mid = name.substring('online_ne_12345.'.length, name.length - CACHE_FILE_SUFFIX.length);
+      expect(mid.length > 0).assertTrue();
+    });
+    it('collisionProneIdsGetDistinctNames', 0, () => {
+      // 转义会折叠(不同 id 折出同名),hash 兜底必须让它们不互相覆盖——
+      // 这是该函数存在的核心理由
+      const a = cacheFileName('online:a/b');
+      const b = cacheFileName('online:a_b');
+      expect(a !== b).assertTrue();
+      const c = cacheFileName('online:a:b');
+      const d = cacheFileName('online:a-b');
+      expect(c !== d).assertTrue();
+    });
+    it('sameIdIsDeterministic', 0, () => {
+      // 同 id 必须稳定派生:缓存命中依赖跨进程/重启的一致性
+      const first = cacheFileName('online:ne_999');
+      for (let i = 0; i < 5; i++) {
+        expect(cacheFileName('online:ne_999')).assertEqual(first);
+      }
+    });
+    it('hashIsNonNegative', 0, () => {
+      // hash 与 0x7fffffff 相与保证非负:toString(36) 不能产出负号段
+      for (const id of ['online:x', 'online:y', 'online:z', 'a:b:c:d']) {
+        const name = cacheFileName(id);
+        expect(name.indexOf('-') < 0).assertTrue();
+      }
+    });
+    it('emptyIdHandled', 0, () => {
+      // 空串:转义后仍等于自身(无非法字符),走干净分支
+      expect(cacheFileName('')).assertEqual('.audio');
+    });
+    it('constantsAreStable', 0, () => {
+      // 常量被索引读写/对账共用,值漂移会让旧缓存全部对不上
+      expect(CACHE_FILE_SUFFIX).assertEqual('.audio');
+      expect(CACHE_INDEX_FILE).assertEqual('index.json');
     });
   });
 
