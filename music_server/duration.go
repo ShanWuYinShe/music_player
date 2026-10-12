@@ -264,7 +264,13 @@ func wavDuration(f *os.File) int64 {
 			break
 		}
 		pos += 8 + chunkLen
-		if chunkLen == 0 || chunkLen > len(head) {
+		// chunkLen==0 时 pos 仍前进 8,不构成死循环,应继续走(合法的零长
+		// chunk 会出现在 data 之前,直接 break 会丢掉后面的 data 块);
+		// 越大的声明长度(超出读窗)视为畸形,终止。
+		if chunkLen == 0 {
+			continue
+		}
+		if chunkLen > len(head) {
 			break
 		}
 	}
