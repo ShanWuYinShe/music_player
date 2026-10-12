@@ -146,6 +146,34 @@ async function uploadIdFor(file) {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// 单片上传:最多 3 次尝试(退避 1s/3s)。分片请求可能"已到达服务端但响应
+// 丢失"(网络抖动/边缘超时),这种模糊失败不能直接判失败——先查一次已收
+// 分片,若该片已在则视为成功,避免整轮上传白费。同内容重传在服务端幂等,
+// 只有"同序号内容不一致"才 409,故重试安全。
+async function sendChunk(uploadId, fileName, total, index, blob, sha, queryReceived) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const fd = new FormData();
+      fd.append('uploadId', uploadId); fd.append('fileName', fileName);
+      fd.append('total', total); fd.append('index', index); fd.append('sha256', sha);
+      fd.append('chunk', blob);
+      return await api('/admin/api/v1/library/upload-chunk', { method: 'POST', body: fd });
+    } catch (e) {
+      lastErr = e;
+      try {
+        const q = await queryReceived();
+        const received = q.received || [];
+        if (received.includes(index)) {
+          return { received: received, total: total, complete: received.length === total };
+        }
+      } catch (_) { /* 查询也失败:继续退避重试 */ }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt === 1 ? 1000 : 3000));
+    }
+  }
+  throw lastErr;
+}
+
 async function uploadChunked() {
   const f = $('bigFile').files[0];
   if (!f) return alert('先选择文件');
@@ -155,21 +183,22 @@ async function uploadChunked() {
   $('uploadProgress').textContent = '计算校验…';
   try {
     const uploadId = await uploadIdFor(f);
+    const queryReceived = () =>
+      api('/admin/api/v1/library/upload-chunk?uploadId=' + uploadId);
     // 续传:查询已收分片,跳过。
-    const q = await api('/admin/api/v1/library/upload-chunk?uploadId=' + uploadId);
+    const q = await queryReceived();
     const done = new Set(q.received || []);
     for (let i = 0; i < total; i++) {
       if (done.has(i)) continue;
       const data = await f.slice(i * CHUNK, (i + 1) * CHUNK).arrayBuffer();
       const hash = await crypto.subtle.digest('SHA-256', data);
       const sha = [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
-      const fd = new FormData();
-      fd.append('uploadId', uploadId); fd.append('fileName', f.name);
-      fd.append('total', total); fd.append('index', i); fd.append('sha256', sha);
-      fd.append('chunk', new Blob([data]));
-      const s = await api('/admin/api/v1/library/upload-chunk', { method: 'POST', body: fd });
+      const s = await sendChunk(uploadId, f.name, total, i, new Blob([data]), sha, queryReceived);
       $('uploadProgress').textContent = `分片 ${s.received.length}/${total}`;
-      if (s.complete) { $('uploadProgress').textContent = `完成:${s.saved}`; loadFiles(); return; }
+      if (s.complete) {
+        $('uploadProgress').textContent = s.saved ? `完成:${s.saved}` : '完成(已合并入库)';
+        loadFiles(); return;
+      }
     }
     $('uploadProgress').textContent = '上传结束(未触发合并,请重试最后一步)';
     loadFiles();
