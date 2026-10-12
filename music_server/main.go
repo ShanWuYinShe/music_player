@@ -344,7 +344,7 @@ func (s *musicServer) handleStream(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "stream resolve failed", http.StatusBadGateway)
 			return
 		}
-		s.netease.proxyStream(w, r, streamURL)
+		s.netease.proxyStream(w, r, streamURL, after)
 		return
 	}
 	s.mu.RLock()

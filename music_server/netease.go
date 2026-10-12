@@ -76,6 +76,35 @@ type neteaseClient struct {
 	searchCache    map[string]searchCacheEntry
 	searchFail     map[string]time.Time
 	searchInflight map[string]*searchCall
+
+	// resolveCache 是播放直链的短 TTL 缓存(key=上游歌曲 id)。播放器起播时
+	// 「探测 + 起播 + 后台整曲预取」几乎同时发生,每次 /stream/{id} 都要解析
+	// 一次直链;无缓存则同一首歌短时间内重复打上游 /song/url/v1。
+	resolveMu       sync.Mutex
+	resolveCache    map[string]resolveEntry
+	resolveInflight map[string]*resolveCall
+}
+
+// resolveCacheTTL 直链缓存有效期。上游直链带时效签名,缓存期必须远短于其
+// 实际有效期(通常几分钟到数小时),否则会拿到已过期直链、表现为播放 403。
+// 30s 只用于吸收「同一首歌的连续/并发请求」,留足安全余量。
+const resolveCacheTTL = 30 * time.Second
+
+// resolveCacheMaxEntries 直链缓存条数上限,超限整体丢弃重建(防无界增长)。
+const resolveCacheMaxEntries = 64
+
+// resolveEntry 单条直链缓存。
+type resolveEntry struct {
+	url string
+	at  time.Time
+}
+
+// resolveCall 是单飞中的一次直链解析:等 done 关闭后读 url/err;同时监听
+// ctx,调用方取消不阻塞。
+type resolveCall struct {
+	done chan struct{}
+	url  string
+	err  error
 }
 
 // searchCacheTTL 是搜索缓存有效期;searchFailCooldown 是搜索失败冷却期;
@@ -434,8 +463,61 @@ func (c *neteaseClient) searchUpstream(ctx context.Context, query string, limit 
 	return songs, nil
 }
 
-// resolveURL 调上游 /song/url/v1 解析播放直链(带时效签名,即取即用)。
+// resolveURL 解析播放直链(带时效签名)。带短 TTL 缓存 + 同曲单飞:
+// 播放器起播时「探测 + 起播 + 后台整曲预取」几乎同时发生,每次 /stream/{id}
+// 都会解析一次;无缓存则同一首歌短时间内重复打上游 /song/url/v1。
+// 失败不写缓存(上游故障/无版权不该被记住)。
 func (c *neteaseClient) resolveURL(ctx context.Context, songID string) (string, error) {
+	c.resolveMu.Lock()
+	if e, ok := c.resolveCache[songID]; ok && time.Since(e.at) < resolveCacheTTL {
+		u := e.url
+		c.resolveMu.Unlock()
+		return u, nil
+	}
+	if call, ok := c.resolveInflight[songID]; ok {
+		c.resolveMu.Unlock()
+		select {
+		case <-call.done:
+			return call.url, call.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	call := &resolveCall{done: make(chan struct{})}
+	if c.resolveInflight == nil {
+		c.resolveInflight = make(map[string]*resolveCall)
+	}
+	c.resolveInflight[songID] = call
+	c.resolveMu.Unlock()
+
+	// 领导者用脱离请求取消的 ctx 打上游（api client 自带 8s 整体超时兜底）：
+	// 客户端中途断开（切歌）不该让同一首歌的其它等待者一并失败。
+	u, err := c.resolveUpstream(context.WithoutCancel(ctx), songID)
+
+	c.resolveMu.Lock()
+	delete(c.resolveInflight, songID)
+	if err == nil {
+		if c.resolveCache == nil || len(c.resolveCache) >= resolveCacheMaxEntries {
+			c.resolveCache = make(map[string]resolveEntry, resolveCacheMaxEntries)
+		}
+		c.resolveCache[songID] = resolveEntry{url: u, at: time.Now()}
+	}
+	call.url, call.err = u, err
+	close(call.done)
+	c.resolveMu.Unlock()
+	return u, err
+}
+
+// invalidateResolve 丢弃某曲的直链缓存:上游对缓存的直链返回 4xx,说明该
+// 直链已失效(过期/防盗链),留着只会让后续请求继续拿到同一坏地址。
+func (c *neteaseClient) invalidateResolve(songID string) {
+	c.resolveMu.Lock()
+	delete(c.resolveCache, songID)
+	c.resolveMu.Unlock()
+}
+
+// resolveUpstream 实际打一次上游 /song/url/v1 并取直链。
+func (c *neteaseClient) resolveUpstream(ctx context.Context, songID string) (string, error) {
 	path := fmt.Sprintf("/song/url/v1?id=%s&level=exhigh", url.QueryEscape(songID))
 	var resp songURLData
 	if err := c.getJSON(ctx, path, &resp); err != nil {
@@ -449,7 +531,8 @@ func (c *neteaseClient) resolveURL(ctx context.Context, songID string) (string, 
 
 // proxyStream 反向代理上游音频流:透传 Range/返回头与状态码,逐块拷贝。
 // 直链域名不做白名单(签名 URL 即凭证),但仅允许 http(s) 防任意 scheme。
-func (c *neteaseClient) proxyStream(w http.ResponseWriter, r *http.Request, streamURL string) {
+// songID 用于在直链失效(上游 4xx)时丢弃缓存,避免后续请求继续拿到坏地址。
+func (c *neteaseClient) proxyStream(w http.ResponseWriter, r *http.Request, streamURL, songID string) {
 	parsed, err := url.Parse(streamURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		writeError(w, "invalid stream url", http.StatusBadGateway)
@@ -471,6 +554,10 @@ func (c *neteaseClient) proxyStream(w http.ResponseWriter, r *http.Request, stre
 		return
 	}
 	defer resp.Body.Close()
+	// 缓存的直链可能已过期/被防盗链拒绝:4xx 即丢弃缓存,后续请求重新解析。
+	if resp.StatusCode >= 400 {
+		c.invalidateResolve(songID)
+	}
 	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)

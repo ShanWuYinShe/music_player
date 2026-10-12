@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -480,5 +481,126 @@ func TestNeteaseSearchCacheAndSingleflight(t *testing.T) {
 	}
 	if n := hits.Load(); n != 2 {
 		t.Fatalf("expect 1 more upstream hit for singleflight batch, got %d total", n)
+	}
+}
+
+// TestNeteaseResolveCacheAndSingleflight 直链解析的短 TTL 缓存与同曲单飞:
+// 播放器起播时「探测 + 起播 + 后台整曲预取」几乎同时发生,同一首歌不该重复
+// 打上游 /song/url/v1。
+func TestNeteaseResolveCacheAndSingleflight(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/song/url/v1" {
+			hits.Add(1)
+			time.Sleep(100 * time.Millisecond) // 放大并发重叠窗口
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"url":"http://cdn.example/a.mp3","code":200}]}`))
+	}))
+	defer srv.Close()
+	c := newNeteaseClient(srv.URL, "", "")
+	ctx := context.Background()
+
+	u1, err := c.resolveURL(ctx, "111")
+	if err != nil || u1 != "http://cdn.example/a.mp3" {
+		t.Fatalf("first resolve: url=%q err=%v", u1, err)
+	}
+	// TTL 内二次解析走缓存,不再打上游。
+	if _, err := c.resolveURL(ctx, "111"); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("expect 1 upstream hit within TTL, got %d", n)
+	}
+
+	// 并发单飞:8 路同曲同时只打一次上游。
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = c.resolveURL(ctx, "222")
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("expect 1 more upstream hit for singleflight batch, got %d total", n)
+	}
+}
+
+// TestNeteaseResolveErrorNotCached 上游失败/无直链不写缓存:故障不该被记住,
+// 否则无版权曲会被永久缓存成 404,后续即使上游恢复也放不了。
+func TestNeteaseResolveErrorNotCached(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"url":"","code":404}]}`)) // 无版权:无直链
+	}))
+	defer srv.Close()
+	c := newNeteaseClient(srv.URL, "", "")
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if _, err := c.resolveURL(ctx, "333"); !errors.Is(err, errNoStream) {
+			t.Fatalf("call %d: err=%v, want errNoStream", i, err)
+		}
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("errNoStream must not be cached, got %d upstream hits", n)
+	}
+}
+
+// TestNeteaseResolveInvalidate 失效后必须重新解析。
+func TestNeteaseResolveInvalidate(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"url":"http://cdn.example/b.mp3","code":200}]}`))
+	}))
+	defer srv.Close()
+	c := newNeteaseClient(srv.URL, "", "")
+	ctx := context.Background()
+	if _, err := c.resolveURL(ctx, "444"); err != nil {
+		t.Fatal(err)
+	}
+	c.invalidateResolve("444")
+	if _, err := c.resolveURL(ctx, "444"); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("expect re-resolve after invalidate, got %d hits", n)
+	}
+}
+
+// TestNeteaseProxyStreamDropsStaleCache 代理收到上游 4xx(直链过期/防盗链)
+// 时丢弃缓存:否则后续请求会继续拿到同一坏地址。
+func TestNeteaseProxyStreamDropsStaleCache(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gone", http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	c := newNeteaseClient(upstream.URL, "", "")
+	c.resolveMu.Lock()
+	c.resolveCache = map[string]resolveEntry{"555": {url: upstream.URL + "/audio.mp3", at: time.Now()}}
+	c.resolveMu.Unlock()
+
+	rec := httptest.NewRecorder()
+	c.proxyStream(rec, httptest.NewRequest(http.MethodGet, "/stream/ne_555", nil),
+		upstream.URL+"/audio.mp3", "555")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 passed through", rec.Code)
+	}
+	c.resolveMu.Lock()
+	_, still := c.resolveCache["555"]
+	c.resolveMu.Unlock()
+	if still {
+		t.Fatal("4xx must drop the cached stream url")
 	}
 }
