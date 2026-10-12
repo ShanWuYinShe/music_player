@@ -26,6 +26,42 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - UI 相关改动在真机上验证时，注意 V2 状态不驱动渲染的已知坑（见 skill `music-app-platform-ui`）——**界面没更新不一定是没装上**
 - 手机息屏会断开无线调试：重连成功后立刻跑安装，并提醒用户装机期间别锁屏
 
+## 本地单测（isLocalTest）要求 PATH 含 /usr/sbin（2026-10-12 实测）
+
+`hvigorw ... -p isLocalTest=true test` 会在 `GenerateUnitTestResult` 任务里
+调 `@ohos/coverage` 的 `findPort` 探测本地测试端口，**内部依赖 `netstat`/`lsof`**——
+macOS 上这两个在 **`/usr/sbin`**。
+
+**症状极具误导性**（报错完全指向代码，实际是 PATH 问题）：
+
+```
+> hvigor ERROR: Failed :entry:default@GenerateUnitTestResult...
+> hvigor ERROR: 00305010 Syntax Error
+Error Message: Cannot read properties of undefined (reading 'toString')
+  > Check whether undefined attributes or methods are used in the hvigorconfig.ts and hvigorfile.ts files.
+```
+
+加 `--stacktrace` 才能看到真因：
+
+```
+at findPort (.../@ohos/coverage/lib/src/commandLine/localTest/portutil.js:30:28)
+at executeCoverageTest (.../previewer.js:113:45)
+```
+
+**误判成本很高**：该错误会让人去查代码语法、hvigorfile 配置、清 `.test`/`build`/
+`.hvigor` 增量状态、甚至怀疑主检出损坏——**全部无效**。判据：看到
+`00305010 Syntax Error` + `Cannot read properties of undefined (reading 'toString')`
+且伴随 `GenerateUnitTestResult` 失败时，**先检查 PATH 是否含 `/usr/sbin`**。
+
+```bash
+# 正确的完整 PATH（脚本/CI/非交互 shell 里尤其要注意）
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+```
+
+> 注意：交互式登录 shell 通常已含 `/usr/sbin`，所以在自己终端里手跑常常正常，
+> 而**用受限 PATH 的程序化调用（agent/CI/脚本）会稳定复现**——排查时容易误以为
+> "代码有问题"或"环境玄学"。
+
 ## worktree 内构建：HVIGOR_USER_HOME 的致命坑（2026-10-12 实测）
 
 **worktree 无 `oh_modules`/`.hvigor`（均被 gitignore），先 `ohpm install`。**
