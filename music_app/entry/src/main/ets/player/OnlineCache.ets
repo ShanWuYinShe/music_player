@@ -3,8 +3,8 @@ import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
-import { evictOrder } from '../source/OnlineApi';
 import { cacheFileName, CACHE_INDEX_FILE as INDEX_FILE } from './CacheFileName';
+import { planLegacyRenames, planOrphans, planMissingKeys, planEviction } from './CachePolicy';
 
 const TAG = 'OnlineCache';
 // 索引 JSON 解码用 TextDecoder：String.fromCharCode(...spread) 会把整个
@@ -316,24 +316,18 @@ export class OnlineCache {
   /** 旧命名迁移：短 hash 引入前的缓存名是 `${safe}.audio`（无 hash 后缀），
    * 逐个改名到当前命名——否则升级后旧缓存全部对不上索引、被当孤儿清空 */
   private migrateLegacyNames(names: Set<string>): void {
-    for (const key of this.index.keys()) {
-      const safe = key.replace(/[^a-zA-Z0-9_-]/g, '_');
-      if (safe === key) {
-        continue;
-      }
-      const legacy = `${safe}.audio`;
-      if (!names.has(legacy)) {
-        continue;
-      }
-      const current = this.filePath(key).split('/').pop() ?? '';
+    // 决策（哪些该改名/该删旧名）由纯函数给出并已单测；此处只做 IO
+    const ops = planLegacyRenames(Array.from(this.index.keys()), names,
+      (key: string) => cacheFileName(key));
+    for (const op of ops) {
       try {
-        if (names.has(current)) {
-          fs.unlinkSync(`${this.dir}/${legacy}`); // 新名已在（重下过），旧名作废
+        if (op.deleteOld) {
+          fs.unlinkSync(`${this.dir}/${op.from}`); // 新名已在（重下过），旧名作废
         } else {
-          fs.renameSync(`${this.dir}/${legacy}`, `${this.dir}/${current}`);
-          names.add(current);
+          fs.renameSync(`${this.dir}/${op.from}`, `${this.dir}/${op.to}`);
+          names.add(op.to);
         }
-        names.delete(legacy);
+        names.delete(op.from);
       } catch (err) {
         // 迁移失败不影响功能：该文件会被当孤儿清掉，缓存 miss 重下
       }
@@ -345,15 +339,20 @@ export class OnlineCache {
     try {
       const names = new Set<string>(fs.listFileSync(this.dir));
       this.migrateLegacyNames(names);
+      // 引用集：索引各条目对应的当前文件名（对账时从盘上集合扣除）
+      const referenced = new Set<string>();
       for (const key of this.index.keys()) {
-        const segs = this.filePath(key).split('/');
-        names.delete(segs[segs.length - 1]);
-        if (!fs.accessSync(this.filePath(key))) {
-          this.index.delete(key);
-        }
+        referenced.add(cacheFileName(key));
       }
-      names.delete(INDEX_FILE);
-      for (const orphan of names) {
+      // 索引里文件已丢失的条目 → 丢弃（决策纯函数、已单测）
+      const keys: string[] = Array.from(this.index.keys());
+      const missing = planMissingKeys(keys,
+        (key: string) => fs.accessSync(`${this.dir}/${cacheFileName(key)}`));
+      for (const key of missing) {
+        this.index.delete(key);
+      }
+      // 在盘不在索引（且非索引文件）→ 孤儿，删除
+      for (const orphan of planOrphans(names, referenced, INDEX_FILE)) {
         try {
           fs.unlinkSync(`${this.dir}/${orphan}`);
         } catch (err) {
@@ -368,28 +367,18 @@ export class OnlineCache {
 
   /** 超限淘汰：按 evictOrder 序删除（非钉住最旧在前、钉住垫后；在途不参与） */
   private evictIfNeeded(): void {
-    let total = 0;
-    for (const entry of this.index.values()) {
-      total += entry.size;
+    // 淘汰计划（顺序与截止点）由纯函数给出并已单测；此处只做 IO
+    const plan = planEviction(this.index, this.pinned, this.inflight, MAX_CACHE_BYTES);
+    if (!plan.overLimit) {
+      return; // 未超限不落盘（与原实现一致）
     }
-    if (total <= MAX_CACHE_BYTES) {
-      return;
-    }
-    for (const key of evictOrder(this.index, this.pinned, this.inflight)) {
-      if (total <= MAX_CACHE_BYTES) {
-        break;
-      }
-      const entry = this.index.get(key);
-      if (!entry) {
-        continue;
-      }
+    for (const key of plan.evict) {
       try {
         if (fs.accessSync(this.filePath(key))) {
           fs.unlinkSync(this.filePath(key));
         }
       } catch (err) {
       }
-      total -= entry.size;
       this.index.delete(key);
       hilog.info(DOMAIN, TAG, 'evicted: %{public}s', key);
     }

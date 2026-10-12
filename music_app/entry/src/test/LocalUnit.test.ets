@@ -24,6 +24,7 @@ import { parseFileNameMeta, LOCAL_ARTIST_FALLBACK } from '../main/ets/library/Fi
 import { cacheFileName, CACHE_FILE_SUFFIX, CACHE_INDEX_FILE } from '../main/ets/player/CacheFileName';
 import { normalizeImportName, uniqueImportName, songIdFor } from '../main/ets/library/ImportNaming';
 import { extrapolatePosition, extrapolateDisplayPosition } from '../main/ets/common/FormExtrapolate';
+import { planOrphans, planMissingKeys, planLegacyRenames, planEviction } from '../main/ets/player/CachePolicy';
 import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
@@ -1123,6 +1124,105 @@ export default function LocalUnitSuite() {
     });
   });
 
+  // 在线缓存的对账/淘汰决策（OnlineCache.reconcile/evictIfNeeded 的纯函数形态）：
+  // 决定「已下载音频的生死」——判错会删掉仍被索引引用的缓存（用户已下整曲丢失）
+  // 或误伤钉住（收藏）条目。此前零测试覆盖。
+  describe('CachePolicyTest', () => {
+    it('orphansAreDiskMinusReferenced', 0, () => {
+      const disk = new Set<string>(['a.audio', 'b.audio', 'index.json']);
+      const referenced = new Set<string>(['a.audio']);
+      const orphans = planOrphans(disk, referenced, 'index.json');
+      expect(orphans.length).assertEqual(1);
+      expect(orphans[0]).assertEqual('b.audio'); // 索引文件自身不算孤儿
+    });
+    it('orphansEmptyWhenAllReferenced', 0, () => {
+      const disk = new Set<string>(['a.audio', 'index.json']);
+      expect(planOrphans(disk, new Set<string>(['a.audio']), 'index.json').length).assertEqual(0);
+    });
+    it('missingKeysDetectsVanishedFiles', 0, () => {
+      const keys = ['k1', 'k2', 'k3'];
+      const exists = new Set<string>(['k1', 'k3']);
+      const missing = planMissingKeys(keys, (k: string) => exists.has(k));
+      expect(missing.length).assertEqual(1);
+      expect(missing[0]).assertEqual('k2');
+    });
+    it('legacyRenameWhenOnlyOldNameOnDisk', 0, () => {
+      // online:ne_1 → 旧名 online_ne_1.audio 在盘、新名不在 → 应改名
+      const disk = new Set<string>(['online_ne_1.audio']);
+      const ops = planLegacyRenames(['online:ne_1'], disk, (k: string) => cacheFileName(k));
+      expect(ops.length).assertEqual(1);
+      expect(ops[0].from).assertEqual('online_ne_1.audio');
+      expect(ops[0].deleteOld).assertFalse();
+      expect(ops[0].to).assertEqual(cacheFileName('online:ne_1'));
+    });
+    it('legacyDeletesOldWhenNewNamePresent', 0, () => {
+      // 新名已在（重下过）→ 旧名作废直接删，不做改名
+      const key = 'online:ne_1';
+      const current = cacheFileName(key);
+      const disk = new Set<string>(['online_ne_1.audio', current]);
+      const ops = planLegacyRenames([key], disk, (k: string) => cacheFileName(k));
+      expect(ops.length).assertEqual(1);
+      expect(ops[0].deleteOld).assertTrue();
+    });
+    it('legacySkipsCleanKeys', 0, () => {
+      // 干净 id 命名从未变过：即便盘上有 <id>.audio 也不迁移
+      const disk = new Set<string>(['abc.audio']);
+      expect(planLegacyRenames(['abc'], disk, (k: string) => cacheFileName(k)).length).assertEqual(0);
+    });
+    it('legacySkipsWhenNoOldFile', 0, () => {
+      // 需要迁移的 key 但盘上无旧名文件 → 无操作
+      const disk = new Set<string>(['other.audio']);
+      expect(planLegacyRenames(['online:ne_1'], disk, (k: string) => cacheFileName(k)).length).assertEqual(0);
+    });
+    it('legacyAppliesSequentially', 0, () => {
+      // 逐条按序模拟：第一条改名后产生的文件会进入集合,影响后续判定。
+      // 两个 key 折出同一旧名时,只应有一条 op(第二条看到的旧名已被消费)
+      const keyA = 'online:a/b';   // safe=online_a_b
+      const keyB = 'online:a_b';   // safe=online_a_b（折叠同名）
+      const disk = new Set<string>(['online_a_b.audio']);
+      const ops = planLegacyRenames([keyA, keyB], disk, (k: string) => cacheFileName(k));
+      expect(ops.length).assertEqual(1);
+      expect(ops[0].key).assertEqual(keyA);
+    });
+    it('evictionNoopUnderLimit', 0, () => {
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('a', { size: 10, lastAccess: 1 });
+      const plan = planEviction(entries, new Set<string>(), new Set<string>(), 100);
+      expect(plan.overLimit).assertFalse();
+      expect(plan.evict.length).assertEqual(0);
+    });
+    it('evictionStopsOnceUnderLimit', 0, () => {
+      // 总量 30、上限 15 → 只需删最旧一条(10) 仍超限? 15 → 删两条到 10
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('old', { size: 10, lastAccess: 1 });
+      entries.set('mid', { size: 10, lastAccess: 2 });
+      entries.set('new', { size: 10, lastAccess: 3 });
+      const plan = planEviction(entries, new Set<string>(), new Set<string>(), 15);
+      expect(plan.overLimit).assertTrue();
+      // 删最旧两条即降到 10 <= 15,第三条不动
+      expect(plan.evict.length).assertEqual(2);
+      expect(plan.evict[0]).assertEqual('old');
+      expect(plan.evict[1]).assertEqual('mid');
+    });
+    it('evictionSparesPinnedUntilNecessary', 0, () => {
+      // 钉住(收藏)垫后：非钉住够用时不碰钉住
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('pinned', { size: 10, lastAccess: 1 }); // 最旧但被钉住
+      entries.set('free', { size: 10, lastAccess: 2 });
+      const plan = planEviction(entries, new Set<string>(['pinned']), new Set<string>(), 10);
+      expect(plan.evict.length).assertEqual(1);
+      expect(plan.evict[0]).assertEqual('free');
+    });
+    it('evictionSkipsInflight', 0, () => {
+      // 在途下载不参与淘汰(删了会打断正在写的文件)
+      const entries = new Map<string, TestCacheEntry>();
+      entries.set('downloading', { size: 10, lastAccess: 1 });
+      entries.set('idle', { size: 10, lastAccess: 2 });
+      const plan = planEviction(entries, new Set<string>(), new Set<string>(['downloading']), 10);
+      expect(plan.evict.length).assertEqual(1);
+      expect(plan.evict[0]).assertEqual('idle');
+    });
+  });
   describe('OnlineApiExtraTest', () => {
     const base = 'https://music.example/api/v1';
     it('parseOnlineSongsSkipsBadEntries', 0, () => {
