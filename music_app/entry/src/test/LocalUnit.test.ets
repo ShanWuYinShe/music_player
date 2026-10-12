@@ -23,6 +23,7 @@ import { parseTlenMs } from '../main/ets/library/Id3ParserCore';
 import { parseFileNameMeta, LOCAL_ARTIST_FALLBACK } from '../main/ets/library/FileNameMeta';
 import { cacheFileName, CACHE_FILE_SUFFIX, CACHE_INDEX_FILE } from '../main/ets/player/CacheFileName';
 import { normalizeImportName, uniqueImportName, songIdFor } from '../main/ets/library/ImportNaming';
+import { extrapolatePosition, extrapolateDisplayPosition } from '../main/ets/common/FormExtrapolate';
 import { fftMagnitudes, isPowerOfTwo } from '../main/ets/common/Fft';
 
 /** 构造测试歌曲记录 */
@@ -1057,6 +1058,68 @@ export default function LocalUnitSuite() {
       expect(songIdFor('a.mp3', 100)).assertEqual('a.mp3_100');
       expect(songIdFor('a.mp3', 200)).assertEqual('a.mp3_200');
       expect(songIdFor('a.mp3', 100) === songIdFor('a.mp3', 100)).assertTrue();
+    });
+  });
+
+  // 桌面卡片进度外推（AppStore.syncFormState 与 MusicCardWide.dispMs 两端
+  // 共用的纯函数）：真机后台 timeUpdate 停报时靠墙钟补齐,两级外推若不逐字
+  // 一致,主进程与卡片会显示不同进度。
+  describe('FormExtrapolateTest', () => {
+    const FRESH = 2000; // 主进程新鲜度窗口 = FORM_PROGRESS_PUSH_MS * 2
+
+    it('mainAddsDeltaWithinWindow', 0, () => {
+      expect(extrapolatePosition(1000, 5000, 6000, FRESH)).assertEqual(2000);
+      expect(extrapolatePosition(0, 100, 1100, FRESH)).assertEqual(1000);
+    });
+    it('mainIgnoresStaleAnchor', 0, () => {
+      // 锚点过旧(长时间暂停后恢复/冷启动首推):两次采样隔着非播放期,
+      // 墙钟差不是播放增量,必须放弃外推——否则卡片一次性跳过整段暂停
+      expect(extrapolatePosition(1000, 0, 60000, FRESH)).assertEqual(1000);
+      expect(extrapolatePosition(1000, 5000, 9000, FRESH)).assertEqual(1000);
+    });
+    it('mainIgnoresClockRollback', 0, () => {
+      // 墙钟回拨:宁停不进,不产生负增量
+      expect(extrapolatePosition(1000, 5000, 4000, FRESH)).assertEqual(1000);
+      expect(extrapolatePosition(1000, 5000, 5000, FRESH)).assertEqual(1000);
+    });
+    it('mainNoAnchorMeansNoExtrapolation', 0, () => {
+      // 从未采样(0):原样返回,等秒推重新积累
+      expect(extrapolatePosition(1000, 0, 9999, FRESH)).assertEqual(1000);
+    });
+    it('cardAddsDeliveryDelay', 0, () => {
+      // 推送到达有延迟时补齐:pos + (now - anchorAt)
+      expect(extrapolateDisplayPosition(2000, 6000, 6500, 200000)).assertEqual(2500);
+      expect(extrapolateDisplayPosition(2000, 6000, 6000, 200000)).assertEqual(2000);
+    });
+    it('cardClampsToDuration', 0, () => {
+      // 夹在时长内:外推越界不显示超过总时长
+      // 199900 + (6500-6000) = 200400 > 200000 → 夹到 200000
+      expect(extrapolateDisplayPosition(199900, 6000, 6500, 200000)).assertEqual(200000);
+      // 未越界不夹取:199000 + 500 = 199500 < 200000 → 原样返回
+      expect(extrapolateDisplayPosition(199000, 6000, 6500, 200000)).assertEqual(199500);
+      // 时长未知(0)不夹取
+      expect(extrapolateDisplayPosition(199000, 6000, 6500, 0)).assertEqual(199500);
+    });
+    it('cardNoAnchorOrBadClock', 0, () => {
+      // 无快照原样返回;锚点晚于当前(时钟偏差/乱序)不加成负增量
+      expect(extrapolateDisplayPosition(2000, 0, 9999, 200000)).assertEqual(2000);
+      expect(extrapolateDisplayPosition(2000, 6000, 5000, 200000)).assertEqual(2000);
+    });
+    it('twoStageCompositionDoesNotDoubleCount', 0, () => {
+      // 核心不变量:主进程外推(currentTime + (T - T_prev)) + 卡片外推
+      // (pos + (now - T)) 合成后必须等于 currentTime + (now - T_prev),
+      // 即「当前播放位置 + 自上次锚点以来的真实经过时间」——不多不少。
+      const currentTime = 1000;
+      const tPrev = 5000;
+      const t = 6000;      // 主进程采样时刻
+      const now = 6800;    // 卡片渲染时刻
+      const duration = 200000;
+      const pushed = extrapolatePosition(currentTime, tPrev, t, FRESH);
+      const displayed = extrapolateDisplayPosition(pushed, t, now, duration);
+      const expected = currentTime + (now - tPrev);
+      expect(displayed).assertEqual(expected);
+      expect(pushed).assertEqual(2000); // 1000 + (6000-5000)
+      expect(displayed).assertEqual(2800); // 2000 + (6800-6000)
     });
   });
 

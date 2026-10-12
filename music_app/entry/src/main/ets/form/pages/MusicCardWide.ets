@@ -1,4 +1,5 @@
 import { firstGlyph } from '../../common/TextFormat';
+import { extrapolateDisplayPosition } from '../../common/FormExtrapolate';
 import { cardPlayAction } from '../CardActions';
 
 let cardStorageWide = new LocalStorage();
@@ -33,13 +34,15 @@ struct MusicCardWide {
   }
 
   /** 显示位置（ms）：锚点 + 墙钟增量，夹在时长内。每次推送更新
-   * LocalStorageProp 后 build 重算，推送间隙的到达延迟由增量补齐 */
+   * LocalStorageProp 后 build 重算，推送间隙的到达延迟由增量补齐。
+   * 规则与主进程侧共用 FormExtrapolate.extrapolateDisplayPosition——两端
+   * 算法逐字一致，否则同一时刻主进程与卡片显示不同进度 */
   private dispMs(): number {
-    if (!this.playing || this.anchorAt <= 0) {
+    if (!this.playing) {
       return this.positionMs;
     }
-    const pos = this.positionMs + Math.max(0, Date.now() - this.anchorAt);
-    return this.durationMs > 0 && pos > this.durationMs ? this.durationMs : pos;
+    return extrapolateDisplayPosition(this.positionMs, this.anchorAt,
+      Date.now(), this.durationMs);
   }
 
   build() {

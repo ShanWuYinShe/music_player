@@ -13,6 +13,7 @@ import { effectiveBaseUrl, isOnlineId } from '../source/OnlineApi';
 import { SongRecord } from '../model/Song';
 import { UserData } from './UserData';
 import { writeFormState, FormPlaybackState, readFormIds, CARD_ACTION_EVENT, toCardPayload } from '../common/FormStateFile';
+import { extrapolatePosition } from '../common/FormExtrapolate';
 import { MicSpectrum } from '../common/MicSpectrum';
 
 const TAG = 'AppStore';
@@ -276,15 +277,13 @@ export class AppStore {
     // 锚点补齐增量卡片进度才走准；算完即把本次采样设为新锚点（暂停/切歌
     // 事件走不到外推分支、顺带重锚，不会把暂停期墙钟差计入）
     const sampledAt = Date.now();
-    let position = this.player.currentTime;
-    if (this.player.isPlaying && this.formTickBaseAt > 0) {
-      // 新鲜度门槛：锚点过旧（长时间暂停后恢复/冷启动首推）说明两次采样
-      // 之间隔着非播放期，墙钟差不是播放增量，放弃外推等秒推重新积累
-      const delta = sampledAt - this.formTickBaseAt;
-      if (delta > 0 && delta <= FORM_PROGRESS_PUSH_MS * 2) {
-        position += delta;
-      }
-    }
+    // 外推规则与卡片侧共用同一纯函数（FormExtrapolate）：两端算法必须逐字
+    // 一致，否则同一时刻主进程与卡片会显示不同进度。isPlaying 门控留在此处
+    // （暂停/切歌事件不走外推分支，顺带把采样重锚，不把暂停期墙钟差计入）
+    let position = this.player.isPlaying
+      ? extrapolatePosition(this.player.currentTime, this.formTickBaseAt,
+        sampledAt, FORM_PROGRESS_PUSH_MS * 2)
+      : this.player.currentTime;
     this.formTickBaseAt = sampledAt;
     const song = this.player.currentSong;
     const duration = this.player.duration;
