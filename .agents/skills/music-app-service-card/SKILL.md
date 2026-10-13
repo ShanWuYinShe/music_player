@@ -47,6 +47,39 @@ description: music_app 桌面服务卡片与趣味特性：2x2/2x4 卡片架构�
 - form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
   window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
 
+## 覆盖安装后旧卡片白块（2026-10-13 模拟器实测）
+
+`hdc install -r` 覆盖安装新 HAP 后，桌面上**已存在的卡片实例会永久变白**：
+FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按钮结构），
+但渲染表面已失效——截图纯白、点击按钮无任何响应（postCardAction 不触发）。
+
+- 根因链：覆盖安装触发 formrenderservice 重启，旧实例的渲染连接随之失效；
+  框架**不会**对已存在的实例重新回调 onAddForm（form_ids.json 不更新、无初始
+  FormBindingData），因此无法自愈，重启模拟器也无效。
+- 修复：长按卡片 → 移除 → 长按应用图标 → 「卡片」→ 重新添加。新实例一切正常。
+- 排障判据：桌面卡片白块时先 `uitest dumpLayout`——节点树在但截图白 = 渲染
+  表面失效（重加即可）；节点树都没有 = FormAbility 未执行（查进程与 hilog）。
+- 对用户的影响：App 升级后老用户桌面卡片会白块，需手动移除重加。若要根治，
+  需在应用更新后主动触发卡片刷新（formProvider.updateForm 或 requestForm），
+  值得作为后续改进项评估。
+
+## 实机验证方法与结论（2026-10-13 模拟器 Pura 90 Pro 实测）
+
+- **按钮热区**：`hdc shell hilog -r` 清缓冲 → `uinput -T -c x y` 点按钮 →
+  `hilog -x | grep "card action published"`，FormAbility 会记录每个动作。
+  已实测：responseRegion 40vp 外扩生效（图标左缘外 15px/右缘外 12px 的点击
+  均触发对应动作），热区外 33px 的点击不触发（负对照）——0d4e41a 的热区改动
+  验证通过。
+- **点击坐标**：从 `uitest dumpLayout` 的 bounds 取中心即可，与 uinput 坐标
+  系一致；密度 3.5（91px/26vp）。
+- **accessibilityText 无法经 dumpLayout 验证**：该工具不导出此属性（应用内
+  已有的 a11y 按钮同样不显示），AccessibilityManagerService 也无元素级树
+  （无屏幕朗读客户端时）。完整验证需开启屏幕朗读后实测。
+- **模拟器冷启动后应用会被回收**（未播放、无长驻任务时），但卡片按钮的
+  message 动作仍可独立触发 FormExtensionAbility，不影响热区验证。
+- 模拟器启动需放开权限的会话（`~/.Huawei/Emulator` 写入）；启动后设备为
+  `127.0.0.1:5555`。
+
 ## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
 
 - **麦克风律动**（`common/MicSpectrum.ets` + `common/Fft.ets`）：设置页开关
