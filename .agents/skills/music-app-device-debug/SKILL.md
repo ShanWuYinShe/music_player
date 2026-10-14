@@ -62,10 +62,11 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 > 而**用受限 PATH 的程序化调用（agent/CI/脚本）会稳定复现**——排查时容易误以为
 > "代码有问题"或"环境玄学"。
 
-## worktree 内构建：HVIGOR_USER_HOME 的致命坑（2026-10-12 实测）
+## worktree 内构建（2026-10-14 起无需重定向 hvigor 缓存）
 
 **worktree 无 `oh_modules`/`.hvigor`（均被 gitignore），先 `ohpm install`。**
-沙盒拦 `~/.hvigor` 写入时用 `HVIGOR_USER_HOME` 重定向，**并把该目录指向
+`~/.hvigor`、`~/.ohpm` 已由 DSH sandbox-extra-roots 放行（2026-10-14 实测），沙盒内直接构建即可；
+未配插件的机器才需 `HVIGOR_USER_HOME` 重定向，**并把该目录指向
 `.workwork/`（workspace 中间产物区），不要指向 worktree 自身目录**：
 
 ```bash

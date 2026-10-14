@@ -27,7 +27,7 @@
 - hvigor/ohpm/node 均用 DevEco 内置：`/Applications/DevEco-Studio.app/Contents/tools/...`
 - hvigorw 打包需 `JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home`（仅 hvigor 命令需要）且 `DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk`（本机 26.0.0）
 - 模拟器 CLI：`/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator -list|-start <name>|-stop <name>`
-- **模拟器数据目录在 `~/.Huawei/Emulator/deployed/`**（2026-10 实测）：受限沙盒内 `-start` 会报 `hmos_make_ext4fs_from_dir: open: Operation not permitted` 后卡死，该目录无重定向配置面，需在放开权限的会话中启动；启动后设备为 `127.0.0.1:5555`；`-stop` 可能 hang，直接 `pkill -9 -f Emulator` 清场
+- **模拟器数据目录在 `~/.Huawei/Emulator/deployed/`**：已由 DSH sandbox-extra-roots 放行（2026-10-14 实测：受限沙盒内 `-start` 约 10s 就绪、`hdc list targets` 出现 `127.0.0.1:5555`、qcow2 正常写入）；启动后设备为 `127.0.0.1:5555`；`-stop` 可能 hang，直接 `pkill -9 -f Emulator` 清场
 - hdc：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`
 - 模拟器可安装未签名 HAP，但运行时页面白屏；已配置 DevEco 自动签名（build-profile.json5 的 signingConfigs，密码为本机加密串，仅本机可用），命令行构建自动产出 `entry-default-signed.hap`
 - **一键签名构建安装**：`tools/auto_sign.sh`（仓库根下）——校验签名材料存在/有效期/设备绑定后，命令行构建 signed HAP，`install` 参数再安装+启动到已连接设备；签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名生成、有效期一年，材料有效期内全程无需打开 IDE；材料缺失/过期/新设备未绑定时脚本会打印指引，只需去 IDE 点一次「Automatically generate signature」重新生成；签名材料是否存在以 `tools/auto_sign.sh` 的校验结果为准（2026-09 曾核实本机材料缺失过一轮，勿凭本记录断定现状）
