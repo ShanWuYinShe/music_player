@@ -274,7 +274,9 @@ export struct PlayerPage {
           Blank()
           Column()
             .width('100%')
-            .height(380)
+            // 520 而非 380：控制面板全高约 500vp，380 盖不住歌名区——
+            // 亮色 shader 波及歌名时对比骤降（视觉二轮审查）
+            .height(520)
             .linearGradient({
               angle: 0,
               colors: [[$r('app.color.viz_fade_strong'), 0], [$r('app.color.viz_fade_clear'), 1]]

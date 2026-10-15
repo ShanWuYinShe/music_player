@@ -38,11 +38,15 @@
     },
     {
       "name": "accent_hi",
-      "value": "#C44A33"
+      "value": "#CD5438"
     },
     {
       "name": "control_line",
       "value": "#00E7E1D0"
+    },
+    {
+      "name": "paper_warm_veil",
+      "value": "#26F3EFE4"
     },
     {
       "name": "on_accent",

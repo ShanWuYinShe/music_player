@@ -67,6 +67,9 @@ export struct CoverArt {
       .height('100%')
       .borderRadius(this.radius)
       .backgroundColor($r('app.color.surface_alt'))
+      // 发丝边框勾出占位轮廓：surface_alt 与纸底明度差小，无边界时
+      // 占位像贴在纸上的平面剪纸（视觉二轮审查）；line 色轻描即可
+      .border({ width: 0.5, color: $r('app.color.line') })
       .justifyContent(FlexAlign.Center)
     }
   }

@@ -77,6 +77,18 @@ export struct SettingsPage {
           .backgroundColor(dayPhaseOverlay())
           .position({ x: 0, y: 0 })
           .hitTestBehavior(HitTestMode.None)
+        // 顶部暖纸晕染：首页有卷首山水暖墨衬底，本页卡片大白面多、
+        // 缺暖色对比时罩色会显冷灰（视觉二轮审查发现），顶部铺一层
+        // 与首页纸色同源的淡晕拉回同一温度
+        Column()
+          .width('100%')
+          .height(220)
+          .position({ x: 0, y: 0 })
+          .hitTestBehavior(HitTestMode.None)
+          .linearGradient({
+            angle: 180,
+            colors: [[$r('app.color.paper_warm_veil'), 0], ['#00F3EFE4', 1]]
+          })
       }
       .width('100%')
       .height('100%')
@@ -266,7 +278,7 @@ export struct SettingsPage {
             .fontSize(16)
             .fontColor($r('app.color.ink'))
           Text(`v${this.appVersion} · 收藏 · 最近播放 · 定时关闭 · 锁屏控制`)
-            .fontSize(12)
+            .fontSize(11)
             .fontColor($r('app.color.ink_soft'))
           Text(`服务端 ${this.serverVersion}`)
             .fontSize(12)
