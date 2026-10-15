@@ -313,11 +313,13 @@ export struct PlayerPage {
             })
             .bindSheet(this.shareShow, this.ShareSheet(), {
               // 分享半模态：预览 + 安全控件保存（SaveButton 临时授权写相册，
-              // 免申请受限的 WRITE_IMAGEVIDEO 权限）
+              // 免申请受限的 WRITE_IMAGEVIDEO 权限）。恒暗底同播放队列 sheet——
+              // 自适应 surface 在恒暗舞台上弹出割裂；标题自绘、关闭钮自绘
+              // （系统 title 字色与 showClose 位置均不受控，showClose 默认值
+              // 即 true 必须显式 false，省略会与自绘钮重叠——真机实测）
               detents: [SheetSize.MEDIUM, SheetSize.LARGE],
-              showClose: true,
-              backgroundColor: $r('app.color.surface'),
-              title: { title: '分享歌曲卡片' },
+              showClose: false,
+              backgroundColor: $r('app.color.viz_card_bg'),
               onDisappear: (): void => {
                 this.shareShow = false;
               }
@@ -905,6 +907,24 @@ export struct PlayerPage {
   @Builder
   ShareSheet() {
     Column({ space: 16 }) {
+      // 自绘标题行（系统 title 字色随系统深浅不受控）：排印大字 +
+      // 同轴自绘关闭钮，样式与播放队列 sheet 一致
+      Row({ space: 10 }) {
+        Text('分享歌曲卡片')
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.viz_fg'))
+        Blank()
+        SymbolGlyph($r('sys.symbol.xmark'))
+          .fontSize(18)
+          .fontColor([$r('app.color.viz_fg_soft')])
+          .padding(11)
+          .accessibilityText('关闭分享卡片')
+          .onClick(() => {
+            this.shareShow = false;
+          })
+      }
+      .width('100%')
       // 预览卡片（快照即截它；id 是 componentSnapshot 的定位锚）
       Column({ space: 14 }) {
         if (this.song !== null && this.song.coverPath !== '') {
