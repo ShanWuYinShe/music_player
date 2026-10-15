@@ -368,7 +368,8 @@ struct Index {
             })
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 8, bottom: 2 })
+        // top 14：与卷首山水晕染下缘拉开呼吸（三轮复审：过近显挤）
+        .padding({ left: 20, right: 20, top: 14, bottom: 2 })
 
         // 列表头（章节题注）：左侧「N 首」计数，右侧排序入口（内容签语义，
         // 在线列表为服务端顺序无排序）

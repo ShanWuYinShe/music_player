@@ -320,6 +320,9 @@ export struct PlayerPage {
               detents: [SheetSize.MEDIUM, SheetSize.LARGE],
               showClose: false,
               backgroundColor: $r('app.color.viz_card_bg'),
+              // 系统默认遮罩对亮背景压暗不足，浅色封面舞台会「半露」
+              // 在 sheet 上沿（视觉三轮复审）——显式加深统一沉浸感
+              maskColor: '#A6000000',
               onDisappear: (): void => {
                 this.shareShow = false;
               }
@@ -556,6 +559,8 @@ export struct PlayerPage {
       // 标题不用系统 title（其字色随系统深浅不受控），QueueSheet
       // 内自绘标题行
       backgroundColor: $r('app.color.viz_card_bg'),
+      // 与分享 sheet 同款遮罩：sheet 弹窗沉浸规范统一
+      maskColor: '#A6000000',
       onDisappear: (): void => {
         this.isQueueOpen = false;
       }
@@ -732,7 +737,8 @@ export struct PlayerPage {
           .fontColor($r('app.color.viz_fg'))
         Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.playMode)}`)
           .fontSize(11)
-          .fontColor($r('app.color.viz_fg_faint'))
+          // viz_fg_soft 而非 faint：纯黑底上 faint 偏淡（三轮复审）
+          .fontColor($r('app.color.viz_fg_soft'))
         if (this.player.playNextCount > 0) {
           Text(`插播 ${this.player.playNextCount} 首`)
             .fontSize(12)
