@@ -545,8 +545,10 @@ export struct PlayerPage {
       .backgroundColor($r('app.color.page_bg'))
     .bindSheet(this.isQueueOpen, this.QueueSheet(), {
       height: SheetSize.MEDIUM,
-      // 关闭钮自绘（系统 showClose 位置固定右上、与自绘标题不同轴），
-      // showClose 不启用；下滑与点遮罩关闭仍由系统托管
+      // showClose 必须显式 false（其默认值即 true，省略会与自绘钮重叠
+      // ——真机实测两枚 × 叠在右上角）：关闭钮已自绘进标题行，
+      // 下滑与点遮罩关闭仍由系统托管
+      showClose: false,
       // 恒暗半模态：舞台本就恒暗，sheet 弹出浅色 surface 会与舞台
       // 割裂（视觉审查遗留项）——底/字全走 viz_* 恒暗 token 族；
       // 标题不用系统 title（其字色随系统深浅不受控），QueueSheet
