@@ -7,6 +7,7 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
 
 - 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力
 - `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 26.0.0（API 26）；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）
+- **脚本/agent 环境调用构建工具链必须补全 env**（2026-10-15 实测）：DSH run_code 进程 `HOME` 为 undefined、`PATH` 缺 `/usr/bin:/bin:/usr/sbin:/sbin`（`sed`/`dirname` 等 ENOENT，表象是 ohpm/hvigorw 莫名 exit 126/127）——spawn 时显式传 `HOME=/Users/<user>`、`PATH` 前缀 `/Applications/DevEco-Studio.app/Contents/tools/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`，hvigor 另需 `JAVA_HOME`+`DEVECO_SDK_HOME`（见 music_app/AGENTS.md「本地命令」）
 - **`module.json5` 必须含 `"pages": "$profile:main_pages"`**：缺失时构建不报错，但编译产物 module.json 无路由表，运行时 `loadContent` 返回 401 白屏（已踩坑）
 - 播放内核 `AVPlayer`（每次切歌重建实例，靠代际号 `generation` 废弃旧实例回调）：
   - **状态迁移是异步事件**——`url` 赋值后须在 `on('stateChange')` 收到 `initialized` 才能调 `prepare()`，收到 `prepared` 才能调 `play()`；同步连调会 5400102
