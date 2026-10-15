@@ -5,6 +5,8 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
 
 # music_app 平台架构与 UI 规范
 
+- **字号适配基准 = app 自身宽高的设计定稿，不跟随系统字体缩放（2026-10-16 用户决策）**：全部 Text 用固定 vp 字号（如歌名 17vp），`app.json5` **不配置** `fontSizeScale`（SDK 该配置在 app configuration 块，`followSystem`/数字倍率两种形态——不配置即不跟随）。实测依据：模拟器系统字体调「超大」档后应用字号零变化，布局稳定。字号变动只能来自 app 宽高设计变更（设计定稿调整），禁止为无障碍跟随而全局接 fontScale——真机渲染红线（@Trace 不驱动属性插值）会使响应式字号刷新需要每组件 @Local 镜像，成本与版式风险都不可接受。已有热区/容器侧无障碍保障：触控热区 ≥40vp、constraintSize 适配、显示大小缩放（display size）下布局实测稳定
+
 - **bindSheet 三个不受控项（2026-10-15 恒暗化实测）**：① `showClose` **默认值即 true**，想隐藏必须显式 `showClose: false`——省略选项后系统钮与自绘关闭钮同屏重叠（真机抓拍双 × ）；② 系统 `title` 的字色随**系统深浅模式**走、不受 `backgroundColor` 控制，恒暗 sheet 上浅色系统会出深字压深底——恒暗 sheet 一律去 title 自绘标题行；③ 系统 showClose 钮位置固定右上，与自绘标题行不同轴。项目内两个 sheet（队列/分享）已按「viz_card_bg 底 + 自绘标题行 + 自绘 xmark（40vp 热区）」统一处理，新增 sheet 沿用该模式
 
 - 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力
