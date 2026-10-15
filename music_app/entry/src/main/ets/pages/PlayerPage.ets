@@ -545,7 +545,8 @@ export struct PlayerPage {
       .backgroundColor($r('app.color.page_bg'))
     .bindSheet(this.isQueueOpen, this.QueueSheet(), {
       height: SheetSize.MEDIUM,
-      showClose: true,
+      // 关闭钮自绘（系统 showClose 位置固定右上、与自绘标题不同轴），
+      // showClose 不启用；下滑与点遮罩关闭仍由系统托管
       // 恒暗半模态：舞台本就恒暗，sheet 弹出浅色 surface 会与舞台
       // 割裂（视觉审查遗留项）——底/字全走 viz_* 恒暗 token 族；
       // 标题不用系统 title（其字色随系统深浅不受控），QueueSheet
@@ -726,7 +727,7 @@ export struct PlayerPage {
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.viz_fg'))
         Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.playMode)}`)
-          .fontSize(12)
+          .fontSize(11)
           .fontColor($r('app.color.viz_fg_faint'))
         if (this.player.playNextCount > 0) {
           Text(`插播 ${this.player.playNextCount} 首`)
@@ -741,9 +742,19 @@ export struct PlayerPage {
             .onClick(() => this.player.clearPlayNextQueue())
         }
         Blank()
+        // 自绘关闭钮：与标题同一水平轴（系统 showClose 位置偏低），
+        // 40vp 热区；下滑与点遮罩关闭仍由系统托管
+        SymbolGlyph($r('sys.symbol.xmark'))
+          .fontSize(18)
+          .fontColor([$r('app.color.viz_fg_soft')])
+          .padding(11)
+          .accessibilityText('关闭播放队列')
+          .onClick(() => {
+            this.isQueueOpen = false;
+          })
       }
       .width('100%')
-      .padding({ left: 20, right: 20, bottom: 8 })
+      .padding({ left: 20, right: 12, bottom: 8 })
 
       List({ space: 2, initialIndex: this.currentIndexIn(this.queueEntries) }) {
         LazyForEach(this.queueSource, (entry: QueueEntry, index: number) => {
