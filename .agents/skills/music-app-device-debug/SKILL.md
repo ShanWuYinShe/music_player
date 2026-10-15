@@ -13,7 +13,8 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - 一键签名构建安装：仓库根 `tools/auto_sign.sh`
   - 不带参数 = 只构建；`install` = 构建 + 安装 + 启动
   - 它自己会校验签名材料、profile 有效期、设备绑定；失败会打印去 IDE 重签名的指引
-- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前缀决定
+- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前
+- **模拟器深色模式切换（2026-10-16 实测，Pura 90 Pro）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态缀决定
 
 ## 本项目验证命令
 
