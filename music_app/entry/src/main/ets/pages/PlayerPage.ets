@@ -546,10 +546,11 @@ export struct PlayerPage {
     .bindSheet(this.isQueueOpen, this.QueueSheet(), {
       height: SheetSize.MEDIUM,
       showClose: true,
-      // 半模态底色用自适应 surface：默认底随系统主题走，浅色模式下会与
-      // 内容层的恒定浅色文字冲突（浅底浅字不可见）
-      backgroundColor: $r('app.color.surface'),
-      title: { title: '播放队列' },
+      // 恒暗半模态：舞台本就恒暗，sheet 弹出浅色 surface 会与舞台
+      // 割裂（视觉审查遗留项）——底/字全走 viz_* 恒暗 token 族；
+      // 标题不用系统 title（其字色随系统深浅不受控），QueueSheet
+      // 内自绘标题行
+      backgroundColor: $r('app.color.viz_card_bg'),
       onDisappear: (): void => {
         this.isQueueOpen = false;
       }
@@ -717,18 +718,23 @@ export struct PlayerPage {
   @Builder
   QueueSheet() {
     Column() {
-      // 汇总行
-      Row({ space: 8 }) {
+      // 自绘标题行（系统 title 字色随系统深浅不受控，恒暗 sheet 上
+      // 可能深字压深底）：排印风 viz_fg 大字 + 汇总并排
+      Row({ space: 10 }) {
+        Text('播放队列')
+          .fontSize(20)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.viz_fg'))
         Text(`${this.queueEntries.length} 首 · ${playModeLabel(this.playMode)}`)
           .fontSize(12)
-          .fontColor($r('app.color.ink_faint'))
+          .fontColor($r('app.color.viz_fg_faint'))
         if (this.player.playNextCount > 0) {
           Text(`插播 ${this.player.playNextCount} 首`)
             .fontSize(12)
             .fontColor($r('app.color.accent'))
           Text('清空')
             .fontSize(12)
-            .fontColor($r('app.color.ink_soft'))
+            .fontColor($r('app.color.viz_fg_soft'))
             // padding 补足 40vp 热区（原光秃文字几乎点不中）
             .padding({ left: 12, right: 12, top: 10, bottom: 10 })
             .accessibilityText('清空插播队列')
@@ -753,7 +759,7 @@ export struct PlayerPage {
               } else {
                 Text(`${index + 1}`)
                   .fontSize(13)
-                  .fontColor($r('app.color.ink_faint'))
+                  .fontColor($r('app.color.viz_fg_faint'))
                   .width(22)
                   .textAlign(TextAlign.Center)
               }
@@ -763,7 +769,7 @@ export struct PlayerPage {
                   Text(entry.song.title)
                     .fontSize(15)
                     .fontColor(entry.song.id === (this.song?.id ?? '') ?
-                      $r('app.color.accent') : $r('app.color.ink'))
+                      $r('app.color.accent') : $r('app.color.viz_fg'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                   if (entry.inserted) {
@@ -778,7 +784,7 @@ export struct PlayerPage {
                 .alignItems(VerticalAlign.Center)
                 Text(entry.song.artist)
                   .fontSize(12)
-                  .fontColor($r('app.color.ink_soft'))
+                  .fontColor($r('app.color.viz_fg_soft'))
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
               }
@@ -787,14 +793,14 @@ export struct PlayerPage {
 
               Text(entry.song.duration > 0 ? formatTime(entry.song.duration) : '--:--')
                 .fontSize(12)
-                .fontColor($r('app.color.ink_faint'))
+                .fontColor($r('app.color.viz_fg_faint'))
             }
             .width('100%')
             .padding({ left: 20, right: 20, top: 8, bottom: 8 })
             .borderRadius(12)
-            // sheet 底色为 surface，当前行高亮用更亮一档的 surface_alt 区分
+            // 恒暗 sheet 当前行高亮：viz_card_bg_alt（viz_card_bg 亮一档）
             .backgroundColor(entry.song.id === (this.song?.id ?? '') ?
-              $r('app.color.surface_alt') : Color.Transparent)
+              $r('app.color.viz_card_bg_alt') : Color.Transparent)
             .accessibilityText(`播放${entry.song.title}，${entry.song.artist}`)
             .onClick(() => this.player.playSong(entry.song.id))
             .bindContextMenu(this.QueueRowMenu(entry), ResponseType.LongPress)
