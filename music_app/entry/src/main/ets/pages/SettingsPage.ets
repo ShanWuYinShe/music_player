@@ -25,6 +25,9 @@ export struct SettingsPage {
   @Local serverVersion: string = appStore.serverVersionCache || '获取中…';
   /** 本地曲库首数镜像：library 非响应式,清空按钮动作里手动归零刷新 */
   @Local libraryCount: number = appStore.library.getAllSongs().length;
+  /** 连接测试进行中：按钮切加载态并禁用（慢网下重复点击会堆并发请求，
+   * 且无进度反馈让人以为没点上——异步操作要有确定性反馈） */
+  @Local testing: boolean = false;
 
   aboutToAppear(): void {
     // 版本号直接在 BundleInfo 顶层（versionName, since 9）——旧代码读
@@ -160,16 +163,30 @@ export struct SettingsPage {
         Text('地址会保存在本机，可随时修改。')
           .fontSize(11)
           .fontColor($r('app.color.ink_faint'))
-        // 测试连接与输入框同卡：配完即测，不用上下找底部按钮
-        Button('保存并测试连接')
-          .width('100%')
-          .constraintSize({ minHeight: 42 })
-          .fontSize(14)
-          .borderRadius(21)
-          .margin({ top: 4 })
-          .backgroundColor($r('app.color.accent'))
-          .fontColor($r('app.color.on_accent'))
-          .onClick(() => this.saveAndTest())
+        // 测试连接与输入框同卡：配完即测，不用上下找底部按钮；
+        // 测试中切「转圈+正在测试」并禁用，防止慢网下重复点击堆请求
+        Button() {
+          Row({ space: 8 }) {
+            if (this.testing) {
+              LoadingProgress()
+                .width(16)
+                .height(16)
+                .color($r('app.color.on_accent'))
+            }
+            Text(this.testing ? '正在测试…' : '保存并测试连接')
+              .fontSize(14)
+              .fontColor($r('app.color.on_accent'))
+          }
+          .justifyContent(FlexAlign.Center)
+        }
+        .width('100%')
+        .constraintSize({ minHeight: 42 })
+        .borderRadius(21)
+        .margin({ top: 4 })
+        .backgroundColor($r('app.color.accent'))
+        .enabled(!this.testing)
+        .opacity(this.testing ? 0.8 : 1)
+        .onClick(() => this.saveAndTest())
       }
       .width('100%')
       .padding(20)
@@ -284,8 +301,12 @@ export struct SettingsPage {
   /** 保存并测试连接：先落盘地址（值未变内部早退），再用轻量 providers 接口
    * 测连——成功/失败都在拇指区即时 toast，不用回首页才知道配错 */
   private async saveAndTest(): Promise<void> {
-    appStore.saveOnlineBaseUrl(this.urlInput);
+    if (this.testing) {
+      return;
+    }
+    this.testing = true;
     try {
+      appStore.saveOnlineBaseUrl(this.urlInput);
       await appStore.onlineSource.fetchProviders();
       promptAction.showToast({ message: '服务连接正常' });
     } catch (err) {
@@ -296,6 +317,8 @@ export struct SettingsPage {
       promptAction.showToast({
         message: `连接失败：${detail}`
       });
+    } finally {
+      this.testing = false;
     }
   }
 

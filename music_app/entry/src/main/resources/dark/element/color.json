@@ -37,6 +37,14 @@
       "value": "#D96C45"
     },
     {
+      "name": "accent_hi",
+      "value": "#E07E58"
+    },
+    {
+      "name": "control_line",
+      "value": "#3A3631"
+    },
+    {
       "name": "on_accent",
       "value": "#2A130B"
     },

@@ -327,6 +327,9 @@ struct Index {
             .fontColor($r('app.color.ink'))
             .placeholderColor($r('app.color.ink_faint'))
             .backgroundColor($r('app.color.surface_alt'))
+            // 深色模式下 surface_alt 与宣纸底对比不足，加发丝线勾出控件轮廓
+            // （浅色下 token 为全透明，浅色对比足够不加线）
+            .border({ width: 0.5, color: $r('app.color.control_line') })
             .borderRadius(12)
             .onChange((value: string) => {
               const prev = this.searchText;
@@ -548,12 +551,14 @@ struct Index {
         .fontColor(this.homeTab === tab ? CURRENT_TINT : $r('app.color.editorial_meta'))
         .fontWeight(this.homeTab === tab ? FontWeight.Bold : FontWeight.Normal)
         .letterSpacing(this.homeTab === tab ? 1 : 0.5)
-      // 选中项下方书脊短金线
+      // 选中项下方书脊短金线（切换时 220ms 淡入淡出，避免生硬瞬切；
+      // homeTab 是页面 @Local，属性插值可靠——真机渲染红线只针对全局单例 @Trace）
       Row()
         .width(26)
         .height(2.5)
         .borderRadius(1.25)
         .backgroundColor(this.homeTab === tab ? CURRENT_TINT : Color.Transparent)
+        .animation({ duration: 220, curve: Curve.EaseOut })
     }
     // 上下 padding 补足 40vp 触控热区
     .padding({ left: 10, right: 10, top: 8, bottom: 8 })

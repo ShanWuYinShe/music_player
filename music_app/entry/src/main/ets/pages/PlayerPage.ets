@@ -446,6 +446,9 @@ export struct PlayerPage {
               .fontSize(22)
               .fontColor($r('app.color.viz_fg'))
               .maxLines(1)
+              // 占满钤印外全部宽度：长歌名不再把钤印挤出/挤压（MARQUEE
+              // 也需要有界宽度才会滚动）
+              .layoutWeight(1)
               // 超长歌名跑马灯滚动展示全名（截断替代方案，播放页大标题
               // 不换行以免顶乱一屏版式）
               .textOverflow({ overflow: TextOverflow.MARQUEE })
@@ -584,9 +587,13 @@ export struct PlayerPage {
     .width(72)
     .height(72)
     .borderRadius(18)
-    .backgroundColor($r('app.color.accent'))
+    // 朱砂渐变键面（亮端 accent_hi → accent）替代平涂：暗舞台上更有体积感
+    .linearGradient({
+      angle: 135,
+      colors: [[$r('app.color.accent_hi'), 0], [$r('app.color.accent'), 1]]
+    })
     .accessibilityText(this.isPlaying ? '暂停' : '播放')
-    .shadow({ radius: 18, color: $r('app.color.viz_shadow'), offsetY: 3 })
+    .shadow({ radius: 18, color: $r('app.color.accent_shadow'), offsetY: 3 })
     .clickEffect({ level: ClickEffectLevel.MIDDLE, scale: 0.92 })
     .onClick(() => this.player.togglePlay())
 
