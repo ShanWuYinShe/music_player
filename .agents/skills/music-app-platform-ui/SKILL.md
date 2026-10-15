@@ -5,6 +5,8 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
 
 # music_app 平台架构与 UI 规范
 
+- **bindSheet 三个不受控项（2026-10-15 恒暗化实测）**：① `showClose` **默认值即 true**，想隐藏必须显式 `showClose: false`——省略选项后系统钮与自绘关闭钮同屏重叠（真机抓拍双 × ）；② 系统 `title` 的字色随**系统深浅模式**走、不受 `backgroundColor` 控制，恒暗 sheet 上浅色系统会出深字压深底——恒暗 sheet 一律去 title 自绘标题行；③ 系统 showClose 钮位置固定右上，与自绘标题行不同轴。项目内两个 sheet（队列/分享）已按「viz_card_bg 底 + 自绘标题行 + 自绘 xmark（40vp 热区）」统一处理，新增 sheet 沿用该模式
+
 - 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力
 - `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 26.0.0（API 26）；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）
 - **脚本/agent 环境调用构建工具链必须补全 env**（2026-10-15 实测）：DSH run_code 进程 `HOME` 为 undefined、`PATH` 缺 `/usr/bin:/bin:/usr/sbin:/sbin`（`sed`/`dirname` 等 ENOENT，表象是 ohpm/hvigorw 莫名 exit 126/127）——spawn 时显式传 `HOME=/Users/<user>`、`PATH` 前缀 `/Applications/DevEco-Studio.app/Contents/tools/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`，hvigor 另需 `JAVA_HOME`+`DEVECO_SDK_HOME`（见 music_app/AGENTS.md「本地命令」）
