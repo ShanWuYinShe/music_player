@@ -143,6 +143,9 @@ struct MusicCardWide {
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
     }
+    // 铺满卡片窗口：内容自适应高度不足时露出系统白底（实机截图发现）
+    .width('100%')
+    .height('100%')
     .justifyContent(FlexAlign.Center)
     .padding(14)
     .backgroundColor('#1E1C19')

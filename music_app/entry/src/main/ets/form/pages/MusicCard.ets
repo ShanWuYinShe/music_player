@@ -96,6 +96,9 @@ struct MusicCard {
       .width('100%')
       .margin({ bottom: 6 })
     }
+    // 铺满卡片窗口：防止内容高度不足时露出系统白底
+    .width('100%')
+    .height('100%')
     .justifyContent(FlexAlign.Center)
     .padding(14)
     .backgroundColor('#1E1C19')
