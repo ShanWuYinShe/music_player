@@ -348,7 +348,13 @@ export struct PlayerPage {
               .padding(12)
               .accessibilityText('可视化风格列表')
               .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
-              .bindMenu(this.VizMenu())
+              .bindMenu(this.VizMenu(), {
+                // 恒暗舞台上的原生菜单：浅色磨砂底与舞台割裂（视觉检查
+                // 发现），底/字强制深色；colorMode 让磨砂材质也走深色
+                backgroundColor: $r('app.color.viz_card_bg'),
+                colorMode: AnchoredColorMode.FOLLOW_TARGET,
+                borderRadius: 16,
+              })
           }
         }
         .width('100%')
@@ -685,7 +691,12 @@ export struct PlayerPage {
     .backgroundColor($r('app.color.viz_btn_bg_strong'))
     .padding({ left: 12, right: 12 })
     .accessibilityText('定时关闭')
-    .bindMenu(this.SleepMenu())
+    .bindMenu(this.SleepMenu(), {
+      // 同 VizMenu：恒暗舞台统一深色原生菜单
+      backgroundColor: $r('app.color.viz_card_bg'),
+      colorMode: AnchoredColorMode.FOLLOW_TARGET,
+      borderRadius: 16,
+    })
   }
   .width('100%')
   .margin({ top: 12 })
@@ -886,12 +897,15 @@ export struct PlayerPage {
         }
       }
     }
+    .fontColor($r('app.color.viz_fg'))
   }
 
   /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
   @Builder
   VizMenu() {
     Menu() {
+      // 深底菜单文字统一 viz_fg（fontColor 作用于菜单内全部文字，
+      // 含分组标题）；勾选图标随 fontColor 继承
       MenuItemGroup({ header: '可视化风格' }) {
         ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
           MenuItem({
@@ -906,6 +920,7 @@ export struct PlayerPage {
         }, (name: string) => name)
       }
     }
+    .fontColor($r('app.color.viz_fg'))
   }
 
   /** 分享卡片半模态：深色舞台风预览卡（封面/纸带 + 歌名歌手 + 落款），
