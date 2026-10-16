@@ -348,13 +348,7 @@ export struct PlayerPage {
               .padding(12)
               .accessibilityText('可视化风格列表')
               .clickEffect({ level: ClickEffectLevel.LIGHT, scale: 0.9 })
-              .bindMenu(this.VizMenu(), {
-                // 恒暗舞台上的原生菜单：浅色磨砂底与舞台割裂（视觉检查
-                // 发现），底/字强制深色；colorMode 让磨砂材质也走深色
-                backgroundColor: $r('app.color.viz_card_bg'),
-                colorMode: AnchoredColorMode.FOLLOW_TARGET,
-                borderRadius: 16,
-              })
+              .bindMenu(this.VizMenu())
           }
         }
         .width('100%')
@@ -691,12 +685,7 @@ export struct PlayerPage {
     .backgroundColor($r('app.color.viz_btn_bg_strong'))
     .padding({ left: 12, right: 12 })
     .accessibilityText('定时关闭')
-    .bindMenu(this.SleepMenu(), {
-      // 同 VizMenu：恒暗舞台统一深色原生菜单
-      backgroundColor: $r('app.color.viz_card_bg'),
-      colorMode: AnchoredColorMode.FOLLOW_TARGET,
-      borderRadius: 16,
-    })
+    .bindMenu(this.SleepMenu())
   }
   .width('100%')
   .margin({ top: 12 })
@@ -874,53 +863,97 @@ export struct PlayerPage {
     }
   }
 
-  /** 定时关闭菜单：原生 Menu/MenuItem，MenuItemGroup 分组标题 */
+  /** 定时关闭菜单（恒暗自绘）：MenuOptions.backgroundColor 对原生
+   * Menu 实测不生效（磨砂材质覆盖，浅底浮在恒暗舞台上割裂）——
+   * 改完全自绘容器；弹层定位/点外关闭/动效仍由 bindMenu 系统托管 */
   @Builder
   SleepMenu() {
-    Menu() {
-      MenuItemGroup({ header: '定时关闭' }) {
-        MenuItem({ content: '15 分钟后停止' })
-          .onClick((): void => this.applySleepTimer(15))
-        MenuItem({ content: '30 分钟后停止' })
-          .onClick((): void => this.applySleepTimer(30))
-        MenuItem({ content: '60 分钟后停止' })
-          .onClick((): void => this.applySleepTimer(60))
-      }
+    Column() {
+      Text('定时关闭')
+        .fontSize(12)
+        .fontColor($r('app.color.viz_fg_faint'))
+        .letterSpacing(1)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 10, bottom: 4 })
+      ForEach([15, 30, 60], (minutes: number) => {
+        Row() {
+          Text(`${minutes} 分钟后停止`)
+            .fontSize(15)
+            .fontColor($r('app.color.viz_fg'))
+        }
+        .width('100%')
+        .constraintSize({ minHeight: 42 })
+        .padding({ left: 14, right: 14 })
+        .borderRadius(10)
+        .onClick((): void => this.applySleepTimer(minutes))
+      }, (minutes: number) => `${minutes}`)
       // 菜单打开瞬间构建，直读即时值——镜像只在启停 notify 时同步，会滞后
       if (this.player.sleepRemainSec >= 0) {
-        MenuItemGroup() {
-          MenuItem({ content: `取消定时（剩 ${formatTime(this.player.sleepRemainSec * 1000)}）` })
-            .onClick(() => {
-              this.player.cancelSleepTimer();
-              promptAction.showToast({ message: '已取消定时关闭' });
-            })
+        Row()
+          .width('100%')
+          .height(0.5)
+          .margin({ left: 14, right: 14, top: 4, bottom: 4 })
+          .backgroundColor($r('app.color.viz_line'))
+        Row() {
+          Text(`取消定时（剩 ${formatTime(this.player.sleepRemainSec * 1000)}）`)
+            .fontSize(15)
+            .fontColor($r('app.color.accent'))
         }
+        .width('100%')
+        .constraintSize({ minHeight: 42 })
+        .padding({ left: 14, right: 14 })
+        .borderRadius(10)
+        .onClick(() => {
+          this.player.cancelSleepTimer();
+          promptAction.showToast({ message: '已取消定时关闭' });
+        })
       }
     }
-    .fontColor($r('app.color.viz_fg'))
+    .width(208)
+    .padding({ top: 6, bottom: 6 })
+    .borderRadius(16)
+    .backgroundColor($r('app.color.viz_card_bg'))
+    .shadow({ radius: 24, color: $r('app.color.viz_shadow'), offsetY: 8 })
   }
 
-  /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格 */
+  /** 可视化风格选择列表：点击魔法棒后弹出，不再直接跳到下一个风格。
+   * 恒暗自绘容器，理由同 SleepMenu */
   @Builder
   VizMenu() {
-    Menu() {
-      // 深底菜单文字统一 viz_fg（fontColor 作用于菜单内全部文字，
-      // 含分组标题）；勾选图标随 fontColor 继承
-      MenuItemGroup({ header: '可视化风格' }) {
-        ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
-          MenuItem({
-            content: `${index + 1}. ${name}`,
-            symbolEndIcon: this.vizPreset === index
-              ? new SymbolGlyphModifier($r('sys.symbol.checkmark')) : undefined
-          })
-            .onClick((): void => {
-              this.vizPreset = index;
-              this.toastPreset(index);
-            })
-        }, (name: string) => name)
-      }
+    Column() {
+      Text('可视化风格')
+        .fontSize(12)
+        .fontColor($r('app.color.viz_fg_faint'))
+        .letterSpacing(1)
+        .width('100%')
+        .padding({ left: 14, right: 14, top: 10, bottom: 4 })
+      ForEach(VIZ_PRESET_NAMES, (name: string, index: number) => {
+        Row({ space: 8 }) {
+          Text(`${index + 1}. ${name}`)
+            .fontSize(15)
+            .fontColor($r('app.color.viz_fg'))
+          Blank()
+          if (this.vizPreset === index) {
+            SymbolGlyph($r('sys.symbol.checkmark'))
+              .fontSize(14)
+              .fontColor([$r('app.color.accent')])
+          }
+        }
+        .width('100%')
+        .constraintSize({ minHeight: 42 })
+        .padding({ left: 14, right: 14 })
+        .borderRadius(10)
+        .onClick((): void => {
+          this.vizPreset = index;
+          this.toastPreset(index);
+        })
+      }, (name: string) => name)
     }
-    .fontColor($r('app.color.viz_fg'))
+    .width(208)
+    .padding({ top: 6, bottom: 6 })
+    .borderRadius(16)
+    .backgroundColor($r('app.color.viz_card_bg'))
+    .shadow({ radius: 24, color: $r('app.color.viz_shadow'), offsetY: 8 })
   }
 
   /** 分享卡片半模态：深色舞台风预览卡（封面/纸带 + 歌名歌手 + 落款），
