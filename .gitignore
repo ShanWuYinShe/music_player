@@ -19,3 +19,6 @@
 
 # 独立站部署本地环境(含站点 IPv6 等运行时值,不入库)
 deploy/.env
+
+# Go 构建产物（本地 go build 生成）
+/music_server/music_server
