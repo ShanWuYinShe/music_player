@@ -13,7 +13,7 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - 一键签名构建安装：仓库根 `tools/auto_sign.sh`
   - 不带参数 = 只构建；`install` = 构建 + 安装 + 启动
   - 它自己会校验签名材料、profile 有效期、设备绑定；失败会打印去 IDE 重签名的指引
-- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前
+- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前缀决定
 - **模拟器深色模式切换（2026-10-16 实测，Pura 90 Pro）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态缀决定
 
 ## 本项目验证命令
@@ -27,11 +27,11 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - UI 相关改动在真机上验证时，注意 V2 状态不驱动渲染的已知坑（见 skill `music-app-platform-ui`）——**界面没更新不一定是没装上**
 - 手机息屏会断开无线调试：重连成功后立刻跑安装，并提醒用户装机期间别锁屏
 
-## 本地单测（isLocalTest）要求 PATH 含 /usr/sbin（2026-10-12 实测）
+## 本地单测（isLocalTest）要求 PATH 含 /usr/sbin
 
 `hvigorw ... -p isLocalTest=true test` 会在 `GenerateUnitTestResult` 任务里
 调 `@ohos/coverage` 的 `findPort` 探测本地测试端口，**内部依赖 `netstat`/`lsof`**——
-macOS 上这两个在 **`/usr/sbin`**。
+macOS 上这两个在 **`/usr/sbin`**（2026-10-12 实测）。
 
 **症状极具误导性**（报错完全指向代码，实际是 PATH 问题）：
 
@@ -63,7 +63,7 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 > 而**用受限 PATH 的程序化调用（agent/CI/脚本）会稳定复现**——排查时容易误以为
 > "代码有问题"或"环境玄学"。
 
-## worktree 内构建（2026-10-14 起无需重定向 hvigor 缓存）
+## worktree 内构建
 
 **worktree 无 `oh_modules`/`.hvigor`（均被 gitignore），先 `ohpm install`。**
 `~/.hvigor`、`~/.ohpm` 已由 DSH sandbox-extra-roots 放行（2026-10-14 实测），沙盒内直接构建即可；

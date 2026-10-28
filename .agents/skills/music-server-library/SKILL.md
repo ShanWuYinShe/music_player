@@ -7,7 +7,7 @@ description: music_server 本地曲库约定：文件名解析约定、曲目来
 
 ## 本地命令
 
-在仓库根(music_player/)执行;`-C music_server` 已指定工作目录:
+在仓库根（music_player/）执行；`-C music_server` 已指定工作目录：
 
 ```bash
 go build -C music_server -o /dev/null .   # 编译检查
@@ -18,9 +18,9 @@ go test -C music_server ./...              # 单元测试
 go run -C music_server . -library-review
 ```
 
-## 文件名约定(本地曲库)
+## 文件名约定（本地曲库）
 
-元数据从文件名解析,不做 ID3/元数据块解析:
+元数据从文件名解析，不做 ID3/元数据块解析：
 
 - `歌手 - 歌名.ext` → artist=歌手, title=歌名
 - 兼容可选序号前缀:`01_歌手 - 歌名.ext` / `01-歌手 - 歌名.ext`(与

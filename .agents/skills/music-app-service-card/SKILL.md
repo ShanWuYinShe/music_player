@@ -47,9 +47,9 @@ description: music_app 桌面服务卡片与趣味特性：2x2/2x4 卡片架构�
 - form_config.json schema 坑：`isDefault` 必填、`uiSyntax: "arkts"` 必填、
   window 字段名是 `autoDesignWidth`（非 autoDesignWidthScale）。
 
-## 覆盖安装后旧卡片白块（2026-10-13 模拟器实测）
+## 覆盖安装后旧卡片白块
 
-`hdc install -r` 覆盖安装新 HAP 后，桌面上**已存在的卡片实例会永久变白**：
+`hdc install -r` 覆盖安装新 HAP 后，桌面上**已存在的卡片实例会永久变白**（2026-10-13 模拟器实测）：
 FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按钮结构），
 但渲染表面已失效——截图纯白、点击按钮无任何响应（postCardAction 不触发）。
 
@@ -63,7 +63,9 @@ FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按
   需在应用更新后主动触发卡片刷新（formProvider.updateForm 或 requestForm），
   值得作为后续改进项评估。
 
-## 实机验证方法与结论（2026-10-13 模拟器 Pura 90 Pro 实测）
+## 实机验证方法与结论
+
+实测环境：Pura 90 Pro 模拟器（1256x2760），结论时间 2026-10-13。
 
 - **按钮热区**：`hdc shell hilog -r` 清缓冲 → `uinput -T -c x y` 点按钮 →
   `hilog -x | grep "card action published"`，FormAbility 会记录每个动作。
