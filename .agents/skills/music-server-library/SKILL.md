@@ -14,8 +14,9 @@ go build -C music_server -o /dev/null .   # 编译检查
 go vet -C music_server ./...               # 静态检查
 gofmt -l music_server/                     # 格式化检查
 go test -C music_server ./...              # 单元测试
-# 运维自检:扫描曲库并打印解析结果(验证文件名约定)
-go run -C music_server . -library-review
+# 运维自检:扫描曲库并打印解析结果(验证文件名约定);需先给 LIBRARY_DIR
+# (默认 /data/library 是容器内路径,本机跑要指向真实曲库目录)
+LIBRARY_DIR=/tmp/music-library go run -C music_server . -library-review
 ```
 
 ## 文件名约定（本地曲库）

@@ -6,7 +6,7 @@
 
 - 首页**无标题栏**（`hideTitleBar(true)`——「音乐/N 首歌曲」chip 冗余已裁撤，2026-09 用户决策）：首屏是一级签排印行（**曲库/喜欢/最近/在线 四签平铺**，喜欢/最近为跨源一级视图不挂在本地签下——2026-09 用户决策；导入/设置图标居行尾，顶部避让并入该行 padding `safeTopVp+8`）→ 系统 Search → 列表头行（左「N 首」计数 + 右排序入口，在线签只显计数无排序）→ 列表。
 - 封面占位统一走 `components/CoverArt.ets`（无内嵌封面时以**歌名首字**做大字排版占位：列表/迷你条浅色 token 板 `surface_alt`，播放页纸带 `onStage` 变体恒暗 viz token 板；不做哈希派生渐变——2026-09 用户决策「默认封面放歌名，不要哈希当颜色」——勿再手写「灰块+音符」占位）。
-- 一级签切换走 `Tabs`（4 个 TabContent，`index` 单向受控 + `onChange` 进 `switchTab`，点选/滑动一致；SDK 无 Segmented/SegmentButton/CapsuleTabBarStyle，已查证；切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色无图标；TabContent 不挂 tabBar（`barHeight(0)` + `barOverlap` 压掉系统预留空栏，否则顶部留 91vp 空隙，已实测））。
+- 一级签切换走 `Tabs`（4 个 TabContent，`index` 单向受控 + `onChange` 进 `switchTab`，点选/滑动一致；SDK 只有 advanced `SegmentButton`（@since 11 的材质化分段按钮），无 `Segmented`/`CapsuleTabBarStyle`（已查证），一级签按排印风自绘、不引入 advanced 组件；切换行是排印风自绘文字标签——选中金色加粗 + 下方短金线，无底色无图标；TabContent 不挂 tabBar（`barHeight(0)` + `barOverlap` 压掉系统预留空栏，否则顶部留 91vp 空隙，已实测））。
 - 搜索框用系统 `Search`（受控 `value` + `onChange`/`onSubmit`，清除键/键盘搜索键系统托管）。
 - 队列与切签自愈：喜欢/最近签进入时队列恢复为本地曲库（`refreshSongs`，队列是内容签列表的筛选源，切签必须自愈——真机踩坑：进喜欢后最近只剩收藏里的在线歌）；点播时喜欢/最近两签把队列替换为该视图跨源列表（`playFromList`，连播跟随所见），曲库签不替换（防搜索清空后列表剩残集）；搜索不跳签——内容签内搜索即筛其子集，在线签仍服务端搜索。
 
@@ -25,7 +25,7 @@
 ## 迷你条
 
 - 迷你条为底部通栏（与页面同宽、上缘发丝线分隔）+ `backgroundBlurStyle(COMPONENT_THICK)` 磨砂；`BlurStyle` 无 `BehindWindow`，窗内列表透出用 COMPONENT 系列。
-- **迷你条常驻不随曲目显隐（2026-09 用户决策）**：无播放曲目时显示占位态（保留封面位与条高、标题「未在播放」、播放/下一首禁用），列表底部常留 `MINI_BAR_HEIGHT`（62vp）避免最后一行被压住。
+- **迷你条常驻不随曲目显隐（2026-09 用户决策）**：无播放曲目时显示占位态（保留封面位与条高、标题「未在播放」、播放/下一首禁用）。迷你条是 Column 内普通兄弟节点、不叠压列表（列表视口到其上缘为止），列表底部只留 12vp 收尾——**不要**再按「迷你条悬浮」给列表预留 `MINI_BAR_HEIGHT`（62vp），那会让视口每屏空出一条高度（真机反馈过）。
 - 迷你条进度线经 `@Local` 镜像 + displaySync(4Hz) 帧驱动（**不能**直读 `player.currentTime` 做 `width()` 插值——真机上 `@Trace` 不驱动属性插值，线是死的），随 `onVisibleAreaChange` 与播放态启停。
 
 ## 数据、引擎与设备声明

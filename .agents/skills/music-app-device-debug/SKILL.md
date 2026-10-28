@@ -12,9 +12,9 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 - 包名：`com.lsyb.musicplayer`，入口 `EntryAbility`
 - 一键签名构建安装：仓库根 `tools/auto_sign.sh`
   - 不带参数 = 只构建；`install` = 构建 + 安装 + 启动
-  - 它自己会校验签名材料、profile 有效期、设备绑定；失败会打印去 IDE 重签名的指引
+  - 它自己会校验签名材料、profile 有效期（`install` 模式另校验设备绑定）；失败会打印去 IDE 重签名的指引
 - `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前缀决定
-- **模拟器深色模式切换（2026-10-16 实测，Pura 90 Pro）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态缀决定
+- **模拟器深色模式切换（2026-10-16 实测，Pura 90 Pro）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态
 
 ## 本项目验证命令
 
@@ -23,7 +23,7 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
 
 ## 本项目的构建注意事项
 
-- 构建必须先起模拟器或连上真机（签名/安装阶段需要设备）
+- 纯构建（不带参数）不需要连设备：设备校验与安装只发生在 `install` 模式，签名只依赖 `~/.ohos/config/` 材料
 - UI 相关改动在真机上验证时，注意 V2 状态不驱动渲染的已知坑（见 skill `music-app-platform-ui`）——**界面没更新不一定是没装上**
 - 手机息屏会断开无线调试：重连成功后立刻跑安装，并提醒用户装机期间别锁屏
 
