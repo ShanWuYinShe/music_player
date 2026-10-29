@@ -104,8 +104,8 @@ FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按
   `.id('share_card')` → `componentSnapshot.get` 截图 → SaveButton 安全控件
   onClick 内（临时授权，免申请受限的 WRITE_IMAGEVIDEO）→
   photoAccessHelper.createAsset + image ImagePacker.packToFile 写入相册。
-  分享图标 `sys.symbol.arrow_up_and_rectangle_on_rectangle`（id_defined.json
-  已核实；`sys.symbol.share` 不存在）。
+  分享图标可选 `sys.symbol.share`（SDK 资源表 id_defined.json 已注册该 symbol）；当前实现
+  选用 `sys.symbol.arrow_up_and_rectangle_on_rectangle`（视觉/风格选择），运行期渲染效果需真机/模拟器验证。
 - @Trace 跨单例镜像仍走 stateListener 管道：AppStore 设置项变更后调
   `player.notifyPrefs()`（public 转发私有 notifyState('prefs')），各页面
   在既有订阅回调里刷新 @Local 镜像（如 micOn）。
