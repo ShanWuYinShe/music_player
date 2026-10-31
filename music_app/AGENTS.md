@@ -39,3 +39,16 @@
 - 系统资源引用（`sys.symbol.*`/`sys.color.*`）先在 `/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/id_defined.json` 中核实名称存在性再用
 - rawfile 演示曲目文件名约定 `demoXX_歌手 - 歌名.wav`，由 `MusicLibrary.fillFromFileName` 解析；重新生成见 git 历史（python3 合成脚本）
 
+
+## skill 索引（改对应模块前先加载对应 skill）
+
+| skill | 管什么 |
+|---|---|
+| `music-app-platform-ui` | 平台基线、媒体内核、V2 渲染红线、播放页舞台双态；在线源与 UI 约定细节见其 `references/` |
+| `music-app-device-debug` | 真机/模拟器安装与调试、hdc 流程、界面没更新的排查 |
+| `music-app-service-card` | 服务卡片相关约定 |
+| `music-app-shader-pipeline` | 播放页 shader 管线：GLSL 规范、场景注册、性能架构、帧驱动与真机踩坑 |
+| `music-server-library` | 服务端本地曲库、文件名解析与 id 空间 |
+
+> 新增 skill 时**必须**同步本表——漏索引 = 该 skill 只能靠系统自动发现，AI 很难主动想到加载它。
+
