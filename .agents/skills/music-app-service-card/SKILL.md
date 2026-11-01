@@ -31,7 +31,7 @@ description: music_app 桌面服务卡片与趣味特性：2x2/2x4 卡片架构�
   （加卡/系统拉起时的快照）同用该映射并含进度字段与锚点。
   `updateEnabled: false`（无定时刷新配额消耗），刷新完全靠主动推送；
   秒推节奏可用 `hilog | grep formPush` 核验。
-- 卡片按钮控制通道（踩坑史，最终方案 message + CommonEvent）：
+- 卡片按钮控制通道（最终方案 message + CommonEvent）：
   ① call 型 `postCardAction` 在真机+模拟器均不送达（点击零反应、无
   onNewWant 日志，原因未明），弃用；② router 型可用但会把应用拉到前台
   （违背卡片免进应用的本意）；③ **最终：message 型发到 FormAbility
@@ -49,7 +49,7 @@ description: music_app 桌面服务卡片与趣味特性：2x2/2x4 卡片架构�
 
 ## 覆盖安装后旧卡片白块
 
-`hdc install -r` 覆盖安装新 HAP 后，桌面上**已存在的卡片实例会永久变白**（2026-10-13 模拟器实测）：
+`hdc install -r` 覆盖安装新 HAP 后，桌面上**已存在的卡片实例会永久变白**（模拟器实测）：
 FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按钮结构），
 但渲染表面已失效——截图纯白、点击按钮无任何响应（postCardAction 不触发）。
 
@@ -65,13 +65,12 @@ FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按
 
 ## 实机验证方法与结论
 
-实测环境：Pura 90 Pro 模拟器（1256x2760），结论时间 2026-10-13。
+实测环境：Pura 90 Pro 模拟器（1256x2760）。
 
 - **按钮热区**：`hdc shell hilog -r` 清缓冲 → `uinput -T -c x y` 点按钮 →
   `hilog -x | grep "card action published"`，FormAbility 会记录每个动作。
   已实测：responseRegion 40vp 外扩生效（图标左缘外 15px/右缘外 12px 的点击
-  均触发对应动作），热区外 33px 的点击不触发（负对照）——0d4e41a 的热区改动
-  验证通过。
+  均触发对应动作），热区外 33px 的点击不触发（负对照）。
 - **点击坐标**：从 `uitest dumpLayout` 的 bounds 取中心即可，与 uinput 坐标
   系一致；密度 3.5（91px/26vp）。
 - **accessibilityText 无法经 dumpLayout 验证**：该工具不导出此属性（应用内

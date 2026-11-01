@@ -2,7 +2,7 @@
 
 Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫描)与网易云
 网络源(经私有部署的 [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)
-上游,本仓 deploy/ 编排的 netease_api 容器,原由 workwork 编排、已迁入本仓,见「部署」节)。零第三方 Go 依赖(纯标准库);
+上游,本仓 deploy/ 编排的 netease_api 容器,见「部署」节)。零第三方 Go 依赖(纯标准库);
 网络源失败自动降级为仅本地曲库。
 
 ## 曲库约定（指针）
@@ -15,9 +15,9 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 
 ## API(下表按内部路由书写)
 
-对外业务前缀是 `/api/v1`(独立站约定),路由直接以该前缀书写;过渡期旧
-别名 `/api/*` 已移除(404),workwork 过渡反代与按旧默认地址轮询的存量
-安装不再可用,需在 App 设置页手填新地址。独立站部署下经 nginx 原样透传。
+对外业务前缀是 `/api/v1`(独立站约定),路由直接以该前缀书写;`/api/*`
+旧别名不存在(404),按 `https://yinghuoren.com/api/music` 轮询的安装不可用,
+需在 App 设置页手填新地址。独立站部署下经 nginx 原样透传。
 
 | 端点 | 说明 |
 |------|------|
@@ -63,8 +63,8 @@ Go HTTP 服务:聚合两类曲目来源——本地曲库目录(LIBRARY_DIR 扫�
 
 **部署编排已在本仓库内自洽**：`deploy/` 是 nginx + music_server + netease_api
 三服务 compose，独立 bridge 与独立数据目录，与 workwork 聚合栈零互通；
-`netease_api` 也已从 workwork 迁入本仓。**不再是 workwork 的 submodule**——
-workwork 已无本仓库检出，不要再按 submodule 理解，也不要再去该仓库找部署入口。
+`netease_api` 编排在本仓。**本仓库不是 workwork 的 submodule**——
+workwork 无本仓库检出，不要按 submodule 理解，也不要再去该仓库找部署入口。
 
 本地曲库音频经管理面板「音乐曲库」页上传（写服务器宿主 `deploy/data/library/`，
 compose 挂载；首次部署需从旧位置迁移快照，见 `deploy/README.md`），或手动投放。

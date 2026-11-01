@@ -13,7 +13,7 @@
 - 成功结果进 OnlineSource 内存缓存（按查询词键控，容量 8，来回切源秒开），默认视图（空查询）同时持久化 `filesDir/online_list_cache.json`（杀进程重开秒开）；进在线页先展示缓存（不再整页 loading）。
 - TTL 10 分钟内不发网络、过期静默刷新；下拉刷新/重复点在线标签/重试/改服务地址强制绕过缓存；换 baseUrl 缓存整体失效（纯函数 `isCacheFresh`/`serializeOnlineCache`/`parseOnlineCache` 在 OnlineApi.ets）。
 
-## 收藏/最近跨源融合（2026-09 用户决策「喜欢不区分在线离线」）
+## 收藏/最近跨源融合（口径：喜欢不区分在线离线）
 
 - 在线歌元数据持久化在 `source/OnlineSongStore.ets`（`filesDir/online_songs.json`，纯函数 `serializeOnlineSongStore`/`parseOnlineSongStore` 在 OnlineApi.ets），收藏（`AppStore.toggleFavorite` 唯一入口，PlayerPage ♥ 调用）与播放（`playSongInternal` 内 upsert）时注册。
 - 喜欢/最近 Tab 经 `LibraryFilter.FilterOptions.onlineSongs` 补位混排（ALL Tab 不混入；注册表非响应式，靠 favoriteIds/recentIds 的 @Trace 改写触发 @Computed 重算）；`PlayerController.findSong` 第三级兜底注册表（点播收藏在线歌/续播恢复都走这条）；换服务地址时注册表条目流地址按当前生效地址重拼（服务端 id 稳定）。

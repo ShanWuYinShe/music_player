@@ -41,9 +41,9 @@ description: music_app 音乐可视化 shader 管线：GLSL 源码位置与构�
 - **uKick**（冲击）：LINEAR_ACCELEROMETER 去重力线加速度经 accelKickLevel（阈值 1.5m/s²、满量程 8m/s²）attack、逐帧指数 decay（600ms），需 `ohos.permission.ACCELEROMETER`，被拒降级为 0。
 - 三者只进几何/亮度，不进色相/速度；传感器不可用时保持 0 退化为无体感。
 
-## 真机踩坑（勿重蹈）
+## 真机陷阱
 
-- ① XComponent 回调须在 NAPI Init 经 `exports.__NATIVE_XCOMPONENT_OBJ__` 早期注册（onLoad 才注册 surface 已创建不回放）；**重进播放页时 XComponent 是新实例，early 注册的对象已失效、created 事件早于 onLoad 的 fallback 注册被丢——EGL 永不初始化（第二次进入必黑屏）**，已加 `OH_NativeXComponent_RegisterSurfaceShowCallback` 兜底（show 晚于 onLoad 注册触发、带 window，VizOnSurfaceShow 幂等补初始化）；destroy 后 `gTexW/gTexH` 必须清零，否则新 context 复用已失效纹理 id。
+- ① XComponent 回调须在 NAPI Init 经 `exports.__NATIVE_XCOMPONENT_OBJ__` 早期注册（onLoad 才注册 surface 已创建不回放）；**重进播放页时 XComponent 是新实例，early 注册的对象已失效、created 事件早于 onLoad 的 fallback 注册被丢——EGL 永不初始化（第二次进入必黑屏）**，现行用 `OH_NativeXComponent_RegisterSurfaceShowCallback` 兜底（show 晚于 onLoad 注册触发、带 window，VizOnSurfaceShow 幂等补初始化）；destroy 后 `gTexW/gTexH` 必须清零，否则新 context 复用已失效纹理 id。
 - ② GLSL `#version 300 es` 须首行（由生成脚本注入，源文件不要写）。
 - ③ 过曝防御 0.86+各层≤0.15+半分辨率。
 - ④ EGLNativeWindowType 经 uintptr_t 中转。
