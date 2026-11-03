@@ -14,7 +14,7 @@
 - 状态管理统一 V2 体系（@ObservedV2/@Trace + @ComponentV2/@Param/@Local）。
 - **真机渲染红线**：全局单例的 @Trace 对 if 分支条件与属性插值不触发 UI 更新，
   渲染层必须走 `addStateListener/removeStateListener` 多播订阅 + @Local 镜像。
-- 播放页舞台双态互斥（封面模式 / 可视化模式），不要恢复旧设计。
+- 播放页舞台双态互斥（封面模式 / 可视化模式），禁止叠加渲染或同时启用。
 - 在线源 OnlineSource 走 SWR 缓存（默认视图持久化到 filesDir）。
 - 收藏/最近播放跨源融合：在线歌元数据注册表（`OnlineSongStore`，filesDir/online_songs.json）持久化，首页一级签「曲库/喜欢/最近/在线」中喜欢/最近为跨源混排视图，收藏的在线歌钉住整曲缓存不被 LRU 淘汰。
 
@@ -37,7 +37,7 @@
 ## 约束
 
 - 系统资源引用（`sys.symbol.*`/`sys.color.*`）先在 `/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/id_defined.json` 中核实名称存在性再用
-- rawfile 演示曲目文件名约定 `demoXX_歌手 - 歌名.wav`，由 `MusicLibrary.fillFromFileName` 解析；重新生成脚本见 git 历史（python3 合成脚本）
+- rawfile 演示曲目文件名约定 `demoXX_歌手 - 歌名.wav`，由 `MusicLibrary.fillFromFileName` 解析；需要重新生成时按该命名约定合成。
 
 
 ## skill 索引（改对应模块前先加载对应 skill）
