@@ -19,3 +19,21 @@
 - Go 侧：构建/检查/测试/运维自检命令以 [music_server/AGENTS.md](music_server/AGENTS.md) 为唯一维护处，此处不重复。
 - HarmonyOS 侧：`music_app/` 目录内执行 hvigor/ohpm 命令（工具链与签名约束见 music_app/AGENTS.md 的「本地命令」）。
 
+## CI 门禁与本地验证分工
+
+重活（全量测试、构建、打包、E2E、镜像构建）一律交给 GitHub Actions，本地只跑秒级检查。
+完整流程见全局 skill `github-ci-flow`：开发分支推送 → `gh pr create` → `gh pr checks --watch`
+全绿 → `gh pr merge --rebase --delete-branch` → 本地 `git pull --ff-only` 并清理 worktree。
+
+- 本地（提交前，秒级）：
+  - Go：`gofmt -l music_server/`（应无输出）+ `cd music_server && go build ./... && go vet ./...`（本机实测均 <1s）。
+  - shader_playground：`pnpm run lint`（biome；需先在 `shader_playground/` 执行 `pnpm install --frozen-lockfile`，未装依赖时交 CI）；类型检查/构建与单测交 CI。
+  - **不跑**：`go test ./...`（全量/含 `-race`）、`pnpm test`、`pnpm run build`、`docker build`。
+- CI 覆盖（`.github/workflows/ci.yml`，`push: main` + `pull_request: main`，共 2 个 job）：
+  - `Music Server (Go)`：gofmt、go vet、go build、`go test -race -count=1 ./...`。
+  - `Shader Playground (Vite)`：`pnpm install --frozen-lockfile`、biome lint、vitest、`tsc + vite build`。
+- CI 覆盖不到、必须本地/真机验证的：**鸿蒙端 `music_app/`**——hvigor 构建依赖本机 DevEco 工具链与签名材料，CI 不覆盖，构建/HAP 打包/模拟器与真机走查必须在本地按 `music_app/AGENTS.md`「本地命令」执行（签名材料与设备绑定约束见该文件；真机调试见 skill `music-app-device-debug`）。**发版/发布门禁不变**：交付 HAP 前必须在本地完成 hvigor 签名构建并在端上验证。
+- 镜像构建：本仓 CI 无镜像构建 job；`deploy/` 生产镜像由部署服务器 `make build` 构建（交付链路，不是开发机本地验证），本地不做 `docker build`。
+- 发版/发布门禁不变：服务端发布按 `deploy/README.md`（git tag 驱动版本，`deploy/Makefile` 取 `git describe`）。
+
+
