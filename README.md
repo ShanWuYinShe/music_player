@@ -5,7 +5,7 @@
 - `music_app`：HarmonyOS 音乐播放器客户端（ArkTS + ArkUI，Stage 模型），零第三方运行时依赖。支持本地曲库导入（系统音频选择器 + ID3v2 解析）、完整播放控制、后台播放与系统媒体中心接入；支持「本地 / 在线」源切换，默认对接线上服务，在线搜索与流式播放 `music_server` 曲库。
 - `music_server`：Go 实现的在线音乐服务，聚合本地曲库目录（扫描、搜索、Range 流式播放）与网易云网络源（经私有部署的 NeteaseCloudMusicApi Enhanced 上游聚合搜索、服务端代理播放）。纯标准库实现、零第三方 Go 依赖；本地曲库音频经管理面板上传或手动投放，网络源上游失败自动降级为仅本地。
 
-客户端默认使用线上服务 `https://music.chaoset.com/api/v1`（设置页可改，留空即用默认；业务接口规范前缀 `/api/v1`）。部署为本仓库内自洽编排：`deploy/`（nginx + music_server + netease_api 三服务 compose，独立 bridge 与数据目录，与 workwork 聚合栈零互通）——**本仓库不再是 workwork 的 submodule**。服务端发布前须在仓库打 git tag（SemVer，如 v1.0.0）：`deploy/Makefile` 取 `git describe` 作 build arg，无 tag 时版本号退化为 commit/dev。
+客户端默认使用线上服务 `https://music.chaoset.com/api/v1`（设置页可改，留空即用默认；业务接口规范前缀 `/api/v1`）。部署为本仓库内自洽编排：`deploy/`（nginx + music_server + netease_api 三服务 compose，独立 bridge 与数据目录，与 workwork 聚合栈零互通）。服务端发布前须在仓库打 git tag（SemVer，如 v1.0.0）：`deploy/Makefile` 取 `git describe` 作 build arg，无 tag 时版本号退化为 commit/dev。
 
 ## 目录结构
 
@@ -38,12 +38,3 @@ curl 'http://127.0.0.1:8790/api/v1/songs?q=关键词'
 
 API 字段、文件名约定与部署说明见 [music_server/AGENTS.md](music_server/AGENTS.md)。
 
-## 后续计划
-
-以下为**尚未实现**的功能（已实现能力见 music_app 的「功能」节，不在此重复）：
-
-- 在线歌单、自建歌单
-- 歌词显示
-- 网络源更多平台
-
-> 桌面服务卡片、喜欢/最近播放跨源聚合均已实现（见 [music_app/README.md](music_app/README.md) 功能列表），不再列待办。
