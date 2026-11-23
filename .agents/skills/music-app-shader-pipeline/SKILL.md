@@ -8,7 +8,7 @@ description: music_app 音乐可视化 shader 管线：GLSL 源码位置与构�
 ## 源码书写与构建
 
 - **shader 源码在 `entry/src/main/cpp/shaders/`**（按 GLSL ES 1.00 书写：`varying` / `gl_FragColor` / `texture2D`，uniform 每行一个声明）。
-- CMake 构建期经 `entry/src/main/cpp/tools/gen_shader_header.py` 转成 GLES3 头文件 `shader_src.h`（生成到构建目录、不进源码树；注入头 frag 15 / vert 4 / blit 5 行，frag 报错行号还需减去 common.glsl 行数——见脚本里的 `frag_injected`）。
+- CMake 构建期经 `entry/src/main/cpp/tools/gen_shader_header.py` 转成 GLES3 头文件 `shader_src.h`（生成到构建目录、不进源码树；注入头行数以 `gen_shader_header.py` 里的 `frag_injected`/`vert_injected`/`blit_injected` 常量为准（现取：`grep -nE 'frag_injected|vert_injected|blit_injected' entry/src/main/cpp/tools/gen_shader_header.py`），frag 报错行号还需减去 common.glsl 行数）。
 
 ## 场景注册（三处同步）
 
