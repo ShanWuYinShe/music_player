@@ -34,9 +34,8 @@ description: music_app 桌面服务卡片与趣味特性：2x2/2x4 卡片架构�
 - 卡片按钮控制通道（message + CommonEvent）：
   **必须用 message 型发到 FormAbility**（`onFormEvent` 解析 `method`），经
   `commonEventManager.publish` 转发自定义公共事件 `CARD_ACTION_EVENT`，主进程
-  AppStore 订阅执行播放控制——完全后台、不拉前台。禁用 call 型 `postCardAction`
-  （真机+模拟器均不送达：点击零反应、无 onNewWant 日志，原因未明）；禁用
-  router 型（可用但会把应用拉到前台，违背卡片免进应用的本意）。
+  AppStore 订阅执行播放控制——完全后台、不拉前台。call 型 `postCardAction`
+  在当前 SDK/API 版本实测真机+模拟器均不送达（点击零反应、无 onNewWant 日志，原因未明），暂不使用；升级 SDK 或查明根因后需重验，通过再恢复。router 型可用但会把应用拉到前台，违背卡片免进应用的本意，默认不用。
   主进程存活即响应（播放中/暂停都有后台长时任务保活）；主进程被杀后点击静默
   无效（FormExtensionContext 无 startAbility 无法拉起，点卡片空白 router 进
   应用即恢复），已知限制。EntryAbility 的 `handleCardAction`
