@@ -63,21 +63,20 @@ FormComponent 节点树仍在（`uitest dumpLayout` 能看到完整的标题/按
 
 ## 实机验证方法与结论
 
-实测环境：Pura 90 Pro 模拟器（1256x2760）。
+实测环境：以 `hdc list targets -v` 的目标为准（当时为 Pura 90 Pro 模拟器；分辨率/密度随实例变化，坐标与热区结论需在目标设备重新标定）。
 
 - **按钮热区**：`hdc shell hilog -r` 清缓冲 → `uinput -T -c x y` 点按钮 →
   `hilog -x | grep "card action published"`，FormAbility 会记录每个动作。
   已实测：responseRegion 40vp 外扩生效（图标左缘外 15px/右缘外 12px 的点击
   均触发对应动作），热区外 33px 的点击不触发（负对照）。
 - **点击坐标**：从 `uitest dumpLayout` 的 bounds 取中心即可，与 uinput 坐标
-  系一致；密度 3.5（91px/26vp）。
+  系一致；密度用 `uitest dumpLayout` 的屏幕像素宽反推（当时为 3.5，91px/26vp，仅示例；换实例需重算）。
 - **accessibilityText 无法经 dumpLayout 验证**：该工具不导出此属性（应用内
   已有的 a11y 按钮同样不显示），AccessibilityManagerService 也无元素级树
   （无屏幕朗读客户端时）。完整验证需开启屏幕朗读后实测。
 - **模拟器冷启动后应用会被回收**（未播放、无长驻任务时），但卡片按钮的
   message 动作仍可独立触发 FormExtensionAbility，不影响热区验证。
-- 模拟器启动需放开权限的会话（`~/.Huawei/Emulator` 写入）；启动后设备为
-  `127.0.0.1:5555`。
+- 模拟器启动需放开权限的会话（`~/.Huawei/Emulator` 写入）；启动后设备地址用 `hdc list targets -v` 现查（当时为 `127.0.0.1:5555`）。
 
 ## 趣味特性（麦克风律动 / 2x4 卡片 / 分享卡片图）
 

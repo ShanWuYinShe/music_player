@@ -8,9 +8,9 @@ description: music_app 平台架构与 UI 规范：AVPlayer 状态机、AVSessio
 ## 平台基线
 
 - 零第三方运行时依赖（仅 devDependencies `@ohos/hypium` 测试框架），全部使用系统能力。
-- `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`，`modelVersion` 6.0.2（oh-package.json5 与 hvigor-config.json5）；本机 SDK 为 HarmonyOS 26.0.0（API 26）；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）。
+- `compatibleSdkVersion`/`targetSdkVersion` 与 `modelVersion` 以 `build-profile.json5`、`hvigor-config.json5` 为准（现取：`grep -nE 'SdkVersion|modelVersion' build-profile.json5 hvigor-config.json5`）；本机 SDK 版本用 `ls /Applications/DevEco-Studio.app/Contents/sdk` 现查；bundleName `com.lsyb.musicplayer`（自动签名由华为账号绑定前缀决定）。
 - **`module.json5` 必须含 `"pages": "$profile:main_pages"`**：缺失时构建不报错，但编译产物 module.json 无路由表，运行时 `loadContent` 返回 401 白屏。
-- **脚本/agent 环境调用构建工具链必须补全 env（实测）**：DSH run_code 进程 `HOME` 为 undefined、`PATH` 缺 `/usr/bin:/bin:/usr/sbin:/sbin`（`sed`/`dirname` 等 ENOENT，表象是 ohpm/hvigorw 莫名 exit 126/127）——spawn 时显式传 `HOME=/Users/<user>`、`PATH` 前缀 `/Applications/DevEco-Studio.app/Contents/tools/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`；hvigor 另需 `JAVA_HOME`+`DEVECO_SDK_HOME`（见 music_app/AGENTS.md「本地命令」）。
+- **脚本/agent 环境调用构建工具链必须补全 env（实测）**：DSH run_code 进程 `HOME` 为 undefined、`PATH` 缺 `/usr/bin:/bin:/usr/sbin:/sbin`（`sed`/`dirname` 等 ENOENT，表象是 ohpm/hvigorw 莫名 exit 126/127）——spawn 时显式传 `HOME=$HOME`、`PATH` 前缀 `<DevEco node bin>:$(brew --prefix)/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`（DevEco 路径用 `ls -d /Applications/DevEco-Studio*.app` 现查，node 用 `command -v node` 核对）；hvigor 另需 `JAVA_HOME`+`DEVECO_SDK_HOME`（见 music_app/AGENTS.md「本地命令」）。
 
 ## 媒体内核：AVPlayer / AVSession / API 24
 
