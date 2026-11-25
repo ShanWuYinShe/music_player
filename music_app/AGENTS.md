@@ -22,14 +22,15 @@
 
 ## 本地命令
 
-构建/测试/lint/模拟器命令见 README.md「构建与运行」；要点：
+构建/测试/lint/设备运行命令见 README.md「构建与运行」；要点：
 
+- **设备优先级：真机优先**——先 `hdc list targets -v` 枚举，状态 `Connected` 且 ConnectKey 非 `127.0.0.1:*` 的真机满足「设备 API（`param get const.ohos.apiversion` 现查）≥ `6.0.0(20)` + 调试签名 profile 覆盖该设备 UDID + 形态/能力匹配本次验证目标」四项时用真机；没有合格真机才用模拟器，并把原因写进走查记录。完整判定见用户级 skill `harmony-device-debug`，本项目判据与命令见 skill `music-app-device-debug`「设备选择」；选中设备后所有 hdc 命令加 `-t <ConnectKey>`。
 - hvigor/ohpm/node 均用 DevEco 内置：`/Applications/DevEco-Studio.app/Contents/tools/...`
 - hvigorw 打包需 `JAVA_HOME=/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home`（仅 hvigor 命令需要）且 `DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk`（本机 26.0.0）
-- 模拟器 CLI：`/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator -list|-start <name>|-stop <name>`
+- **模拟器（仅在无合格真机时）** CLI：`/Applications/DevEco-Studio.app/Contents/tools/emulator/Emulator -list|-start <name>|-stop <name>`
 - **模拟器数据目录在 `~/.Huawei/Emulator/deployed/`**：已由 DSH sandbox-extra-roots 放行（验证方式：实测；受限沙盒内 `-start` 约 10s 就绪、`hdc list targets` 出现 `127.0.0.1:5555`、qcow2 正常写入）；启动后设备为 `127.0.0.1:5555`；`-stop` 可能 hang，直接 `pkill -9 -f Emulator` 清场
 - hdc：`/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc`
-- 模拟器可安装未签名 HAP，但运行时页面白屏；已配置 DevEco 自动签名（build-profile.json5 的 signingConfigs，密码为本机加密串，仅本机可用），命令行构建自动产出 `entry-default-signed.hap`
+- **模拟器场景**：可安装未签名 HAP，但运行时页面白屏；已配置 DevEco 自动签名（build-profile.json5 的 signingConfigs，密码为本机加密串，仅本机可用），命令行构建自动产出 `entry-default-signed.hap`
 - **一键签名构建安装**：`tools/auto_sign.sh`（仓库根下）——校验签名材料存在/有效期/设备绑定后，命令行构建 signed HAP，`install` 参数再安装+启动到已连接设备；签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名生成、有效期一年，材料有效期内全程无需打开 IDE；材料缺失/过期/新设备未绑定时脚本会打印指引，只需去 IDE 点一次「Automatically generate signature」重新生成；签名材料是否存在以 `tools/auto_sign.sh` 的校验结果为准
 - UI 自动化验证：`hdc shell uitest dumpLayout` 取 UI 树（应用 root 在 children[0]，检查 children 是否为空判断页面是否渲染）、`hdc shell uinput -T -c <x> <y>` 模拟点击、`snapshot_display` 截图
 - **git worktree 内构建的三个前提**（主检出不需要）：① worktree 无 `oh_modules`（gitignore 不入库），先 `ohpm install`；② `~/.hvigor`、`~/.ohpm` 已由 DSH sandbox-extra-roots 插件放行，沙盒内 worktree 直接构建即可；未配插件的机器才需 `HVIGOR_USER_HOME` 重定向到工作区目录，并把主检出 `~/.hvigor/wrapper` 复制过去（避免 pnpm 重新拉引擎）；③ 本地单测命令 `hvigorw --mode module -p module=entry@default -p isLocalTest=true test --no-daemon`，结果在 `entry/.test/default/intermediates/test/coverage_data/test_result.txt`（末行 Tests run 汇总）
@@ -45,7 +46,7 @@
 | skill | 管什么 |
 |---|---|
 | `music-app-platform-ui` | 平台基线、媒体内核、V2 渲染红线、播放页舞台双态；在线源与 UI 约定细节见其 `references/` |
-| `music-app-device-debug` | 真机/模拟器安装与调试、hdc 流程、界面没更新的排查 |
+| `music-app-device-debug` | 设备选择（真机优先）、签名安装与调试、hdc 流程、界面没更新的排查 |
 | `music-app-service-card` | 服务卡片相关约定 |
 | `music-app-shader-pipeline` | 播放页 shader 管线：GLSL 规范、场景注册、性能架构、帧驱动与真机踩坑 |
 | `music-server-library` | 服务端本地曲库、文件名解析与 id 空间 |

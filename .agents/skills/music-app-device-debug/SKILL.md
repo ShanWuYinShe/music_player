@@ -1,11 +1,24 @@
 ---
 name: music-app-device-debug
-description: music_app 真机/模拟器调试的项目专属部分：包名与入口、一键签名构建安装脚本 tools/auto_sign.sh 的用法与前提、安装后存活与界面验证命令、沙盒缓存重定向。触发：把 music_app 装到真机或模拟器；auto_sign.sh 失败或签名材料/证书过期；安装后启动白屏或进程不在；用 hdc 验证 music_app 界面。
+description: music_app 真机/模拟器调试的项目专属部分：设备选择（真机优先，无合格真机才用模拟器；真机需签名 profile 覆盖 UDID）、包名与入口、一键签名构建安装脚本 tools/auto_sign.sh 的用法与前提、安装后存活与界面验证命令、沙盒缓存重定向。触发：把 music_app 装到真机或模拟器；判断该用真机还是模拟器；auto_sign.sh 失败或签名材料/证书过期/设备未绑定；安装后启动白屏或进程不在；用 hdc 验证 music_app 界面。
 ---
 
-# music_app 真机调试（项目专属部分）
+# music_app 设备调试（项目专属部分，真机优先）
 
 **hdc 通用流程（设备自动发现、无线调试连接、tconn 陷阱与僵尸连接清场、uitest 布局与截图验证、沙盒缓存重定向）见用户级 skill `harmony-device-debug`，本文件不复述。**
+
+## 设备选择（真机优先）
+
+先枚举再选设备：**有合格真机就用真机，没有才用模拟器**。完整判定流程（四项合格条件、Fallback 原因记录口径）见用户级 skill `harmony-device-debug` 的「选设备：真机优先，模拟器兜底」节，本文件只写本项目判据。
+
+- 枚举：`hdc list targets -v`——状态列 `Connected` 才算可用（`Offline`/`Unknown` 不算）；ConnectKey 为 `127.0.0.1:*` 的是本地模拟器（本项目实例地址 `127.0.0.1:5555`），其余为真机。模拟器身份用现查命令复核：`hdc -t <ConnectKey> shell param get const.product.model` 返回 `emulator`。
+- 本项目真机判据：设备 API（`hdc -t <ConnectKey> shell param get const.ohos.apiversion` 现查）不低于 `compatibleSdkVersion`（`6.0.0(20)`，见 `music_app/build-profile.json5`）；`tools/auto_sign.sh install` 的设备绑定校验通过（脚本读 `hdc shell bm get -u` 的 UDID，用 `tools/parse_profile.py` 与 profile 绑定列表比对，未绑定会打印去 IDE 重签名的指引；本地模拟器 `127.0.0.1:*` 跳过绑定校验）。
+- 形态/能力：普通 UI 走查手机真机即可；可视化体感（uTilt/uSpin/uKick）、麦克风律动、音频外放、服务卡片等依赖真实硬件，模拟器结论不算数。
+- 数据安全：不擅自卸载/清数据/改系统设置；用户日常机涉及这些操作前先征得同意。
+- 选中后所有 hdc 命令固定加 `-t <ConnectKey>`（全局选项放在子命令前，如 `hdc -t <ConnectKey> shell ...`）；走查记录与 PR 证据写明型号（`hdc -t <ConnectKey> shell param get const.product.model` 现查，不靠外观猜）+ 系统版本（`param get const.product.software.version`）+ serial/target（模拟器写实例名与 `127.0.0.1:5555`）。
+- `tools/auto_sign.sh install` 不接收 `-t`，按「当前连接的设备」安装；同时连着多台设备（如真机 + 模拟器）时先断开其余设备再跑。
+
+无合格真机 → 用模拟器，并把原因（未连接/未授权/版本不符/签名未绑定/形态不符/需隔离数据）写进走查记录；模拟器专属结论（坐标、性能、无麦等）不得当成真机结论。
 
 ## 项目事实
 
@@ -14,7 +27,7 @@ description: music_app 真机/模拟器调试的项目专属部分：包名与�
   - 不带参数 = 只构建；`install` = 构建 + 安装 + 启动
   - 它自己会校验签名材料、profile 有效期（`install` 模式另校验设备绑定）；失败会打印去 IDE 重签名的指引
 - `compatibleSdkVersion`/`targetSdkVersion` 为 `6.0.0(20)`；自动签名由华为账号绑定前缀决定
-- **模拟器深色模式切换（Pura 90 Pro）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态
+- **模拟器深色模式切换（仅模拟器；坐标基于 1256x2760 分辨率实例标定，真机与其他实例需重新标定）**：`persist.ace.darkmode`/`persist.sys.dark*` 等 param 参数**全部不存在**（set 报 success 但不生效，get 1002）——唯一路径是**设置 App UI 导航**：`hdc shell aa start -a com.huawei.hmos.settings.MainAbility -b com.huawei.hmos.settings` → 点「显示和亮度」(628,1490) → 深色单选 (905,1620) / 浅色单选 (355,1620)（1256x2760 分辨率坐标，**模拟器专属**）。切换全系统即时生效；切完记得恢复浅色，别把用户模拟器留在深色态
 
 ## 本项目验证命令
 

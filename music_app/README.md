@@ -72,21 +72,28 @@ hvigorw --mode module -p module=entry@default -p isLocalTest=true test --no-daem
   /Applications/DevEco-Studio.app/Contents/plugins/codelinter/run/index.js -e error
 ```
 
-模拟器运行（DevEco Studio）：
+运行到设备（真机优先）：
+
+先枚举设备：`hdc list targets -v`，状态列为 `Connected` 的才可用；ConnectKey 为 `127.0.0.1:5555` 的是本地模拟器（可用 `hdc -t <ConnectKey> shell param get const.product.model` 复核，模拟器返回 `emulator`），其余为真机。**有合格真机就用真机，没有才用模拟器**——真机需同时满足：设备 API（`hdc -t <ConnectKey> shell param get const.ohos.apiversion` 现查）不低于 `compatibleSdkVersion`（`6.0.0(20)`）、调试签名 profile 覆盖该设备 UDID（`tools/auto_sign.sh install` 会校验并给出重签名指引）、形态与能力匹配本次验证目标。选中设备后所有 hdc 命令固定加 `-t <ConnectKey>`（放在子命令前，如 `hdc -t <ConnectKey> install ...`），走查记录写明型号（`param get const.product.model` 现查）+ 系统版本（`param get const.product.software.version`）+ serial。
+
+无合格真机（未连接/未授权/版本不符/签名未绑定/形态不符/需隔离数据）时才用模拟器，并把原因写进走查记录。
+
+模拟器运行（DevEco Studio，仅无合格真机时）：
 
 1. 用 DevEco Studio 打开工程
 2. File > Project Structure > Signing Configs 勾选 **Automatically generate signature** 完成自动签名（已配置，bundleName 为 `com.lsyb.musicplayer`）
 3. 选择模拟器点击 Run；命令行方式见下
 
-> 注意：模拟器允许 `hdc install` 未签名 HAP，但**运行时页面加载要求签名**（未签名会白屏），
-> 因此真机/模拟器运行前必须完成签名步骤。
+> 注意（模拟器场景）：模拟器允许 `hdc install` 未签名 HAP，但**运行时页面加载要求签名**（未签名会白屏），
+> 因此模拟器/真机运行前都必须完成签名步骤。
 
-命令行安装运行（模拟器已启动时）：
+命令行安装运行（设备已连接时）：
 
 ```bash
 HDC=/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
-$HDC install -r entry/build/default/outputs/default/entry-default-signed.hap
-$HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
+$HDC -t <ConnectKey> install -r entry/build/default/outputs/default/entry-default-signed.hap
+$HDC -t <ConnectKey> shell aa start -a EntryAbility -b com.lsyb.musicplayer
+# 单设备可省略 -t；多设备必须显式指定目标
 ```
 
 **一键签名构建+安装**（推荐，签名有效期内无需打开 IDE）：
@@ -94,7 +101,7 @@ $HDC shell aa start -a EntryAbility -b com.lsyb.musicplayer
 ```bash
 # 脚本按自身位置解析仓库根，任意目录下均可执行
 tools/auto_sign.sh          # 校验签名材料并构建 signed HAP
-tools/auto_sign.sh install  # 校验 + 构建 + 安装 + 启动到已连接设备
+tools/auto_sign.sh install  # 校验 + 构建 + 安装 + 启动到已连接设备（脚本不接收 -t，多设备先断开其余设备）
 ```
 
 签名材料（`~/.ohos/config/default_music_app_*.p12/.cer/.p7b`）由 DevEco 自动签名
@@ -105,7 +112,7 @@ signature"，需登录华为账号），debug profile 有效期一年。有效�
 > 签名材料含私钥且绑定设备 UDID，**不入库**（build-profile.json5 的 material 为
 > 本机绝对路径，DevEco 每次重新生成会自动改写该段）。
 
-> 当前签名 HAP 仅本地安装（`hdc install` 到已连接的模拟器/真机），未建立应用内更新通道。
+> 当前签名 HAP 仅本地安装（`hdc install` 到已连接的真机/模拟器），未建立应用内更新通道。
 
 ## 音乐导入说明
 

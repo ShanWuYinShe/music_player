@@ -32,7 +32,7 @@
 - CI 覆盖（`.github/workflows/ci.yml`，`push: main` + `pull_request: main`；job 列表与数量以该文件为准，数量用 `yq '.jobs | keys | length' .github/workflows/ci.yml` 现取）：
   - `Music Server (Go)`：gofmt、go vet、go build、`go test -race -count=1 ./...`。
   - `Shader Playground (Vite)`：`pnpm install --frozen-lockfile`、biome lint、vitest、`tsc + vite build`。
-- CI 覆盖不到、必须本地/真机验证的：**鸿蒙端 `music_app/`**——hvigor 构建依赖本机 DevEco 工具链与签名材料，CI 不覆盖，构建/HAP 打包/模拟器与真机走查必须在本地按 `music_app/AGENTS.md`「本地命令」执行（签名材料与设备绑定约束见该文件；真机调试见 skill `music-app-device-debug`）。**发版/发布门禁不变**：交付 HAP 前必须在本地完成 hvigor 签名构建并在端上验证。
+- CI 覆盖不到、必须本地/端上验证的：**鸿蒙端 `music_app/`**——hvigor 构建依赖本机 DevEco 工具链与签名材料，CI 不覆盖，构建/HAP 打包/端上走查（**真机优先，无合格真机才用模拟器**）必须在本地按 `music_app/AGENTS.md`「本地命令」执行（签名材料与设备绑定约束见该文件；设备选择与真机/模拟器调试见 skill `music-app-device-debug`）。**发版/发布门禁不变**：交付 HAP 前必须在本地完成 hvigor 签名构建并在端上验证。
 - 镜像构建：本仓 CI 无镜像构建 job；`deploy/` 生产镜像由部署服务器 `make build` 构建（交付链路，不是开发机本地验证），本地不做 `docker build`。
 - 发版/发布门禁不变：服务端发布按 `deploy/README.md`（git tag 驱动版本，`deploy/Makefile` 取 `git describe`）。
 
